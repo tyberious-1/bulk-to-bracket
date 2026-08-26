@@ -2,7 +2,7 @@
 
 Click the link below to turn your bulk Magic collection into a **synergistic, bracket-aware Commander deck**.
 
-https://tyberous-1.github.io/bulk-to-bracket/
+https://tyberious-1.github.io/bulk-to-bracket/
 
 Bulk to Bracket is a web app that lets you:
 
