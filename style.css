@@ -905,3 +905,15 @@ button:disabled {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* Two commanders (partner, Background, Doctor's companion) sit side by side. */
+.commander-image-wrap.has-partner {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  min-height: 0;
+}
+
+.commander-image-wrap.has-partner .commander-image {
+  width: 50%;
+}
