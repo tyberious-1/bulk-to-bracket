@@ -23,6 +23,19 @@
         <div id="autocompleteList" class="autocomplete-list hidden"></div>
       </div>
 
+      <div id="partnerRow" class="hidden">
+        <label id="partnerLabel" for="partnerInput">Partner</label>
+        <div class="autocomplete-wrap">
+          <input
+            id="partnerInput"
+            type="text"
+            placeholder="Start typing..."
+            autocomplete="off"
+          />
+          <div id="partnerAutocompleteList" class="autocomplete-list hidden"></div>
+        </div>
+      </div>
+
       <label for="csvFile">Upload ManaBox CSV</label>
       <input id="csvFile" type="file" accept=".csv" />
 
@@ -56,6 +69,7 @@
           <div id="commanderImageWrap" class="commander-image-wrap">
             <div id="commanderImageSkeleton" class="commander-image-skeleton hidden"></div>
             <img id="commanderImage" class="commander-image hidden" alt="Commander card image" />
+            <img id="partnerImage" class="commander-image hidden" alt="Partner card image" />
           </div>
 
           <div id="commanderMeta" class="commander-meta"></div>
@@ -103,6 +117,31 @@
 
   <div id="toast" class="toast hidden">Copied.</div>
 
-  <script src="script.js"></script>
+  <script src="js/constants.js"></script>
+  <script src="js/utils/text.js"></script>
+  <script src="js/utils/cards.js"></script>
+  <script src="js/analysis/pairing.js"></script>
+  <script src="js/collection/csv.js"></script>
+  <script src="js/analysis/themes.js"></script>
+  <script src="js/analysis/scoring.js"></script>
+  <script src="js/api/http.js"></script>
+  <script src="js/api/edhrec.js"></script>
+  <script src="js/cache.js"></script>
+  <script src="js/api/scryfall.js"></script>
+  <script src="js/build/bracket.js"></script>
+  <script src="js/build/manabase.js"></script>
+  <script src="js/utils/deck-stats.js"></script>
+  <script src="js/build/type-plan.js"></script>
+  <script src="js/build/deck.js"></script>
+  <script src="js/dom.js"></script>
+  <script src="js/state.js"></script>
+  <script src="js/ui/status.js"></script>
+  <script src="js/ui/autocomplete.js"></script>
+  <script src="js/ui/charts.js"></script>
+  <script src="js/ui/commander.js"></script>
+  <script src="js/ui/hover-preview.js"></script>
+  <script src="js/ui/report.js"></script>
+  <script src="js/ui/export.js"></script>
+  <script src="js/main.js"></script>
 </body>
 </html>
