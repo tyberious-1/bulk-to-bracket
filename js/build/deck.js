@@ -57,6 +57,8 @@ function buildDeckFromScoredPool(
     wipe: Math.round(Number(edhrecRoleTargets?.wipe) || 3)
   };
 
+  const curvePlan = buildCurvePlan(targetNonlandCount);
+
   const fallbackPool = [];
   const collectionEntries = getCollectionEntries(collectionData);
   for (const entry of collectionEntries) {
@@ -94,6 +96,7 @@ function buildDeckFromScoredPool(
     if (usedNames.has(key) || commanderKeys.has(key)) return false;
     deck.push({ ...card, source });
     usedNames.add(key);
+    recordCurvePick(curvePlan, card.cmc);
     return true;
   }
 
@@ -101,13 +104,13 @@ function buildDeckFromScoredPool(
   for (const bucket of buckets) {
     const target = Number(typePlan?.buckets?.[bucket]?.target || 0);
     while (getTypePlanBucketNeed(deck, typePlan, bucket) > 0 && deck.length < targetNonlandCount) {
-      const edhrecPick = pickBestCardForBucket(scoredNonlands, usedNames, commanderKeys, bucket);
+      const edhrecPick = pickBestCardForBucket(scoredNonlands, usedNames, commanderKeys, bucket, curvePlan);
       if (edhrecPick) {
         addCard(edhrecPick, "edhrec");
         continue;
       }
 
-      const fallbackPick = pickBestCardForBucket(fallbackPool, usedNames, commanderKeys, bucket);
+      const fallbackPick = pickBestCardForBucket(fallbackPool, usedNames, commanderKeys, bucket, curvePlan);
       if (fallbackPick) {
         addCard(fallbackPick, bucket === "Creature" ? "fallback-creature" : "fallback");
         continue;
@@ -121,13 +124,13 @@ function buildDeckFromScoredPool(
   for (const neededBucket of getCardsNeededForTypeMinimums(deck, typePlan)) {
     if (deck.length >= targetNonlandCount) break;
 
-    const edhrecPick = pickBestCardForBucket(scoredNonlands, usedNames, commanderKeys, neededBucket);
+    const edhrecPick = pickBestCardForBucket(scoredNonlands, usedNames, commanderKeys, neededBucket, curvePlan);
     if (edhrecPick) {
       addCard(edhrecPick, "edhrec");
       continue;
     }
 
-    const fallbackPick = pickBestCardForBucket(fallbackPool, usedNames, commanderKeys, neededBucket);
+    const fallbackPick = pickBestCardForBucket(fallbackPool, usedNames, commanderKeys, neededBucket, curvePlan);
     if (fallbackPick) {
       addCard(fallbackPick, neededBucket === "Creature" ? "fallback-creature" : "fallback");
     }
@@ -151,7 +154,7 @@ function buildDeckFromScoredPool(
   const creatureRule = typePlan?.buckets?.Creature;
   if (creatureRule) {
     while ((countByType(deck).Creature || 0) < creatureRule.min && deck.length) {
-      const fallbackCreature = pickBestCardForBucket(fallbackPool, usedNames, commanderKeys, "Creature");
+      const fallbackCreature = pickBestCardForBucket(fallbackPool, usedNames, commanderKeys, "Creature", curvePlan);
       if (!fallbackCreature) break;
 
       let replaceIndex = -1;
@@ -171,6 +174,7 @@ function buildDeckFromScoredPool(
 
       if (replaceIndex === -1) break;
       usedNames.delete(normalizeCardName(deck[replaceIndex].name));
+      releaseCurvePick(curvePlan, deck[replaceIndex].cmc);
       deck.splice(replaceIndex, 1);
       addCard(fallbackCreature, "fallback-creature");
     }

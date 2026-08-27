@@ -4,8 +4,11 @@
 //
 // Depends on: text.js
 
-const CARD_CACHE_STORAGE_KEY = "mtg_commander_builder_card_cache_v1";
-const MAX_PERSISTED_CACHE_ENTRIES = 2000;
+// Bumped to v2: entries no longer carry `legalities`, so a v1 payload would
+// waste most of the quota until it aged out.
+const CARD_CACHE_STORAGE_KEY = "mtg_commander_builder_card_cache_v2";
+const LEGACY_CARD_CACHE_STORAGE_KEYS = ["mtg_commander_builder_card_cache_v1"];
+const MAX_PERSISTED_CACHE_ENTRIES = 8000;
 
 const cardCache = new Map();
 
@@ -20,7 +23,6 @@ function trimCardForPersistentCache(card) {
     cmc: Number(card.cmc || 0),
     colors: Array.isArray(card.colors) ? card.colors : [],
     layout: card.layout || "",
-    legalities: card.legalities || {},
     producedMana: Array.isArray(card.producedMana) ? card.producedMana : [],
     imageUrl: card.imageUrl || "",
     manaCost: card.manaCost || "",
@@ -41,7 +43,6 @@ function restoreCardFromPersistentCache(value) {
     cmc: Number(value.cmc || 0),
     colors: Array.isArray(value.colors) ? value.colors : [],
     layout: String(value.layout || "").toLowerCase(),
-    legalities: value.legalities || {},
     producedMana: Array.isArray(value.producedMana) ? value.producedMana : [],
     imageUrl: String(value.imageUrl || ""),
     manaCost: String(value.manaCost || ""),
@@ -66,9 +67,26 @@ function indexCardByFrontFace(cache, card) {
   cache.set(front, card);
 }
 
+// Reads the current payload, falling back to an older key so a version bump
+// doesn't force a full re-fetch. Superseded payloads are always removed --
+// left in place they would occupy quota the current key needs.
+function readPersistedCachePayload() {
+  const raw = localStorage.getItem(CARD_CACHE_STORAGE_KEY);
+
+  let legacyRaw = null;
+  for (const key of LEGACY_CARD_CACHE_STORAGE_KEYS) {
+    if (!legacyRaw) legacyRaw = localStorage.getItem(key);
+    localStorage.removeItem(key);
+  }
+
+  // Older entries carry fields the current shape drops; the restore below
+  // reads by name, so the extras are simply ignored.
+  return raw || legacyRaw;
+}
+
 function hydrateCardCacheFromStorage() {
   try {
-    const raw = localStorage.getItem(CARD_CACHE_STORAGE_KEY);
+    const raw = readPersistedCachePayload();
     if (!raw) return;
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return;
@@ -100,9 +118,24 @@ function persistCardCacheToStorage() {
       if (trimmed) cards.push(trimmed);
     }
 
+    // Freshest first, so whatever gets dropped below is the stalest.
     cards.sort((a, b) => Number(b.savedAt || 0) - Number(a.savedAt || 0));
-    const limited = cards.slice(0, MAX_PERSISTED_CACHE_ENTRIES);
-    localStorage.setItem(CARD_CACHE_STORAGE_KEY, JSON.stringify(limited));
+
+    // The quota is nominally ~5MB but varies by browser and by whatever else
+    // this origin has stored, so rather than guess an entry count that always
+    // fits, write as many as we can and halve on rejection.
+    let count = Math.min(cards.length, MAX_PERSISTED_CACHE_ENTRIES);
+    while (count > 0) {
+      try {
+        localStorage.setItem(CARD_CACHE_STORAGE_KEY, JSON.stringify(cards.slice(0, count)));
+        return;
+      } catch (error) {
+        count = Math.floor(count / 2);
+      }
+    }
+
+    // Nothing fit. Drop any previous payload rather than leaving a stale one.
+    localStorage.removeItem(CARD_CACHE_STORAGE_KEY);
   } catch (error) {
     console.warn("Unable to persist local card cache.", error);
   }

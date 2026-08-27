@@ -124,6 +124,54 @@ function buildTypeTargetPlan(edhrecTypeAverages, strategyProfile, targetLandCoun
   };
 }
 
+// Mana-value planning.
+//
+// The type plan alone can't shape a curve: the pickers walk a score-sorted
+// pool and take the first card of the right type, so whichever mana value
+// scores highest gets drafted until the collection runs out of it. On a bulk
+// collection that means every slot goes to one or two mana values. Curve
+// bands work like the type buckets above -- each band gets a slot quota, and
+// a card is only picked while its band still has room.
+
+// Bands are 1 (zero and one drops), 2..6, and 7 (everything seven and up).
+function getCmcBand(cmc) {
+  const value = Number(cmc) || 0;
+  if (value <= 1) return 1;
+  if (value >= 7) return 7;
+  return Math.round(value);
+}
+
+// Shares of the nonland slots per band. EDHREC's endpoints don't report a
+// curve, so these are fixed: a normal descending Commander curve that still
+// leaves room for a real top end.
+const DEFAULT_CURVE_SHARES = { 1: 0.08, 2: 0.20, 3: 0.22, 4: 0.18, 5: 0.13, 6: 0.10, 7: 0.09 };
+
+function buildCurvePlan(nonlandCount, shares = DEFAULT_CURVE_SHARES) {
+  const caps = {};
+  for (const band of Object.keys(shares)) {
+    caps[band] = Math.max(1, Math.round(shares[band] * nonlandCount));
+  }
+  return { caps, counts: {} };
+}
+
+function curveHasRoom(curvePlan, cmc) {
+  if (!curvePlan) return true;
+  const band = getCmcBand(cmc);
+  return (curvePlan.counts[band] || 0) < (curvePlan.caps[band] || 0);
+}
+
+function recordCurvePick(curvePlan, cmc) {
+  if (!curvePlan) return;
+  const band = getCmcBand(cmc);
+  curvePlan.counts[band] = (curvePlan.counts[band] || 0) + 1;
+}
+
+function releaseCurvePick(curvePlan, cmc) {
+  if (!curvePlan) return;
+  const band = getCmcBand(cmc);
+  curvePlan.counts[band] = Math.max(0, (curvePlan.counts[band] || 0) - 1);
+}
+
 // No current caller; kept alongside the rest of the plan predicates.
 function canAddCardForTypePlan(card, deck, typePlan, strict = true) {
   const planBuckets = typePlan?.buckets || typePlan || {};
@@ -164,14 +212,23 @@ function getRoleCounts(deck) {
 
 // excludedKeys holds every commander's normalized name (a deck may have two),
 // so a commander is never also drafted into its own deck.
-function pickBestCardForBucket(pool, usedNames, excludedKeys, bucket) {
+function pickBestCardForBucket(pool, usedNames, excludedKeys, bucket, curvePlan = null) {
+  let bestIgnoringCurve = null;
+
   for (const card of pool) {
     const key = normalizeCardName(card.name);
     if (usedNames.has(key) || excludedKeys.has(key)) continue;
     if (getDeckTypeBucket(card.type || card.type_line || "") !== bucket) continue;
-    return card;
+
+    // The pool is score-sorted, so the first card whose band still has room is
+    // the best card we can take without distorting the curve.
+    if (curveHasRoom(curvePlan, card.cmc)) return card;
+    if (!bestIgnoringCurve) bestIgnoringCurve = card;
   }
-  return null;
+
+  // Every band this bucket can still reach is full -- take the best remaining
+  // card rather than leaving the slot empty.
+  return bestIgnoringCurve;
 }
 
 function chooseBestFlexibleCard(pool, deck, typePlan, roleTargets, usedNames, excludedKeys) {
