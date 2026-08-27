@@ -42,7 +42,6 @@ function convertScryfallCard(data) {
     cmc: Number(data.cmc || 0),
     colors: Array.isArray(data.color_identity) ? data.color_identity : [],
     layout: String(data.layout || "").toLowerCase(),
-    legalities: data.legalities || {},
     producedMana,
     imageUrl: pickCommanderImage(data),
     manaCost: String(data.mana_cost || ""),
