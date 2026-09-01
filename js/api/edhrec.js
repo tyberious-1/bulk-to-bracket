@@ -6,8 +6,36 @@
 //
 // Depends on: constants.js, http.js, text.js, themes.js
 
+// A commander page alone rarely lists enough cards a given collection owns to
+// fill a deck -- for a niche commander it can be a third of what's needed, and
+// the builder then backfills the rest with no commander-specific signal at
+// all. Each detected theme has its own page with a different card list, so
+// pulling the top few multiplies the candidate pool for a few extra requests.
+const EDHREC_THEME_PAGE_LIMIT = 5;
+
+// Below this many decks a theme page's inclusion rates are noise -- EDHREC
+// serves pages built from as few as four decks, where one deck is 25%.
+const EDHREC_THEME_MIN_DECKS = 20;
+
 function toEdhrecSlug(name) {
   return slugifyForEdhrec(name);
+}
+
+// The share of decks that could have played this card and did. EDHREC's raw
+// num_decks is not comparable across commanders -- a niche commander's most
+// played card sits near 400 decks where a popular one's clears 40,000 -- so
+// dividing by potential_decks is what lets one weight work for both.
+//
+// Returns null when EDHREC has no usable numbers, which means "no opinion" --
+// distinct from a real rate of 0.
+function getEdhrecInclusionRate(edhrecEntry) {
+  if (!edhrecEntry) return null;
+
+  const decks = Number(edhrecEntry.decks || 0);
+  const potential = Number(edhrecEntry.potentialDecks || 0);
+  if (!(decks > 0) || !(potential > 0)) return null;
+
+  return Math.min(1, decks / potential);
 }
 
 // EDHREC serves a partnered deck under a combined slug, but only in one
@@ -32,6 +60,8 @@ function edhrecPayloadHasCards(data) {
   return Array.isArray(cardlists) && cardlists.length > 0;
 }
 
+// Returns { data, slug } so theme sub-page URLs can be built from the slug
+// that actually resolved, rather than guessing it again.
 async function fetchEdhrecCommanderJson(commanderNames) {
   const candidates = buildEdhrecSlugCandidates(commanderNames);
   let lastError = null;
@@ -46,7 +76,7 @@ async function fetchEdhrecCommanderJson(commanderNames) {
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
           const data = await fetchJsonWithTimeout(url, {}, 12000);
-          if (edhrecPayloadHasCards(data)) return data;
+          if (edhrecPayloadHasCards(data)) return { data, slug };
           break;
         } catch (error) {
           lastError = error;
@@ -59,6 +89,31 @@ async function fetchEdhrecCommanderJson(commanderNames) {
 
   console.warn(`Failed to fetch EDHREC commander data for ${commanderNames}.`, lastError);
   return null;
+}
+
+// Themes worth pulling a page for: the most-played ones, and only where enough
+// decks back them to make the numbers mean something.
+function pickEdhrecThemeSlugs(data) {
+  const taglinks = data?.panels?.taglinks;
+  if (!Array.isArray(taglinks)) return [];
+
+  return taglinks
+    .filter((tag) => tag?.slug && Number(tag.count || 0) >= EDHREC_THEME_MIN_DECKS)
+    .sort((a, b) => Number(b.count || 0) - Number(a.count || 0))
+    .slice(0, EDHREC_THEME_PAGE_LIMIT)
+    .map((tag) => String(tag.slug));
+}
+
+// A missing or broken theme page is not worth failing the build over -- the
+// commander page already gave us a usable pool.
+async function fetchEdhrecThemePage(commanderSlug, themeSlug) {
+  try {
+    const data = await fetchJsonWithTimeout(`${EDHREC_BASE}${commanderSlug}/${themeSlug}.json`, {}, 12000);
+    return edhrecPayloadHasCards(data) ? data : null;
+  } catch (error) {
+    console.warn(`EDHREC theme page unavailable: ${commanderSlug}/${themeSlug}`, error);
+    return null;
+  }
 }
 
 function extractLikelyTags(value, weights) {
@@ -375,8 +430,60 @@ function extractEdhrecRoleTargets(data, edhrecTags = []) {
   );
 }
 
+// Folds one EDHREC payload's card lists into `deduped`, which may already hold
+// entries from another page for the same commander.
+function collectEdhrecCards(data, deduped) {
+  const cardlists = data?.container?.json_dict?.cardlists;
+  if (!Array.isArray(cardlists)) return;
+
+  for (const section of cardlists) {
+    const cards = Array.isArray(section.cardviews) ? section.cardviews : [];
+    for (const card of cards) {
+      if (!card?.name) continue;
+
+      const key = normalizeCardName(card.name);
+      const decks = Number(card.num_decks || 0);
+      // How many decks *could* have played it -- the denominator that turns a
+      // raw count into a rate comparable across commanders and themes.
+      const potentialDecks = Number(card.potential_decks || 0);
+      const header = section.header ? String(section.header) : "";
+
+      const existing = deduped.get(key);
+      if (!existing) {
+        deduped.set(key, {
+          name: card.name,
+          synergy: Number(card.synergy || 0),
+          decks,
+          potentialDecks,
+          label: header,
+          labels: header ? [header] : []
+        });
+        continue;
+      }
+
+      existing.synergy = Math.max(Number(existing.synergy || 0), Number(card.synergy || 0));
+
+      // decks and potentialDecks only mean anything as a pair. Taking the max
+      // of each independently would staple a theme page's numerator to the
+      // commander page's much larger denominator and understate the card.
+      // Keep whichever pair reads as the stronger rate instead.
+      const existingRate = existing.potentialDecks > 0 ? existing.decks / existing.potentialDecks : 0;
+      const incomingRate = potentialDecks > 0 ? decks / potentialDecks : 0;
+      if (incomingRate > existingRate) {
+        existing.decks = decks;
+        existing.potentialDecks = potentialDecks;
+      }
+
+      if (header && !existing.labels.includes(header)) existing.labels.push(header);
+    }
+  }
+}
+
 async function getEDHREC(commanderNames) {
-  const data = await fetchEdhrecCommanderJson(commanderNames);
+  const fetched = await fetchEdhrecCommanderJson(commanderNames);
+  const data = fetched?.data || null;
+  const commanderSlug = fetched?.slug || "";
+
   if (!data) {
     return {
       cards: [],
@@ -399,29 +506,16 @@ async function getEDHREC(commanderNames) {
   }
 
   const deduped = new Map();
+  collectEdhrecCards(data, deduped);
 
-  for (const section of cardlists) {
-    const cards = Array.isArray(section.cardviews) ? section.cardviews : [];
-    for (const card of cards) {
-      if (!card?.name) continue;
-      const key = normalizeCardName(card.name);
-      if (!deduped.has(key)) {
-        deduped.set(key, {
-          name: card.name,
-          synergy: Number(card.synergy || 0),
-          decks: Number(card.num_decks || 0),
-          label: section.header || "",
-          labels: section.header ? [String(section.header)] : []
-        });
-      } else {
-        const existing = deduped.get(key);
-        existing.synergy = Math.max(Number(existing.synergy || 0), Number(card.synergy || 0));
-        existing.decks = Math.max(Number(existing.decks || 0), Number(card.num_decks || 0));
-        if (section.header && !existing.labels.includes(String(section.header))) {
-          existing.labels.push(String(section.header));
-        }
-      }
-    }
+  // Theme pages are still this commander's decks, just sliced by archetype, so
+  // their cards belong in the same pool. They also carry much stronger signal:
+  // a card is 18% of all Krydle decks but 55% of Krydle Mill decks.
+  const themeSlugs = pickEdhrecThemeSlugs(data);
+  for (const themeSlug of themeSlugs) {
+    const themeData = await fetchEdhrecThemePage(commanderSlug, themeSlug);
+    if (themeData) collectEdhrecCards(themeData, deduped);
+    await sleep(120);
   }
 
   const tags = extractEdhrecTagsFromData(data);

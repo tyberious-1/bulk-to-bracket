@@ -4,7 +4,14 @@
 // scoreCard and scoreFallbackCard turn that plus commander themes, EDHREC
 // synergy and the active mode preferences into a single sortable number.
 //
-// Depends on: cards.js, constants.js, text.js, themes.js
+// Depends on: cards.js, constants.js, edhrec.js, text.js, themes.js
+
+// Weights for the two EDHREC signals in scoreCard, sized against the theme/tag
+// term, which spans roughly 25 points. Inclusion rate is the broad "do decks
+// for this commander play this" measure; synergy is narrower but sharper, and
+// tops out near 0.5 on a theme page against 0.3 on a commander page.
+const EDHREC_CARD_INCLUSION_WEIGHT = 18;
+const EDHREC_CARD_SYNERGY_WEIGHT = 12;
 
 function isCreatureCard(card) {
   return getCardType(card).includes("creature");
@@ -208,6 +215,75 @@ function detectCardTags(card) {
     tags.push("blink");
   }
 
+  // Themes below here exist in EDHREC's vocabulary but had no detector, so
+  // focusing on them used to match nothing and left the deck unchanged.
+
+  if (
+    type.includes("equipment") ||
+    type.includes("aura") ||
+    text.includes("equipped creature") ||
+    text.includes("enchanted creature") ||
+    text.includes("attach")
+  ) {
+    tags.push("voltron");
+  }
+
+  if (
+    text.includes("can't be blocked") ||
+    text.includes("cannot be blocked") ||
+    text.includes("unblockable")
+  ) {
+    tags.push("unblockable");
+  }
+
+  if (text.includes("infect") || text.includes("toxic") || text.includes("poison counter")) {
+    tags.push("infect");
+  }
+
+  if (text.includes("ninjutsu")) tags.push("ninjutsu");
+
+  // Taking someone else's permanent, whether it stays taken or not.
+  if (
+    text.includes("gain control of") ||
+    text.includes("gains control of") ||
+    text.includes("exile target creature an opponent controls") ||
+    text.includes("you may cast it") ||
+    text.includes("from an opponent's")
+  ) {
+    tags.push("theft");
+  }
+
+  if (
+    text.includes("counter target spell") ||
+    text.includes("counter that spell") ||
+    text.includes("counter target activated")
+  ) {
+    tags.push("control");
+  }
+
+  if (
+    text.includes("copy target instant") ||
+    text.includes("copy target sorcery") ||
+    text.includes("copy that spell") ||
+    text.includes("when you cast your second spell")
+  ) {
+    tags.push("spell copy");
+  }
+
+  // Broader than "cantrips", which only counts cheap instants and sorceries.
+  if (text.includes("draw a card") || text.includes("draw two cards") || text.includes("draw three cards")) {
+    tags.push("card draw");
+  }
+
+  if (
+    text.includes("spells cost") && text.includes("more to cast") ||
+    text.includes("can't attack") ||
+    text.includes("players can't") ||
+    text.includes("each opponent can't")
+  ) {
+    tags.push("hatebears");
+  }
+
   for (const tribalType of TRIBAL_TYPES) {
     const pattern = new RegExp(`\\b${tribalType}\\b`);
     if (pattern.test(combined)) tags.push(`${tribalType} tribal`);
@@ -285,6 +361,46 @@ function cardMatchesThemeFocus(card, modePrefs) {
   return false;
 }
 
+// Which of these themes could actually steer this collection. Mirrors the
+// alias/tribal matching cardMatchesThemeFocus does, over the whole pool rather
+// than one card, so the UI can mark a theme unavailable instead of offering a
+// button that quietly rebuilds the same deck.
+//
+// Scores every theme in one pass: detectCardTags is the expensive part, and
+// checking themes one at a time re-derived the tags for each of them.
+function getSupportedThemes(themes, allOwnedCardData) {
+  const list = Array.from(new Set((themes || []).filter(Boolean)));
+  // No collection to judge against yet -- assume usable rather than grey
+  // everything out.
+  if (!allOwnedCardData) return new Set(list);
+
+  const specs = list.map((theme) => ({
+    theme,
+    aliases: new Set(getThemeAliases(theme).map((alias) => normalizeThemeName(alias))),
+    tribes: getCommanderTribalThemes([theme]).map((t) => t.replace(" tribal", ""))
+  }));
+
+  const supported = new Set();
+
+  for (const card of allOwnedCardData.values()) {
+    if (supported.size === specs.length) break;
+    if (!card) continue;
+
+    const tags = detectCardTags(card).map((tag) => normalizeThemeName(tag));
+
+    for (const spec of specs) {
+      if (supported.has(spec.theme)) continue;
+      if (tags.some((tag) => spec.aliases.has(tag))) {
+        supported.add(spec.theme);
+        continue;
+      }
+      if (spec.tribes.some((tribe) => hasTribalType(card, tribe))) supported.add(spec.theme);
+    }
+  }
+
+  return supported;
+}
+
 function classifyBackfillModeFit(card, modePrefs) {
   const themeMatch = cardMatchesThemeFocus(card, modePrefs);
   const role = detectRole(card);
@@ -300,8 +416,15 @@ function classifyBackfillModeFit(card, modePrefs) {
 }
 
 function scoreCard(card, edhrecCard, commanderThemes, strategyProfile, commanderColors, modePrefs) {
-  const synergyScore = Number(edhrecCard.synergy || 0) * 6;
-  const popularityScore = Math.min(Number(edhrecCard.decks || 0) / 1200, 18);
+  // Both EDHREC terms used to contribute almost nothing. decks/1200 spanned a
+  // third of a point for a commander with a few hundred decks and pinned at
+  // the cap for one with tens of thousands, so it carried no ordering either
+  // way; the rate fixes that the same way it did for lands. Synergy at x6 was
+  // a +-2 nudge against a ~25 point theme term, which is far too quiet for the
+  // one number that measures "played more with *this* commander than usual".
+  const inclusionRate = getEdhrecInclusionRate(edhrecCard);
+  const popularityScore = inclusionRate === null ? 0 : inclusionRate * EDHREC_CARD_INCLUSION_WEIGHT;
+  const synergyScore = Number(edhrecCard.synergy || 0) * EDHREC_CARD_SYNERGY_WEIGHT;
 
   let roleBonus = 0;
   const role = detectRole(card);

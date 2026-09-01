@@ -143,7 +143,7 @@ async function generateDeck() {
       commanders.colors
     );
     displayThemes(commanderThemes);
-    renderPriorityButtons(commanderThemes);
+    renderPriorityButtons(commanderThemes, allOwnedCardData);
     logMessage(`Detected themes: ${commanderThemes.join(", ") || "none"}`);
 
     updateProgress(58, "Matching your collection...");
@@ -310,7 +310,7 @@ async function performBuildFromContext() {
       ? `After legality checks, ${scoredNonlands.length} nonland cards remain in the EDHREC candidate pool.`
       : `After legality checks, ${scoredNonlands.length} nonland cards remain in the collection fallback pool.`
   );
-  renderPriorityButtons(commanderThemes);
+  renderPriorityButtons(commanderThemes, allOwnedCardData);
 
   updateProgress(90, "Building deck structure and mana base...");
   const finalDeck = buildDeckFromScoredPool(

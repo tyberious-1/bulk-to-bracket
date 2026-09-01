@@ -20,18 +20,30 @@ function updatePriorityButtons() {
   });
 }
 
-function renderPriorityButtons(commanderThemes = []) {
+function renderPriorityButtons(commanderThemes = [], allOwnedCardData = null) {
   const wrap = document.getElementById("priorityButtons");
   if (!wrap) return;
 
   const uniqueThemes = Array.from(new Set((commanderThemes || []).filter(Boolean))).slice(0, 5);
+
+  // EDHREC names strategy-level themes ("Aggro", "Combo") that no card carries
+  // a signal for, and any collection can simply lack a theme's cards. Either
+  // way the rebuild returns the same deck, so say so up front rather than let
+  // the click look broken.
+  const supportedThemes = getSupportedThemes(uniqueThemes, allOwnedCardData);
+
   const sections = [
     {
       title: "Detected Themes",
-      buttons: uniqueThemes.map((theme) => ({
-        mode: `theme:${theme}`,
-        label: formatThemeLabel(theme)
-      }))
+      buttons: uniqueThemes.map((theme) => {
+        const supported = supportedThemes.has(theme);
+        return {
+          mode: `theme:${theme}`,
+          label: formatThemeLabel(theme),
+          disabled: !supported,
+          title: supported ? "" : "No cards in your collection match this theme"
+        };
+      })
     }
   ].filter((section) => section.buttons.length);
 
@@ -40,7 +52,7 @@ function renderPriorityButtons(commanderThemes = []) {
       <div class="priority-section-label">${escapeHtml(section.title)}</div>
       <div class="priority-section-buttons">
         ${section.buttons.map((btn) => `
-          <button class="priority-btn" data-mode="${escapeHtml(btn.mode)}" type="button" ${btn.disabled ? "disabled" : ""}>${escapeHtml(btn.label)}</button>
+          <button class="priority-btn" data-mode="${escapeHtml(btn.mode)}" type="button" title="${escapeHtml(btn.title || "")}" ${btn.disabled ? "disabled" : ""}>${escapeHtml(btn.label)}</button>
         `).join("")}
       </div>
     </div>
