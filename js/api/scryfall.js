@@ -80,6 +80,22 @@ async function fetchCommanderAutocomplete(query) {
   return Array.isArray(data.data) ? data.data.slice(0, 12) : [];
 }
 
+// The map callers get back is keyed by the names their CSV used, but EDHREC
+// names a two-faced card by its front face alone, so it has to answer to that
+// spelling too.
+function collectCachedCards(uniqueNames) {
+  const results = new Map();
+
+  for (const name of uniqueNames) {
+    const cached = cardCache.get(name);
+    if (cached) results.set(name, cached);
+  }
+
+  for (const card of Array.from(results.values())) indexCardByFrontFace(results, card);
+
+  return results;
+}
+
 async function fetchCardDataBatchWithProgress(cardNames, progressCallback) {
   const uniqueNames = Array.from(new Set(cardNames.map(normalizeCardName)));
   const missingNames = uniqueNames.filter((name) => !cardCache.has(name));
@@ -88,11 +104,7 @@ async function fetchCardDataBatchWithProgress(cardNames, progressCallback) {
 
   if (total === 0) {
     if (progressCallback) progressCallback(0, 0);
-    return new Map(
-      uniqueNames
-        .map((name) => [name, cardCache.get(name)])
-        .filter(([, value]) => value)
-    );
+    return collectCachedCards(uniqueNames);
   }
 
   const chunkSize = 75;
@@ -102,7 +114,11 @@ async function fetchCardDataBatchWithProgress(cardNames, progressCallback) {
   }
 
   async function fetchChunk(chunk, attempt = 1) {
-    const identifiers = chunk.map((name) => ({ name }));
+    // The collection endpoint has no entry under "Front // Back" -- that
+    // spelling comes back in not_found, so asking with the name a ManaBox CSV
+    // uses drops every two-faced card in the collection. The front face alone
+    // resolves to the whole card.
+    const identifiers = chunk.map((name) => ({ name: cleanCardNameForLookup(name) }));
 
     try {
       const response = await fetch(SCRYFALL_COLLECTION, {
@@ -157,11 +173,5 @@ async function fetchCardDataBatchWithProgress(cardNames, progressCallback) {
 
   persistCardCacheToStorage();
 
-  const results = new Map();
-  for (const name of uniqueNames) {
-    const cached = cardCache.get(name);
-    if (cached) results.set(name, cached);
-  }
-
-  return results;
+  return collectCachedCards(uniqueNames);
 }

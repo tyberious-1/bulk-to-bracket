@@ -11,45 +11,13 @@
   <div class="app">
     <h1>MTG Commander Deck Builder</h1>
 
-    <div class="panel">
-      <label for="commanderInput">Commander Name</label>
-      <div class="autocomplete-wrap">
-        <input
-          id="commanderInput"
-          type="text"
-          placeholder="Start typing a commander name..."
-          autocomplete="off"
-        />
-        <div id="autocompleteList" class="autocomplete-list hidden"></div>
-      </div>
-
-      <div id="partnerRow" class="hidden">
-        <label id="partnerLabel" for="partnerInput">Partner</label>
-        <div class="autocomplete-wrap">
-          <input
-            id="partnerInput"
-            type="text"
-            placeholder="Start typing..."
-            autocomplete="off"
-          />
-          <div id="partnerAutocompleteList" class="autocomplete-list hidden"></div>
-        </div>
-      </div>
-
-      <label for="csvFile">Upload ManaBox CSV</label>
-      <input id="csvFile" type="file" accept=".csv" />
-
-      <button id="generateBtn" type="button">Generate Deck</button>
-    </div>
-
-    <div id="emptyState" class="panel empty-state">
-      <h2>How it works</h2>
-      <p>Choose a legal commander, upload a ManaBox CSV of cards you own, and the app will build a legal Commander deck from your collection.</p>
-      <p>It uses your owned cards, commander themes, EDHREC synergy, and collection-based fallback logic to fill out the list.</p>
+    <div class="tabs" role="tablist">
+      <button class="tab-btn active" type="button" data-tab="build">Build a Deck</button>
+      <button class="tab-btn" type="button" data-tab="commanders">Your Commanders</button>
     </div>
 
     <div class="panel progress-panel">
-      <h2>Build Progress</h2>
+      <h2>Progress</h2>
       <div id="progressContainer">
         <div id="progressBar"></div>
       </div>
@@ -57,60 +25,106 @@
       <div id="subStatusText" class="sub-status"></div>
     </div>
 
-    <div id="postBuildControls" class="panel hidden">
-      <h2>Regenerate With Different Priorities</h2>
-      <div id="priorityButtons" class="priority-buttons"></div>
-    </div>
-
-    <div class="results-grid">
+    <div class="tab-panel" data-tab="build">
       <div class="panel">
-        <h2>Commander</h2>
-        <div class="commander-column">
-          <div id="commanderImageWrap" class="commander-image-wrap">
-            <div id="commanderImageSkeleton" class="commander-image-skeleton hidden"></div>
-            <img id="commanderImage" class="commander-image hidden" alt="Commander card image" />
-            <img id="partnerImage" class="commander-image hidden" alt="Partner card image" />
-          </div>
-
-          <div id="commanderMeta" class="commander-meta"></div>
-          <div id="colorPips" class="color-pips"></div>
-
-          <h3 class="themes-heading">Detected Themes</h3>
-          <div id="themeChips" class="theme-chips"></div>
+        <label for="commanderInput">Commander Name</label>
+        <div class="autocomplete-wrap">
+          <input
+            id="commanderInput"
+            type="text"
+            placeholder="Start typing a commander name..."
+            autocomplete="off"
+          />
+          <div id="autocompleteList" class="autocomplete-list hidden"></div>
         </div>
+
+        <div id="partnerRow" class="hidden">
+          <label id="partnerLabel" for="partnerInput">Partner</label>
+          <div class="autocomplete-wrap">
+            <input
+              id="partnerInput"
+              type="text"
+              placeholder="Start typing..."
+              autocomplete="off"
+            />
+            <div id="partnerAutocompleteList" class="autocomplete-list hidden"></div>
+          </div>
+        </div>
+
+        <label for="csvFile">Upload ManaBox CSV</label>
+        <input id="csvFile" type="file" accept=".csv" />
+
+        <button id="generateBtn" type="button">Generate Deck</button>
       </div>
 
-      <div class="panel">
-        <h2>Deck Report</h2>
+      <div id="emptyState" class="panel empty-state">
+        <h2>How it works</h2>
+        <p>Choose a legal commander, upload a ManaBox CSV of cards you own, and the app will build a legal Commander deck from your collection.</p>
+        <p>It uses your owned cards, commander themes, EDHREC synergy, and collection-based fallback logic to fill out the list.</p>
+      </div>
 
-        <div class="dashboard-grid">
-          <div id="deckStats" class="panel stat-panel"></div>
-          <div class="panel chart-panel">
-            <div class="chart-title">Mana Curve</div>
-            <div class="chart-canvas-wrap">
-              <canvas id="manaCurveChart"></canvas>
+      <div id="postBuildControls" class="panel hidden">
+        <h2>Regenerate With Different Priorities</h2>
+        <div id="priorityButtons" class="priority-buttons"></div>
+      </div>
+
+      <div class="results-grid">
+        <div class="panel">
+          <h2>Commander</h2>
+          <div class="commander-column">
+            <div id="commanderImageWrap" class="commander-image-wrap">
+              <div id="commanderImageSkeleton" class="commander-image-skeleton hidden"></div>
+              <img id="commanderImage" class="commander-image hidden" alt="Commander card image" />
+              <img id="partnerImage" class="commander-image hidden" alt="Partner card image" />
             </div>
-          </div>
-          <div class="panel chart-panel">
-            <div class="chart-title">Card Type Breakdown</div>
-            <div class="chart-canvas-wrap">
-              <canvas id="typeBreakdownChart"></canvas>
-            </div>
+
+            <div id="commanderMeta" class="commander-meta"></div>
+            <div id="colorPips" class="color-pips"></div>
+
+            <h3 class="themes-heading">Detected Themes</h3>
+            <div id="themeChips" class="theme-chips"></div>
           </div>
         </div>
 
-        <div id="deckSummary" class="deck-summary"></div>
-        <div id="deckBracket" class="deck-bracket"></div>
-        <div id="deckGameChangers" class="deck-game-changers"></div>
-        <div id="buildBreakdown" class="build-breakdown"></div>
-        <div id="warningsPanel" class="warnings-panel"></div>
+        <div class="panel">
+          <h2>Deck Report</h2>
 
-        <div class="preview-heading">Grouped Preview</div>
-        <div id="exportPreview" class="export-preview"></div>
+          <div class="dashboard-grid">
+            <div id="deckStats" class="panel stat-panel"></div>
+            <div class="panel chart-panel">
+              <div class="chart-title">Mana Curve</div>
+              <div class="chart-canvas-wrap">
+                <canvas id="manaCurveChart"></canvas>
+              </div>
+            </div>
+            <div class="panel chart-panel">
+              <div class="chart-title">Card Type Breakdown</div>
+              <div class="chart-canvas-wrap">
+                <canvas id="typeBreakdownChart"></canvas>
+              </div>
+            </div>
+          </div>
 
-        <div class="preview-heading">Plain Text Export</div>
-        <textarea id="moxfieldExport" class="export-box" readonly></textarea>
-        <button id="copyExportBtn" type="button">Copy Decklist</button>
+          <div id="deckSummary" class="deck-summary"></div>
+          <div id="deckBracket" class="deck-bracket"></div>
+          <div id="deckGameChangers" class="deck-game-changers"></div>
+          <div id="buildBreakdown" class="build-breakdown"></div>
+          <div id="warningsPanel" class="warnings-panel"></div>
+
+          <div class="preview-heading">Grouped Preview</div>
+          <div id="exportPreview" class="export-preview"></div>
+
+          <div class="preview-heading">Plain Text Export</div>
+          <textarea id="moxfieldExport" class="export-box" readonly></textarea>
+          <button id="copyExportBtn" type="button">Copy Decklist</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-panel hidden" data-tab="commanders">
+      <div class="panel">
+        <h2>Commanders You Own</h2>
+        <div id="commandersPanel"></div>
       </div>
     </div>
   </div>
@@ -133,6 +147,7 @@
   <script src="js/utils/deck-stats.js"></script>
   <script src="js/build/type-plan.js"></script>
   <script src="js/build/deck.js"></script>
+  <script src="js/analysis/commander-match.js"></script>
   <script src="js/dom.js"></script>
   <script src="js/state.js"></script>
   <script src="js/ui/status.js"></script>
@@ -141,6 +156,7 @@
   <script src="js/ui/commander.js"></script>
   <script src="js/ui/hover-preview.js"></script>
   <script src="js/ui/report.js"></script>
+  <script src="js/ui/commanders-tab.js"></script>
   <script src="js/ui/export.js"></script>
   <script src="js/main.js"></script>
 </body>

@@ -140,3 +140,42 @@ function persistCardCacheToStorage() {
     console.warn("Unable to persist local card cache.", error);
   }
 }
+
+// EDHREC's commander rankings are the same for everybody and change only as
+// the site's deck counts move, so they are worth keeping across visits. Stored
+// apart from the card cache: a different shape, a different lifetime, and a
+// quota failure here must not cost the card data.
+const COMMANDER_RANKINGS_STORAGE_KEY = "mtg_commander_builder_commander_ranks_v1";
+const COMMANDER_RANKINGS_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function readPersistedCommanderRankings() {
+  try {
+    const raw = localStorage.getItem(COMMANDER_RANKINGS_STORAGE_KEY);
+    if (!raw) return null;
+
+    const payload = JSON.parse(raw);
+    if (!Array.isArray(payload?.rankings) || !payload.rankings.length) return null;
+    if (Date.now() - Number(payload.savedAt || 0) > COMMANDER_RANKINGS_MAX_AGE_MS) {
+      localStorage.removeItem(COMMANDER_RANKINGS_STORAGE_KEY);
+      return null;
+    }
+
+    return payload.rankings;
+  } catch (error) {
+    console.warn("Unable to read cached commander rankings.", error);
+    return null;
+  }
+}
+
+function persistCommanderRankings(rankings) {
+  try {
+    localStorage.setItem(
+      COMMANDER_RANKINGS_STORAGE_KEY,
+      JSON.stringify({ savedAt: Date.now(), rankings })
+    );
+  } catch (error) {
+    // Rankings are cheap to refetch; the card cache is not. Leave its quota
+    // alone rather than trimming to make these fit.
+    console.warn("Unable to persist commander rankings.", error);
+  }
+}

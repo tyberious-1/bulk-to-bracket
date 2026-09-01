@@ -88,3 +88,42 @@ const GAME_CHANGERS = new Set([
   "vampiric tutor",
   "worldly tutor"
 ]);
+
+// EDHREC publishes its commander rankings as one page per color identity, and
+// each page lists exactly the commanders of that identity -- so the page a
+// commander appears on names its colors, with no per-commander lookup needed.
+// Slugs are EDHREC's own; the four-color ones are the Guildpact Nephilim.
+const EDHREC_COMMANDER_COLOR_PAGES = {
+  "colorless": [],
+  "mono-white": ["W"],
+  "mono-blue": ["U"],
+  "mono-black": ["B"],
+  "mono-red": ["R"],
+  "mono-green": ["G"],
+  "azorius": ["W", "U"],
+  "dimir": ["U", "B"],
+  "rakdos": ["B", "R"],
+  "gruul": ["R", "G"],
+  "selesnya": ["G", "W"],
+  "orzhov": ["W", "B"],
+  "golgari": ["B", "G"],
+  "simic": ["G", "U"],
+  "izzet": ["U", "R"],
+  "boros": ["R", "W"],
+  "bant": ["G", "W", "U"],
+  "esper": ["W", "U", "B"],
+  "grixis": ["U", "B", "R"],
+  "jund": ["B", "R", "G"],
+  "naya": ["R", "G", "W"],
+  "abzan": ["W", "B", "G"],
+  "jeskai": ["U", "R", "W"],
+  "mardu": ["R", "W", "B"],
+  "sultai": ["B", "G", "U"],
+  "temur": ["G", "U", "R"],
+  "glint-eye": ["U", "B", "R", "G"],
+  "dune-brood": ["B", "R", "G", "W"],
+  "ink-treader": ["R", "G", "W", "U"],
+  "witch-maw": ["G", "W", "U", "B"],
+  "yore-tiller": ["W", "U", "B", "R"],
+  "five-color": ["W", "U", "B", "R", "G"]
+};

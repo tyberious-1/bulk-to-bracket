@@ -530,3 +530,105 @@ async function getEDHREC(commanderNames) {
     unavailable: false
   };
 }
+
+// Commander rankings.
+//
+// The builder asks EDHREC about one commander at a time, which is the wrong
+// shape for "rank every commander I own" -- a bulk collection holds hundreds
+// of legal commanders and that many requests is minutes of waiting. The color
+// pages answer the same question in 32: each lists its identity's most-played
+// commanders with a global deck count, so intersecting them with a collection
+// ranks it without touching a single commander page.
+
+// EDHREC writes a partner pair as one entry, "A // B" -- the same separator a
+// two-faced card's name uses. Callers have to tell those apart; see
+// resolveOwnedCommanderEntry.
+function extractEdhrecCommanderList(data, colorPage) {
+  const cardlists = data?.container?.json_dict?.cardlists;
+  if (!Array.isArray(cardlists)) return [];
+
+  const entries = [];
+  for (const section of cardlists) {
+    for (const entry of Array.isArray(section.cardviews) ? section.cardviews : []) {
+      if (!entry?.name) continue;
+      entries.push({
+        name: entry.name,
+        slug: String(entry.slug || toEdhrecSlug(getPrimaryCardName(entry.name))),
+        decks: Number(entry.num_decks || 0),
+        colorPage,
+        colors: EDHREC_COMMANDER_COLOR_PAGES[colorPage] || []
+      });
+    }
+  }
+
+  return entries;
+}
+
+// A missing color page costs that identity's commanders, not the whole scan.
+async function fetchEdhrecColorPage(colorPage) {
+  try {
+    const data = await fetchJsonWithTimeout(`${EDHREC_BASE}${colorPage}.json`, {}, 12000);
+    return edhrecPayloadHasCards(data) ? data : null;
+  } catch (error) {
+    console.warn(`EDHREC color page unavailable: ${colorPage}`, error);
+    return null;
+  }
+}
+
+async function getEdhrecCommanderRankings(onProgress) {
+  const colorPages = Object.keys(EDHREC_COMMANDER_COLOR_PAGES);
+  const byName = new Map();
+  let done = 0;
+
+  for (const colorPage of colorPages) {
+    const data = await fetchEdhrecColorPage(colorPage);
+    if (data) {
+      for (const entry of extractEdhrecCommanderList(data, colorPage)) {
+        const key = normalizeCardName(entry.name);
+        const existing = byName.get(key);
+        // One identity page per commander, but keep the larger reading rather
+        // than trust that.
+        if (!existing || entry.decks > existing.decks) byName.set(key, entry);
+      }
+    }
+
+    done += 1;
+    if (onProgress) onProgress(done, colorPages.length);
+    await sleep(120);
+  }
+
+  return Array.from(byName.values()).sort((a, b) => b.decks - a.decks);
+}
+
+// The same pool a build would draw from, theme pages included. Reading only
+// the commander page is a request cheaper but measures the wrong thing: it
+// found 42 of Krydle's cards in a collection a real build fills 89 from, so
+// the tab reported 67% for a deck EDHREC can in fact cover completely. A
+// percentage that undercounts by a third is not worth the saved request.
+//
+// Takes EDHREC's own slug, which the commander lists already carry -- correct
+// for partner pairs too, where deriving a slug from names has to guess at the
+// ordering.
+async function getEdhrecCommanderPool(slug) {
+  try {
+    const data = await fetchJsonWithTimeout(`${EDHREC_BASE}${slug}.json`, {}, 12000);
+    if (!edhrecPayloadHasCards(data)) return null;
+
+    const deduped = new Map();
+    collectEdhrecCards(data, deduped);
+
+    for (const themeSlug of pickEdhrecThemeSlugs(data)) {
+      const themeData = await fetchEdhrecThemePage(slug, themeSlug);
+      if (themeData) collectEdhrecCards(themeData, deduped);
+      await sleep(120);
+    }
+
+    return {
+      cards: Array.from(deduped.values()),
+      typeAverages: extractEdhrecTypeAverages(data)
+    };
+  } catch (error) {
+    console.warn(`EDHREC commander page unavailable: ${slug}`, error);
+    return null;
+  }
+}

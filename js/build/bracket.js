@@ -1,8 +1,10 @@
-// Power-level estimation and structural warnings.
+// Bracket estimation and structural warnings.
 //
-// The bracket score weights fast mana, tutors, extra turns, mass land denial
-// and compact combos far above the support-package counts, then floors the
-// bracket whenever Game Changers are present.
+// The bracket comes from the criteria the official system names -- Game
+// Changers, mass land denial, chained extra turns, two-card combos, heavy
+// tutoring -- each acting as a floor on the result. It is not a power score:
+// brackets 1 and 2 are defined by what a deck does not do, and summing the
+// things a good deck does have cannot express that.
 //
 // Depends on: cards.js, text.js, themes.js
 
@@ -38,8 +40,6 @@ function detectGameChangers(deck, commanderNames) {
 function estimateDeckBracket(deck, commanderThemes, commanderColors, commanderNames) {
   const names = deck.map((c) => normalizeCardName(c.name));
   const nonlands = deck.filter((c) => c.role !== "land");
-  const lands = deck.filter((c) => c.role === "land");
-  const creatures = nonlands.filter((c) => getCardType(c).includes("creature")).length;
 
   const rampCount = nonlands.filter((c) => c.role === "ramp").length;
   const drawCount = nonlands.filter((c) => c.role === "draw").length;
@@ -73,65 +73,91 @@ function estimateDeckBracket(deck, commanderThemes, commanderColors, commanderNa
     "thassa's oracle", "underworld breach", "ad nauseam", "protean hulk", "bolas's citadel", "dockside extortionist", "food chain"
   ];
 
-  const fastManaCount = names.filter((n) => fastManaCards.includes(n)).length;
-  const tutorCount = names.filter((n) => tutorCards.includes(n)).length;
-  const extraTurnCount = names.filter((n) => extraTurnCards.includes(n)).length;
-  const massLandDenialCount = names.filter((n) => massLandDenialCards.includes(n)).length;
-  const compactComboCount = names.filter((n) => compactComboCards.includes(n)).length;
+  // A Game Changer is counted as a Game Changer and nothing else. Four cards
+  // sit on both the official list and one of the lists above -- Vampiric and
+  // Worldly Tutor, Thassa's Oracle, Underworld Breach -- and counting them
+  // twice overstated the very decks the gates below already catch.
   const gameChangers = detectGameChangers(deck, commanderNames);
+  const gameChangerKeys = new Set(gameChangers.map((name) => normalizeCardName(name)));
+  const countExcludingGameChangers = (list) =>
+    names.filter((n) => list.includes(n) && !gameChangerKeys.has(n)).length;
+
+  const fastManaCount = countExcludingGameChangers(fastManaCards);
+  const tutorCount = countExcludingGameChangers(tutorCards);
+  const extraTurnCount = countExcludingGameChangers(extraTurnCards);
+  const massLandDenialCount = countExcludingGameChangers(massLandDenialCards);
+  const compactComboCount = countExcludingGameChangers(compactComboCards);
   const gameChangerCount = gameChangers.length;
 
-  let score = 0;
-  score += rampCount * 0.25;
-  score += drawCount * 0.2;
-  score += removalCount * 0.15;
-  score += wipeCount * 0.2;
-
-  if (avgCmc <= 2.2) score += 2.5;
-  else if (avgCmc <= 2.8) score += 1.5;
-  else if (avgCmc <= 3.3) score += 0.5;
-
-  score += fastManaCount * 2.5;
-  score += tutorCount * 1.75;
-  score += extraTurnCount * 1.5;
-  score += massLandDenialCount * 2;
-  score += compactComboCount * 2.5;
-  score += gameChangerCount * 1.2;
-
-  if (commanderHasTheme(commanderThemes, "tokens")) score += 0.4;
-  if (commanderHasTheme(commanderThemes, "sacrifice")) score += 0.4;
-  if (commanderHasTheme(commanderThemes, "cantrips")) score += 0.6;
-  if (commanderHasTheme(commanderThemes, "counters")) score += 0.3;
-  if (getCommanderTribalThemes(commanderThemes).length) score += 0.3;
-
-  if (commanderColors.length >= 3) score += 0.3;
-  if (creatures >= 24) score -= 0.3;
-  if (lands >= 37) score -= 0.2;
-
+  // Brackets are decided by the criteria the official system names, not by a
+  // weighted score. Brackets 1 and 2 are defined by what a deck does NOT do,
+  // so a sum of desirable-deck qualities can only drift from them: the support
+  // package this builder deliberately fills used to contribute 7.45 of a 8.95
+  // total, which read every honest Core deck as Optimized.
+  const gates = [];
   let bracket = 2;
-  if (score < 1.5) bracket = 1;
-  else if (score < 4.5) bracket = 2;
-  else if (score < 8.5) bracket = 3;
-  else if (score < 13) bracket = 4;
-  else bracket = 5;
 
-  if (gameChangerCount > 0 && bracket < 3) bracket = 3;
-  if (gameChangerCount > 3 && bracket < 4) bracket = 4;
+  function requireAtLeast(minimum, reason) {
+    if (bracket < minimum) bracket = minimum;
+    gates.push(reason);
+  }
+
+  // Nothing below 4 may run mass land denial or chain extra turns, and a
+  // two-card infinite combo is allowed at 3 only when it cannot come online
+  // early. Nothing in the card data says when a combo assembles, so any pair
+  // is treated as the stricter case.
+  if (massLandDenialCount > 0) requireAtLeast(4, `mass land denial: ${massLandDenialCount}`);
+  if (extraTurnCount >= 2) requireAtLeast(4, `extra turns that can chain: ${extraTurnCount}`);
+  if (compactComboCount >= 2) requireAtLeast(4, `two-card combo pieces: ${compactComboCount}`);
+  if (gameChangerCount > 3) requireAtLeast(4, `more than three game changers: ${gameChangerCount}`);
+  else if (gameChangerCount > 0) requireAtLeast(3, `game changers: ${gameChangerCount}`);
+
+  // Core expects few tutors; past a handful the deck is playing a different
+  // game even with no Game Changer in it. Most of the named tutors are
+  // themselves Game Changers and were counted above, so in practice this fires
+  // only for the handful that are not -- Diabolic Intent, Eladamri's Call,
+  // Green Sun's Zenith, Finale of Devastation.
+  if (tutorCount >= 3) requireAtLeast(3, `heavy tutoring: ${tutorCount}`);
+
+  // Exhibition is a deliberate choice rather than an accident, so it takes a
+  // deck with no acceleration, no selection, no combo, and a curve saying that
+  // winning is not the point.
+  const powerCardCount =
+    fastManaCount + tutorCount + extraTurnCount +
+    massLandDenialCount + compactComboCount + gameChangerCount;
+
+  if (powerCardCount === 0 && avgCmc > 3.2 && removalCount + wipeCount < 6) {
+    bracket = 1;
+    gates.push("no accelerants, tutors or combos, and a slow curve");
+  }
+
+  // Bracket 5 is never assigned here: cEDH is a statement about the table a
+  // deck is built for, and no card list settles it.
+
+  // Kept for the build log and for ordering two decks that land in the same
+  // bracket. It decides nothing, and it ignores the support package.
+  const score = Number((
+    fastManaCount * 1.5 +
+    tutorCount * 1.25 +
+    extraTurnCount * 1.5 +
+    massLandDenialCount * 2 +
+    compactComboCount * 2 +
+    gameChangerCount * 2
+  ).toFixed(2));
 
   const reasons = [];
-  if (gameChangerCount) reasons.push(`game changers: ${gameChangerCount}`);
+  if (gates.length) reasons.push(...gates);
+  else reasons.push("no game changers, mass land denial, extra-turn chain or two-card combo");
   if (fastManaCount) reasons.push(`fast mana: ${fastManaCount}`);
-  if (tutorCount) reasons.push(`tutors: ${tutorCount}`);
-  if (compactComboCount) reasons.push(`combo pieces: ${compactComboCount}`);
-  if (extraTurnCount) reasons.push(`extra turns: ${extraTurnCount}`);
-  if (massLandDenialCount) reasons.push(`mass land denial: ${massLandDenialCount}`);
+  if (extraTurnCount === 1) reasons.push("one extra-turn spell, which cannot chain");
+  if (compactComboCount === 1) reasons.push("one combo piece, no pair");
   reasons.push(`avg CMC: ${avgCmc.toFixed(2)}`);
   reasons.push(`ramp/draw/removal/wipes: ${rampCount}/${drawCount}/${removalCount}/${wipeCount}`);
 
   return {
     bracket,
     label: getBracketLabel(bracket),
-    score: Number(score.toFixed(2)),
+    score,
     reasons,
     gameChangers
   };

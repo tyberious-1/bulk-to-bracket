@@ -39,9 +39,14 @@ function splitCsvLine(line) {
   return result;
 }
 
+// EDHREC names a two-faced card by its front face, while the CSV lists it as
+// "Front // Back", so an exact-name check alone reports those cards unowned
+// and drops them from the EDHREC candidate pool.
 function hasOwnedCard(collectionData, cardName) {
   const normalized = normalizeCardName(cardName);
-  return collectionData.byNormalized.has(normalized) || isBasicLand(cardName);
+  if (collectionData.byNormalized.has(normalized)) return true;
+  if (collectionData.byFrontFace?.has(normalized)) return true;
+  return isBasicLand(cardName);
 }
 
 function getCollectionEntries(collectionData) {
@@ -93,8 +98,19 @@ async function parseCSV(file) {
           quantity
         }));
 
+        // Front-face aliases for the two-faced cards, kept in their own map so
+        // a real single-faced card of the same name always wins the lookup.
+        const byFrontFace = new Map();
+        for (const entry of entries) {
+          const front = normalizeCardName(getPrimaryCardName(entry.normalizedName));
+          if (!front || front === entry.normalizedName) continue;
+          if (byNormalized.has(front) || byFrontFace.has(front)) continue;
+          byFrontFace.set(front, entry.quantity);
+        }
+
         resolve({
           byNormalized,
+          byFrontFace,
           entries,
           originals: entries,
           uniqueRawNames: entries.map((entry) => entry.rawName)
