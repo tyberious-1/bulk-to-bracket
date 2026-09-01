@@ -917,3 +917,148 @@ button:disabled {
 .commander-image-wrap.has-partner .commander-image {
   width: 50%;
 }
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #374151;
+}
+
+.tab-btn {
+  margin-top: 0;
+  border-radius: 10px 10px 0 0;
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-bottom: none;
+  color: #cbd5e1;
+  font-weight: 600;
+}
+
+.tab-btn:hover {
+  background: #374151;
+}
+
+.tab-btn.active {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+/* Commanders tab */
+.commanders-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.commanders-count {
+  color: #cbd5e1;
+  font-size: 14px;
+}
+
+.commanders-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.commanders-actions button {
+  margin-top: 0;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+
+.commanders-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.commanders-table th {
+  text-align: left;
+  color: #9ca3af;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 8px 10px;
+  border-bottom: 1px solid #374151;
+  white-space: nowrap;
+}
+
+.commanders-table td {
+  padding: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  vertical-align: middle;
+}
+
+.commanders-table tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.commanders-table .col-rank {
+  width: 44px;
+  color: #9ca3af;
+}
+
+.commanders-table .col-decks,
+.commanders-table .col-match {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.commanders-table .col-colors {
+  width: 130px;
+}
+
+.commanders-table .col-colors .color-pip {
+  width: 20px;
+  height: 20px;
+  font-size: 11px;
+}
+
+.commanders-table .col-build {
+  width: 80px;
+  text-align: right;
+}
+
+.commander-name {
+  font-weight: 600;
+}
+
+.commander-tag {
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.18);
+  border: 1px solid rgba(37, 99, 235, 0.4);
+  color: #93c5fd;
+  font-size: 11px;
+}
+
+.match-value {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.match-detail,
+.match-empty {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.match-btn,
+.build-btn {
+  margin-top: 0;
+  padding: 6px 12px;
+  font-size: 13px;
+  background: #374151;
+}
+
+.match-btn:hover,
+.build-btn:hover {
+  background: #4b5563;
+}

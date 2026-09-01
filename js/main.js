@@ -80,7 +80,9 @@ async function generateDeck() {
   try {
     logMessage("Parsing uploaded CSV.");
     updateProgress(5, "Parsing CSV...");
-    const collection = await parseCSV(file);
+    // Already parsed when the file was chosen, unless that parse failed.
+    const collection = getOwnedCollection() || await parseCSV(file);
+    setOwnedCollection(collection);
     logMessage(`Parsed ${collection.byNormalized.size} unique cards from CSV.`);
 
     updateProgress(10, "Validating commander...");
@@ -359,7 +361,24 @@ async function performBuildFromContext() {
 
 generateBtn.addEventListener("click", generateDeck);
 copyExportBtn.addEventListener("click", copyMoxfieldExport);
-csvFileInput.addEventListener("change", updateGenerateButtonState);
+
+// Parse on selection rather than at build time, so the commanders tab has a
+// collection to work from without waiting for a deck to be built.
+csvFileInput.addEventListener("change", async () => {
+  setOwnedCollection(null);
+  updateGenerateButtonState();
+
+  const file = csvFileInput?.files?.[0];
+  if (file) {
+    try {
+      setOwnedCollection(await parseCSV(file));
+    } catch (error) {
+      showToast(error.message);
+    }
+  }
+
+  renderCommandersTab();
+});
 
 // The partner field's eligibility filter reads the current primary pick on
 // every keystroke, so it is a live lookup rather than a captured value.
@@ -412,6 +431,8 @@ if (priorityButtonsWrap) {
 }
 
 bindPreviewHoverImages();
+bindCommandersTab();
 hydrateCardCacheFromStorage();
 renderPreviewEmptyState();
+renderCommandersTab();
 updateGenerateButtonState();

@@ -35,3 +35,16 @@ function getPartnerCard() {
 function setPartnerCard(card) {
   partnerCard = card || null;
 }
+
+// The uploaded collection, parsed once when the file is chosen so the build
+// flow and the commanders tab read the same object rather than each parsing the
+// file again.
+let ownedCollection = null;
+
+function getOwnedCollection() {
+  return ownedCollection;
+}
+
+function setOwnedCollection(collection) {
+  ownedCollection = collection || null;
+}
