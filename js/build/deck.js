@@ -8,6 +8,78 @@
 // Depends on: cards.js, csv.js, deck-stats.js, manabase.js, scoring.js,
 //   text.js, themes.js, type-plan.js
 
+// Backfill redundancy.
+//
+// scoreFallbackCard's tribal term is +12 against a base of 5, so when EDHREC
+// reports a creature-type theme every card of that type outranks everything
+// else and the backfill becomes one card seven times: a Krydle build took seven
+// Rogues, five of them "unblockable", three contributing no ramp, draw or
+// removal at all. The bonus a shared trait earns the first pick should not be
+// earned in full by the fifth.
+//
+// A candidate is charged for its *most* repeated trait rather than the sum over
+// all of them -- summing would punish a card for being described in more words
+// than its rivals. At this weight the tribal bonus is spent by the fourth copy,
+// and the slot goes to something that does a different job.
+const FALLBACK_REDUNDANCY_WEIGHT = 4;
+
+// exemptTraits holds what the deck is *trying* to repeat. A Dragon tribal
+// commander wants its fourth and tenth Dragon as much as its first, so charging
+// for them fights the plan: Rivaz of the Claw went from 13 dragons to 8, with
+// none of 23 backfilled slots going to a dragon out of the 35 legal ones owned.
+// Accidental sameness is what this penalty is for.
+function getCardRedundancyKeys(card, exemptTraits) {
+  const keys = new Set([...detectCardTags(card), ...getCardSubtypes(card)]);
+  if (exemptTraits) {
+    for (const trait of exemptTraits) keys.delete(trait);
+  }
+  return Array.from(keys);
+}
+
+function getRedundancyPenalty(keys, redundancyCounts) {
+  let mostRepeated = 0;
+  for (const key of keys || []) {
+    const seen = redundancyCounts.get(key) || 0;
+    if (seen > mostRepeated) mostRepeated = seen;
+  }
+  return mostRepeated * FALLBACK_REDUNDANCY_WEIGHT;
+}
+
+// Same contract as pickBestCardForBucket, but the ranking has to be re-decided
+// on every call: the penalty depends on what the deck already holds, so a
+// pre-sorted pool cannot answer it.
+function pickBestFallbackCard(pool, usedNames, commanderKeys, bucket, curvePlan, redundancyCounts) {
+  let best = null;
+  let bestScore = -Infinity;
+  let bestIgnoringCurve = null;
+  let bestIgnoringCurveScore = -Infinity;
+
+  for (const card of pool) {
+    const key = normalizeCardName(card.name);
+    if (usedNames.has(key) || commanderKeys.has(key)) continue;
+    if (getDeckTypeBucket(card.type || card.type_line || "") !== bucket) continue;
+
+    const adjusted = Number(card.score || 0) - getRedundancyPenalty(card.redundancyKeys, redundancyCounts);
+
+    if (curveHasRoom(curvePlan, card.cmc)) {
+      if (adjusted > bestScore) {
+        best = card;
+        bestScore = adjusted;
+      }
+      continue;
+    }
+
+    if (adjusted > bestIgnoringCurveScore) {
+      bestIgnoringCurve = card;
+      bestIgnoringCurveScore = adjusted;
+    }
+  }
+
+  // Every band this bucket can still reach is full -- take the best remaining
+  // card rather than leaving the slot empty.
+  return best || bestIgnoringCurve;
+}
+
 function buildDeckFromScoredPool(
   scoredNonlands,
   commanderColors,
@@ -42,6 +114,29 @@ function buildDeckFromScoredPool(
 
   const strategyProfile = getCommanderStrategyProfile(commanderName, commanderThemes, commanderColors);
 
+  // The traits this deck is built to repeat, which the backfill must not be
+  // charged for pursuing -- a Dragon tribal deck wants its tenth Dragon as much
+  // as its first.
+  //
+  // Only the headline tribe counts. EDHREC lists themes by how many decks play
+  // them, so the first is what the deck is about: Rivaz of the Claw leads with
+  // "dragons" and turns 35 owned dragons into 25 in the deck, while Krydle of
+  // Baldur's Gate leads with "mill" and is merely itself a Rogue -- there,
+  // seven more Rogues is seven copies of the same card, none of which do
+  // anything. Exempting every tribe named anywhere in the themes brought that
+  // straight back.
+  //
+  // A tribe reaches the trait list under two names, "dragon" from the type line
+  // and "dragon tribal" from detectCardTags, and exempting one leaves the other
+  // charging full price.
+  const planTraits = new Set();
+  if (strategyProfile.wantsTribal) {
+    for (const alias of getCommanderTribalThemes((commanderThemes || []).slice(0, 1))) {
+      planTraits.add(alias);
+      planTraits.add(alias.replace(" tribal", ""));
+    }
+  }
+
   const recommendedLandCount = recommendLandCount(commanderColors);
   const typePlan = buildTypeTargetPlan(edhrecTypeAverages, strategyProfile, recommendedLandCount, commanderThemes, deckSize);
   const targetLandCount = typePlan.landCount;
@@ -50,12 +145,7 @@ function buildDeckFromScoredPool(
     (Array.isArray(edhrecCards) ? edhrecCards : []).map((entry) => [normalizeCardName(entry.name), entry])
   );
 
-  const roleTargets = {
-    ramp: Math.round(Number(edhrecRoleTargets?.ramp) || 10),
-    draw: Math.round(Number(edhrecRoleTargets?.draw) || 10),
-    removal: Math.round(Number(edhrecRoleTargets?.removal) || 8),
-    wipe: Math.round(Number(edhrecRoleTargets?.wipe) || 3)
-  };
+  const roleTargets = normalizeRoleTargets(edhrecRoleTargets);
 
   const curvePlan = buildCurvePlan(targetNonlandCount);
 
@@ -81,7 +171,9 @@ function buildDeckFromScoredPool(
       type: getCardType(card),
       cmc: card.cmc,
       colors: card.colors,
-      modeFitTier: fit.tier
+      modeFitTier: fit.tier,
+      // Precomputed: the picker reads these once per candidate per slot.
+      redundancyKeys: getCardRedundancyKeys(card, planTraits)
     });
   }
 
@@ -90,6 +182,27 @@ function buildDeckFromScoredPool(
 
   const buckets = ["Creature", "Artifact", "Enchantment", "Instant", "Sorcery", "Planeswalker"];
 
+  // Traits of everything already drafted, EDHREC picks included -- a Rogue
+  // taken from the EDHREC pool makes the next Rogue no less of a repeat.
+  const redundancyCounts = new Map();
+
+  function getRedundancySource(card) {
+    return allOwnedCardData.get(normalizeCardName(card.name))
+      || allOwnedCardData.get(normalizeCardName(getPrimaryCardName(card.name)))
+      || null;
+  }
+
+  function adjustRedundancy(card, delta) {
+    const source = getRedundancySource(card);
+    if (!source) return;
+
+    for (const key of getCardRedundancyKeys(source, planTraits)) {
+      const next = (redundancyCounts.get(key) || 0) + delta;
+      if (next > 0) redundancyCounts.set(key, next);
+      else redundancyCounts.delete(key);
+    }
+  }
+
   function addCard(card, source) {
     if (!card) return false;
     const key = normalizeCardName(card.name);
@@ -97,6 +210,7 @@ function buildDeckFromScoredPool(
     deck.push({ ...card, source });
     usedNames.add(key);
     recordCurvePick(curvePlan, card.cmc);
+    adjustRedundancy(card, 1);
     return true;
   }
 
@@ -110,7 +224,7 @@ function buildDeckFromScoredPool(
         continue;
       }
 
-      const fallbackPick = pickBestCardForBucket(fallbackPool, usedNames, commanderKeys, bucket, curvePlan);
+      const fallbackPick = pickBestFallbackCard(fallbackPool, usedNames, commanderKeys, bucket, curvePlan, redundancyCounts);
       if (fallbackPick) {
         addCard(fallbackPick, bucket === "Creature" ? "fallback-creature" : "fallback");
         continue;
@@ -130,7 +244,7 @@ function buildDeckFromScoredPool(
       continue;
     }
 
-    const fallbackPick = pickBestCardForBucket(fallbackPool, usedNames, commanderKeys, neededBucket, curvePlan);
+    const fallbackPick = pickBestFallbackCard(fallbackPool, usedNames, commanderKeys, neededBucket, curvePlan, redundancyCounts);
     if (fallbackPick) {
       addCard(fallbackPick, neededBucket === "Creature" ? "fallback-creature" : "fallback");
     }
@@ -154,7 +268,7 @@ function buildDeckFromScoredPool(
   const creatureRule = typePlan?.buckets?.Creature;
   if (creatureRule) {
     while ((countByType(deck).Creature || 0) < creatureRule.min && deck.length) {
-      const fallbackCreature = pickBestCardForBucket(fallbackPool, usedNames, commanderKeys, "Creature", curvePlan);
+      const fallbackCreature = pickBestFallbackCard(fallbackPool, usedNames, commanderKeys, "Creature", curvePlan, redundancyCounts);
       if (!fallbackCreature) break;
 
       let replaceIndex = -1;
@@ -175,6 +289,7 @@ function buildDeckFromScoredPool(
       if (replaceIndex === -1) break;
       usedNames.delete(normalizeCardName(deck[replaceIndex].name));
       releaseCurvePick(curvePlan, deck[replaceIndex].cmc);
+      adjustRedundancy(deck[replaceIndex], -1);
       deck.splice(replaceIndex, 1);
       addCard(fallbackCreature, "fallback-creature");
     }

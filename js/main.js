@@ -64,6 +64,7 @@ async function generateDeck() {
   document.getElementById("deckBracket").textContent = "";
   document.getElementById("deckGameChangers").textContent = "";
   document.getElementById("buildBreakdown").textContent = "";
+  document.getElementById("supportPackage").textContent = "";
   document.getElementById("warningsPanel").textContent = "";
   document.getElementById("moxfieldExport").value = "";
 
@@ -349,6 +350,7 @@ async function performBuildFromContext() {
   displayDeckBracket(bracketInfo);
   displayGameChangers(bracketInfo);
   displayBuildBreakdown(sanitizedFinalDeck);
+  displaySupportPackage(sanitizedFinalDeck, roleTargets);
   displayWarnings(warnings);
   displayMoxfieldExport(sanitizedFinalDeck, commanders.names, commanderThemes, strategyProfile, commanders.colors);
   renderManaCurve(sanitizedFinalDeck);
@@ -377,6 +379,7 @@ csvFileInput.addEventListener("change", async () => {
     }
   }
 
+  resetCommanderScan();
   renderCommandersTab();
 });
 

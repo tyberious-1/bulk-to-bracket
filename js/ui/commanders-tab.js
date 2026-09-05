@@ -14,6 +14,10 @@ let commanderMatches = new Map();
 let commanderSortMode = "decks";
 let commanderScanBusy = false;
 
+// Empty means no filter. "C" stands in for the colorless identity, which is the
+// empty set of colors and so has no pip of its own to toggle.
+let commanderColorFilter = new Set();
+
 function activateTab(tabName) {
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.tab === tabName);
@@ -23,6 +27,24 @@ function activateTab(tabName) {
   });
 
   if (tabName === "commanders") renderCommandersTab();
+}
+
+// A new collection invalidates everything derived from the old one: which
+// commanders are owned, and every percentage measured against it. Without this
+// the tab keeps rendering the previous upload's list, and the button that would
+// rank the new one is hidden because that stale list is not empty.
+//
+// The rankings themselves are the same for every collection, so a cached copy
+// rebuilds the list on the spot rather than asking to rank again.
+function resetCommanderScan() {
+  ownedCommanders = [];
+  commanderMatches = new Map();
+
+  const collection = getOwnedCollection();
+  if (!collection) return;
+
+  const cached = readPersistedCommanderRankings();
+  if (cached) ownedCommanders = findOwnedRankedCommanders(collection, cached);
 }
 
 function setCommanderScanBusy(busy) {
@@ -47,10 +69,21 @@ function getCommanderMatchResult(commander) {
   return match && match !== "unavailable" ? match : null;
 }
 
+// An exact identity match: picking U and B offers the commanders of a Dimir
+// deck, not every commander a Dimir deck could run.
+function matchesColorFilter(commander) {
+  if (!commanderColorFilter.size) return true;
+
+  const colors = commander.colors || [];
+  if (commanderColorFilter.has("C")) return colors.length === 0;
+  if (colors.length !== commanderColorFilter.size) return false;
+  return colors.every((color) => commanderColorFilter.has(color));
+}
+
 // Checked rows sort by match, and anything unchecked sinks below them -- an
 // unchecked row is an unknown percentage, not a zero.
 function getSortedCommanders() {
-  const rows = [...ownedCommanders];
+  const rows = ownedCommanders.filter(matchesColorFilter);
   if (commanderSortMode !== "match") return rows;
 
   return rows.sort((a, b) => {
@@ -112,11 +145,26 @@ function renderCommandersTab() {
 
   const rows = getSortedCommanders();
   const checkedCount = rows.filter(getCommanderMatchResult).length;
+  const filtered = commanderColorFilter.size > 0;
 
   panel.innerHTML = `
+    <div class="color-filter">
+      ${["C", "W", "U", "B", "R", "G"].map((color) => `
+        <button
+          class="color-pip pip-${color} color-pip-btn ${commanderColorFilter.has(color) ? "active" : ""}"
+          type="button"
+          data-filter-color="${color}"
+          title="${color === "C" ? "Colorless commanders" : `Commanders whose identity is exactly this${commanderColorFilter.size ? " combination" : ""}`}"
+        >${color}</button>
+      `).join("")}
+      ${filtered ? `<button id="clearColorFilterBtn" class="clear-filter-btn" type="button">Clear</button>` : ""}
+    </div>
+
     <div class="commanders-toolbar">
       <div class="commanders-count">
-        ${rows.length} commanders owned &middot; ${checkedCount} checked
+        ${filtered
+          ? `${rows.length} of ${ownedCommanders.length} commanders shown`
+          : `${rows.length} commanders owned`} &middot; ${checkedCount} checked
       </div>
       <div class="commanders-actions">
         <button id="sortCommandersBtn" type="button">
@@ -138,6 +186,13 @@ function renderCommandersTab() {
         </tr>
       </thead>
       <tbody>
+        ${rows.length ? "" : `
+          <tr>
+            <td colspan="6" class="commanders-empty">
+              You own no commander of exactly that color identity.
+            </td>
+          </tr>
+        `}
         ${rows.map((commander, index) => `
           <tr>
             <td class="col-rank">${index + 1}</td>
@@ -288,6 +343,25 @@ function bindCommandersTab() {
   panel.addEventListener("click", (event) => {
     if (event.target.id === "rankCommandersBtn") {
       rankOwnedCommanders();
+      return;
+    }
+
+    // Colorless is the empty identity, so it cannot be held alongside a color.
+    const filterColor = event.target.dataset?.filterColor;
+    if (filterColor) {
+      if (commanderColorFilter.has(filterColor)) commanderColorFilter.delete(filterColor);
+      else if (filterColor === "C") commanderColorFilter = new Set(["C"]);
+      else {
+        commanderColorFilter.delete("C");
+        commanderColorFilter.add(filterColor);
+      }
+      renderCommandersTab();
+      return;
+    }
+
+    if (event.target.id === "clearColorFilterBtn") {
+      commanderColorFilter = new Set();
+      renderCommandersTab();
       return;
     }
 

@@ -131,6 +131,47 @@ function displayGameChangers(bracketInfo) {
   `;
 }
 
+const SUPPORT_ROLE_LABELS = {
+  ramp: "Ramp",
+  draw: "Card Draw",
+  removal: "Removal",
+  wipe: "Board Wipes"
+};
+
+// Two numbers per row: the cards whose main job this is, and -- where they
+// differ -- how many contribute to it at all, counting cards that do two jobs.
+function displaySupportPackage(deck, edhrecRoleTargets) {
+  const el = document.getElementById("supportPackage");
+  if (!el) return;
+
+  const counts = getSupportPackageCounts(deck);
+  const targets = normalizeRoleTargets(edhrecRoleTargets);
+
+  el.innerHTML = `
+    <div class="info-card fade-up">
+      <div class="info-card-title">Support Package</div>
+      <div class="info-card-copy">How many cards do each job, against what EDHREC's decks average.</div>
+      <div class="support-grid">
+        ${Object.keys(SUPPORT_ROLE_LABELS).map((role) => {
+          const { primary, total } = counts[role];
+          const target = targets[role];
+          const short = primary < target;
+          return `
+            <div class="support-row">
+              <span class="support-label">${escapeHtml(SUPPORT_ROLE_LABELS[role])}</span>
+              <span class="support-counts">
+                <strong class="${short ? "support-short" : ""}">${primary}</strong>
+                <span class="support-target">of ${target}</span>
+                ${total > primary ? `<span class="support-secondary">${total} incl. secondary</span>` : ""}
+              </span>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function displayBuildBreakdown(deck) {
   const el = document.getElementById("buildBreakdown");
 

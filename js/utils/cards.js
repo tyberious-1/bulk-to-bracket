@@ -14,6 +14,20 @@ function getCardType(card) {
   return String(card?.type ?? card?.type_line ?? card?.rawType ?? "").toLowerCase();
 }
 
+// The subtypes a card carries -- creature types, but also Equipment, Aura and
+// the rest. Everything after the em dash, on both faces of a two-faced card.
+// detectCardTags only names a handful of tribes, so this is what sees that
+// seven different creatures are all Rogues.
+function getCardSubtypes(card) {
+  return getCardType(card)
+    .split("//")
+    .flatMap((face) => {
+      const dash = face.indexOf("—");
+      return dash === -1 ? [] : face.slice(dash + 1).trim().split(/\s+/);
+    })
+    .filter(Boolean);
+}
+
 function sanitizeCard(card) {
   if (!card) return null;
   const type = getCardType(card);

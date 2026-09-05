@@ -113,48 +113,41 @@ function isGenericStaple(card) {
   return staples.has(normalizeCardName(card.name));
 }
 
-function detectRole(card) {
+// The oracle text that marks a card as doing one of the four support jobs.
+// Shared by detectRole and getRoleContributions so the two can never disagree
+// about what counts as ramp.
+const ROLE_TEXT_PATTERNS = {
+  ramp: ["add {", "create a treasure", "create treasure", "search your library for a land"],
+  draw: ["draw a card", "draw two cards", "draw three cards", "whenever you draw"],
+  removal: ["destroy target", "exile target", "counter target spell", "return target permanent"],
+  wipe: ["destroy all creatures", "exile all creatures", "each creature gets"]
+};
+
+const SUPPORT_ROLES = ["ramp", "draw", "removal", "wipe"];
+
+function cardMatchesRole(card, role) {
   const text = getCardText(card);
-  const type = getCardType(card);
+  return (ROLE_TEXT_PATTERNS[role] || []).some((pattern) => text.includes(pattern));
+}
 
-  if (type.includes("land")) return "land";
+// One role per card, first match winning, which is what the builder's role
+// targets and the curve planner are written against.
+function detectRole(card) {
+  if (getCardType(card).includes("land")) return "land";
 
-  if (
-    text.includes("add {") ||
-    text.includes("create a treasure") ||
-    text.includes("create treasure") ||
-    text.includes("search your library for a land")
-  ) {
-    return "ramp";
-  }
-
-  if (
-    text.includes("draw a card") ||
-    text.includes("draw two cards") ||
-    text.includes("draw three cards") ||
-    text.includes("whenever you draw")
-  ) {
-    return "draw";
-  }
-
-  if (
-    text.includes("destroy target") ||
-    text.includes("exile target") ||
-    text.includes("counter target spell") ||
-    text.includes("return target permanent")
-  ) {
-    return "removal";
-  }
-
-  if (
-    text.includes("destroy all creatures") ||
-    text.includes("exile all creatures") ||
-    text.includes("each creature gets")
-  ) {
-    return "wipe";
+  for (const role of SUPPORT_ROLES) {
+    if (cardMatchesRole(card, role)) return role;
   }
 
   return "synergy";
+}
+
+// Every job a card does, rather than the first one detectRole stops at. A
+// removal spell that also draws is both, and a board wipe that draws is
+// reported as a wipe here where detectRole would only ever call it draw.
+function getRoleContributions(card) {
+  if (getCardType(card).includes("land")) return [];
+  return SUPPORT_ROLES.filter((role) => cardMatchesRole(card, role));
 }
 
 function detectCardTags(card) {

@@ -1062,3 +1062,106 @@ button:disabled {
 .build-btn:hover {
   background: #4b5563;
 }
+
+/* Commander color filter */
+.color-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #374151;
+}
+
+.color-pip-btn {
+  margin-top: 0;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  opacity: 0.4;
+  filter: grayscale(0.7);
+  transition: opacity 0.12s, filter 0.12s, box-shadow 0.12s;
+}
+
+.color-pip-btn:hover {
+  opacity: 0.8;
+  filter: grayscale(0.2);
+}
+
+.color-pip-btn.active {
+  opacity: 1;
+  filter: none;
+  box-shadow: 0 0 0 2px #f3f4f6;
+}
+
+.clear-filter-btn {
+  margin-top: 0;
+  margin-left: 4px;
+  padding: 6px 12px;
+  font-size: 13px;
+  background: #374151;
+}
+
+.clear-filter-btn:hover {
+  background: #4b5563;
+}
+
+.commanders-empty {
+  color: #9ca3af;
+  text-align: center;
+  padding: 24px 10px;
+}
+
+/* Support package breakdown */
+.support-grid {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.support-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.support-label {
+  color: #cbd5e1;
+  font-size: 13px;
+}
+
+.support-counts {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.support-counts strong {
+  font-size: 16px;
+  color: #f3f4f6;
+}
+
+.support-counts strong.support-short {
+  color: #fbbf24;
+}
+
+.support-target {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.support-secondary {
+  color: #9ca3af;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
