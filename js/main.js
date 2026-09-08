@@ -184,7 +184,8 @@ async function generateDeck() {
       allOwnedCardData,
       commanderThemes,
       typeAverages: edhrecData?.typeAverages || null,
-      roleTargets: edhrecData?.roleTargets || null
+      roleTargets: edhrecData?.roleTargets || null,
+      themeCardLists: edhrecData?.themeCardLists || {}
     };
 
     await performBuildFromContext();
@@ -237,6 +238,7 @@ async function performBuildFromContext() {
     typeAverages,
     roleTargets
   } = currentRunContext;
+
 
   const strategyProfile = getCommanderStrategyProfile(
     commanders.primary.name,
@@ -315,6 +317,19 @@ async function performBuildFromContext() {
   );
   renderPriorityButtons(commanderThemes, allOwnedCardData);
 
+  updateProgress(88, "Finding collection cards that fit the themes...");
+  // Resolved here rather than inside the builder: local text matching answers
+  // most themes, but the ones it cannot need a Scryfall lookup, and the builder
+  // is synchronous.
+  const themeCardNames = await buildThemeCandidateNames(
+    commanderThemes,
+    collection,
+    allOwnedCardData,
+    commanders.colors,
+    currentRunContext.themeCardLists
+  );
+  logMessage(`${themeCardNames.size} owned cards match the detected themes.`);
+
   updateProgress(90, "Building deck structure and mana base...");
   const finalDeck = buildDeckFromScoredPool(
     scoredNonlands,
@@ -327,7 +342,7 @@ async function performBuildFromContext() {
     typeAverages,
     roleTargets,
     edhrecCards,
-    { commanderNames: commanders.names, deckSize: commanders.deckSize }
+    { commanderNames: commanders.names, deckSize: commanders.deckSize, themeCardNames }
   );
 
   logMessage(`Built final deck with ${finalDeck.length} cards.`);

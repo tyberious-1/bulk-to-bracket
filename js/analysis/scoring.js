@@ -120,7 +120,29 @@ const ROLE_TEXT_PATTERNS = {
   ramp: ["add {", "create a treasure", "create treasure", "search your library for a land"],
   draw: ["draw a card", "draw two cards", "draw three cards", "whenever you draw"],
   removal: ["destroy target", "exile target", "counter target spell", "return target permanent"],
-  wipe: ["destroy all creatures", "exile all creatures", "each creature gets"]
+  // Sweepers are written a dozen ways and this list used to know three of them,
+  // one of which ("each creature gets") matches no card ever printed -- the
+  // wording is "all creatures get -X/-X". Across 6,056 owned nonland cards the
+  // old list found 10 while missing 67, including every damage-based sweeper:
+  // Savage Twister, Storm's Wrath, Gale Force, Needle Storm.
+  //
+  // Kept deliberately literal rather than reaching for "destroy all", which
+  // also catches "destroy all Equipment attached to that creature" and "destroy
+  // all Auras attached to target land". Single-target edicts are left out for
+  // the same reason -- "target opponent sacrifices a creature" is removal, not
+  // a wipe -- while "each player" and "each opponent" forms are counted, since
+  // at a four-player table they clear three bodies.
+  wipe: [
+    "destroy all creatures",
+    "destroy all other creatures",
+    "destroy all non",
+    "destroy all permanents",
+    "exile all creatures",
+    "all creatures get -",
+    "damage to each creature",
+    "each player sacrifices",
+    "each opponent sacrifices"
+  ]
 };
 
 const SUPPORT_ROLES = ["ramp", "draw", "removal", "wipe"];

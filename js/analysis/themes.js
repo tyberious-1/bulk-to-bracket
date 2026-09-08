@@ -432,3 +432,243 @@ function getModePreferences(mode, strategyProfile) {
     tribalBias: tribalFocus ? 1.55 : 1
   };
 }
+
+// Theme candidates for the backfill.
+//
+// scoreFallbackCard's theme term reads detectCardTags, which knows a fixed
+// vocabulary of about twenty tags. Most themes EDHREC actually names -- landfall,
+// clues, elementals, toolbox -- are not among them, so every owned card scored
+// the same zero for theme fit and the backfill filled Yisan's toolbox deck with
+// Wary Okapi and Spined Karok. Two commanders sharing a color got the same
+// generic bodies: Yisan and Lonis shared 10 of 31 backfilled cards.
+//
+// So match the theme EDHREC named, rather than a tag we happen to have a
+// detector for. Every owned card's oracle text and subtypes are already cached,
+// which covers any theme whose name appears on the cards that serve it.
+
+// EDHREC names themes in the plural where cards read singular ("clues" against
+// "sacrifice this Clue"), so try both.
+function getThemeKeywords(theme) {
+  const name = normalizeThemeName(theme);
+  if (!name) return [];
+
+  const keywords = [name];
+  if (name.endsWith("s")) keywords.push(name.slice(0, -1));
+  return keywords;
+}
+
+// Whole words only. A plain substring test makes "ramp" match every trample
+// creature, which handed Yisan's toolbox deck Yavimaya Wurm, Craw Giant and
+// Elfhame Wurm as theme cards.
+function cardMatchesThemeText(card, theme) {
+  const keywords = getThemeKeywords(theme);
+  if (!keywords.length) return false;
+
+  const text = getCardText(card);
+  const subtypes = getCardSubtypes(card);
+
+  return keywords.some((keyword) => {
+    if (subtypes.includes(keyword)) return true;
+    const pattern = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+    return pattern.test(text);
+  });
+}
+
+// Owned cards that read as serving this theme, by name.
+function findLocalThemeMatches(theme, collectionData, allOwnedCardData, commanderColors) {
+  const matches = new Set();
+
+  for (const entry of getCollectionEntries(collectionData)) {
+    const card = allOwnedCardData.get(entry.normalizedName);
+    if (!card) continue;
+    if (getCardType(card).includes("land")) continue;
+    if (!legalForCommander(card.colors, commanderColors)) continue;
+    if (cardMatchesThemeText(card, theme)) matches.add(entry.normalizedName);
+  }
+
+  return matches;
+}
+
+// Below this, a theme has told the backfill almost nothing and is worth a
+// Scryfall lookup.
+const THEME_LOCAL_MATCH_FLOOR = 8;
+
+// Names of every owned card that serves any of this commander's themes.
+//
+// Local text matching answers most themes for free. Where it does not -- either
+// the theme is named differently on the cards that serve it, or it is a concept
+// with no text at all -- Scryfall's functional tags are asked instead: they are
+// curated rather than derived, so otag:landfall finds 174 Gruul cards where a
+// text search for "landfall" finds 120.
+async function buildThemeCandidateNames(
+  commanderThemes,
+  collectionData,
+  allOwnedCardData,
+  commanderColors,
+  themeCardLists = {}
+) {
+  const candidates = new Set();
+  const corpusCards = Array.from(allOwnedCardData.values());
+
+  for (const theme of Array.isArray(commanderThemes) ? commanderThemes : []) {
+    // Pass one: the theme's own name, against text we already hold.
+    const local = findLocalThemeMatches(theme, collectionData, allOwnedCardData, commanderColors);
+    for (const name of local) candidates.add(name);
+    if (local.size >= THEME_LOCAL_MATCH_FLOOR) continue;
+
+    // Pass two: Scryfall's curated functional tags.
+    const tagged = await fetchScryfallThemeCardNames(theme, commanderColors);
+    let taggedMatches = 0;
+    for (const name of tagged) {
+      if (!hasOwnedCard(collectionData, name)) continue;
+
+      const normalized = normalizeCardName(name);
+      const card = allOwnedCardData.get(normalized)
+        || allOwnedCardData.get(normalizeCardName(getPrimaryCardName(name)));
+      if (!card) continue;
+      if (getCardType(card).includes("land")) continue;
+      if (!legalForCommander(card.colors, commanderColors)) continue;
+
+      candidates.add(normalized);
+      taggedMatches += 1;
+    }
+    if (local.size + taggedMatches >= THEME_LOCAL_MATCH_FLOOR) continue;
+
+    // Pass three: what EDHREC's own theme page says the theme is. The only one
+    // of the three that can describe a theme with no name in the rules text.
+    const exemplarNames = themeCardLists?.[normalizeThemeName(theme)] || [];
+    if (exemplarNames.length < 6) continue;
+
+    const exemplarData = await fetchCardDataBatchWithProgress(
+      exemplarNames.slice(0, THEME_EXEMPLAR_LIMIT),
+      null
+    );
+    const phrases = deriveThemeFingerprint(Array.from(exemplarData.values()), corpusCards);
+    for (const name of findFingerprintMatches(phrases, collectionData, allOwnedCardData, commanderColors)) {
+      candidates.add(name);
+    }
+  }
+
+  return candidates;
+}
+
+// Theme fingerprints from EDHREC's own theme pages.
+//
+// Some themes describe an intent rather than a mechanic. "Toolbox", "combo",
+// "birthing pod", "midrange" appear nowhere in card text and Scryfall has no
+// functional tag for any of them, so neither earlier pass sees anything and the
+// backfill goes back to picking whatever creature is cheapest -- Yisan's
+// toolbox deck matched zero owned cards on 41 backfilled slots.
+//
+// EDHREC has already told us what those themes mean, though: the theme page
+// lists the cards that define them. Read those cards and keep the phrases that
+// are common among them and rare in the collection at large -- "search your
+// library for a creature card" for a toolbox -- then match owned cards on those.
+
+const THEME_EXEMPLAR_LIMIT = 60;
+const THEME_FINGERPRINT_PHRASES = 12;
+
+// A baseline drawn from the whole collection would mean 6,000 substring scans
+// per candidate phrase. A slice is enough to tell "every third card says this"
+// from "one in two hundred does".
+const THEME_CORPUS_SAMPLE = 1200;
+
+// How much more often a phrase must appear among the exemplars than in the
+// collection before it counts as describing the theme rather than describing
+// Magic. This is the filter that does the work: "when this creature enters"
+// turns up in 11 of 60 toolbox exemplars but 166 of 1,200 owned cards, a lift
+// of 1.3, while "your library for a" manages 4.2 on 7 exemplars.
+const THEME_MIN_PHRASE_LIFT = 3;
+
+// Support has to stay low for the same reason. A conceptual theme's cards agree
+// on very little: a toolbox page is tutor targets, so only about one in eight
+// carries the tutoring phrase that actually names the theme. Demanding 20%
+// agreement threw that away and derived nothing at all.
+const THEME_MIN_PHRASE_SUPPORT = 0.1;
+
+// Ceiling on how many phrases get measured against the collection.
+const THEME_PHRASE_SHORTLIST_LIMIT = 120;
+
+// Reminder text is stripped: it restates rules the whole game shares and would
+// hand back "you may cast this card from your graveyard" for every theme.
+function getThemePhraseCandidates(text) {
+  const cleaned = String(text || "")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return [];
+
+  const words = cleaned.split(" ");
+  const phrases = new Set();
+
+  for (let size = 3; size <= 4; size++) {
+    for (let start = 0; start + size <= words.length; start++) {
+      phrases.add(words.slice(start, start + size).join(" "));
+    }
+  }
+
+  return Array.from(phrases);
+}
+
+function deriveThemeFingerprint(exemplarCards, corpusCards) {
+  const exemplars = (exemplarCards || []).filter(Boolean);
+  if (exemplars.length < 6) return [];
+
+  const exemplarHits = new Map();
+  for (const card of exemplars) {
+    for (const phrase of getThemePhraseCandidates(getCardText(card))) {
+      exemplarHits.set(phrase, (exemplarHits.get(phrase) || 0) + 1);
+    }
+  }
+
+  const minimumHits = Math.max(4, Math.ceil(exemplars.length * THEME_MIN_PHRASE_SUPPORT));
+  let shortlist = [];
+  for (const [phrase, hits] of exemplarHits) {
+    if (hits >= minimumHits) shortlist.push(phrase);
+  }
+  if (!shortlist.length) return [];
+
+  // Each survivor costs a scan of the corpus sample, so bound the list by the
+  // phrases the exemplars agree on most rather than scoring all of them.
+  shortlist.sort((a, b) => exemplarHits.get(b) - exemplarHits.get(a));
+  shortlist = shortlist.slice(0, THEME_PHRASE_SHORTLIST_LIMIT);
+
+  const sample = (corpusCards || []).slice(0, THEME_CORPUS_SAMPLE);
+  const sampleSize = Math.max(sample.length, 1);
+  const scored = [];
+
+  for (const phrase of shortlist) {
+    let corpusHits = 0;
+    for (const card of sample) {
+      if (getCardText(card).includes(phrase)) corpusHits += 1;
+    }
+
+    const exemplarShare = exemplarHits.get(phrase) / exemplars.length;
+    // Floored so a phrase absent from the sample does not divide by zero.
+    const corpusShare = Math.max(corpusHits, 1) / sampleSize;
+    const lift = exemplarShare / corpusShare;
+
+    if (lift >= THEME_MIN_PHRASE_LIFT) scored.push({ phrase, lift });
+  }
+
+  scored.sort((a, b) => b.lift - a.lift);
+  return scored.slice(0, THEME_FINGERPRINT_PHRASES).map((entry) => entry.phrase);
+}
+
+function findFingerprintMatches(phrases, collectionData, allOwnedCardData, commanderColors) {
+  const matches = new Set();
+  if (!phrases.length) return matches;
+
+  for (const entry of getCollectionEntries(collectionData)) {
+    const card = allOwnedCardData.get(entry.normalizedName);
+    if (!card) continue;
+    if (getCardType(card).includes("land")) continue;
+    if (!legalForCommander(card.colors, commanderColors)) continue;
+
+    const text = getCardText(card);
+    if (phrases.some((phrase) => text.includes(phrase))) matches.add(entry.normalizedName);
+  }
+
+  return matches;
+}

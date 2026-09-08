@@ -1,6 +1,7 @@
 // The deck assembler.
 //
-// buildDeckFromScoredPool runs four phases: hit the EDHREC type mix from
+// buildDeckFromScoredPool runs five phases: fill the support package the deck
+// needs (ramp, draw, removal, sweepers), hit the EDHREC type mix from
 // EDHREC-owned matches, satisfy any unmet type minimums, fill the remainder
 // with whatever best serves the shortest type and role, then force creatures
 // in if the collection turned out to be spell-heavy. Lands are added last.
@@ -22,6 +23,12 @@
 // than its rivals. At this weight the tribal bonus is spent by the fourth copy,
 // and the slot goes to something that does a different job.
 const FALLBACK_REDUNDANCY_WEIGHT = 4;
+
+// What a card is worth for serving the deck's theme. It has to clear the
+// generic bonuses in scoreFallbackCard -- base 5, curve 4, "is a creature" 6 --
+// or a vanilla body in the right colors goes on beating a card that does what
+// the deck is built to do.
+const FALLBACK_THEME_BONUS = 10;
 
 // exemptTraits holds what the deck is *trying* to repeat. A Dragon tribal
 // commander wants its fourth and tenth Dragon as much as its first, so charging
@@ -112,6 +119,10 @@ function buildDeckFromScoredPool(
   // Cards besides the commanders: 99 alone, 98 for a pair.
   const deckSize = Number(options.deckSize) || 99;
 
+  // Owned cards that serve one of this commander's themes, resolved before the
+  // build because finding them can require a network lookup.
+  const themeCardNames = options.themeCardNames instanceof Set ? options.themeCardNames : new Set();
+
   const strategyProfile = getCommanderStrategyProfile(commanderName, commanderThemes, commanderColors);
 
   // The traits this deck is built to repeat, which the backfill must not be
@@ -167,13 +178,16 @@ function buildDeckFromScoredPool(
     fallbackPool.push({
       name: card.name,
       role: detectRole(card),
-      score: scoreFallbackCard(card, commanderThemes, strategyProfile, commanderColors, modePrefs) + modeFitAdjustment,
+      score: scoreFallbackCard(card, commanderThemes, strategyProfile, commanderColors, modePrefs)
+        + modeFitAdjustment
+        + (themeCardNames.has(normalizedName) ? FALLBACK_THEME_BONUS : 0),
       type: getCardType(card),
       cmc: card.cmc,
       colors: card.colors,
       modeFitTier: fit.tier,
-      // Precomputed: the picker reads these once per candidate per slot.
-      redundancyKeys: getCardRedundancyKeys(card, planTraits)
+      // Precomputed: the pickers read these once per candidate per slot.
+      redundancyKeys: getCardRedundancyKeys(card, planTraits),
+      roles: getRoleContributions(card)
     });
   }
 
@@ -212,6 +226,101 @@ function buildDeckFromScoredPool(
     recordCurvePick(curvePlan, card.cmc);
     adjustRedundancy(card, 1);
     return true;
+  }
+
+  // Phase 0: the support package, before anything else spends the slots.
+  //
+  // The role targets used to be read only by chooseBestFlexibleCard, which never
+  // runs -- phase 1 fills every bucket to its target first, so the deck was
+  // already full by the time anything asked how much ramp or draw it had. Four
+  // low-coverage commanders each came out missing at least one target. Fill the
+  // package first, then let the type mix and the themes have what is left.
+  const supportRoles = ["ramp", "draw", "removal", "wipe"];
+  const exhaustedRoles = new Set();
+
+  // Counted by contribution, not by primary role: a removal spell that draws is
+  // filed as draw, and asking for removal anyway would double up.
+  function getDeckRoleCounts() {
+    const counts = { ramp: 0, draw: 0, removal: 0, wipe: 0 };
+
+    for (const card of deck) {
+      const source = getRedundancySource(card);
+      if (!source) continue;
+      for (const role of getRoleContributions(source)) counts[role] += 1;
+    }
+
+    return counts;
+  }
+
+  // A role slot still answers to the type plan, or ten ramp artifacts arrive
+  // before the type mix gets a say. Target rather than max: this phase runs
+  // first, so leave the buckets room to be filled properly afterwards.
+  function bucketHasRoomForRole(bucket) {
+    const rule = typePlan?.buckets?.[bucket];
+    if (!rule) return true;
+    return (countByType(deck)[bucket] || 0) < Number(rule.target || 0);
+  }
+
+  function pickBestForRole(pool, role, chargeRedundancy) {
+    let best = null;
+    let bestScore = -Infinity;
+
+    for (const card of pool) {
+      const key = normalizeCardName(card.name);
+      if (usedNames.has(key) || commanderKeys.has(key)) continue;
+
+      const roles = card.roles || getRoleContributions(getRedundancySource(card) || card);
+      if (!roles.includes(role)) continue;
+      if (!bucketHasRoomForRole(getDeckTypeBucket(card.type || card.type_line || ""))) continue;
+
+      let adjusted = Number(card.score || 0);
+      if (chargeRedundancy) adjusted -= getRedundancyPenalty(card.redundancyKeys, redundancyCounts);
+      // Out-of-band is discouraged here rather than forbidden: a support hole is
+      // worse for the deck than a bump in the curve.
+      if (!curveHasRoom(curvePlan, card.cmc)) adjusted -= 8;
+
+      if (adjusted > bestScore) {
+        best = card;
+        bestScore = adjusted;
+      }
+    }
+
+    return best;
+  }
+
+  while (deck.length < targetNonlandCount) {
+    const counts = getDeckRoleCounts();
+
+    let neediestRole = null;
+    let largestGap = 0;
+    for (const role of supportRoles) {
+      if (exhaustedRoles.has(role)) continue;
+      const gap = roleTargets[role] - counts[role];
+      if (gap > largestGap) {
+        neediestRole = role;
+        largestGap = gap;
+      }
+    }
+    if (!neediestRole) break;
+
+    const edhrecPick = pickBestForRole(scoredNonlands, neediestRole, false);
+    if (edhrecPick) {
+      addCard(edhrecPick, "edhrec");
+      continue;
+    }
+
+    const fallbackPick = pickBestForRole(fallbackPool, neediestRole, true);
+    if (!fallbackPick) {
+      // Nothing owned and legal can serve this role -- a collection with no
+      // board wipes in these colors, say. Stop asking rather than spin.
+      exhaustedRoles.add(neediestRole);
+      continue;
+    }
+
+    addCard(
+      fallbackPick,
+      getDeckTypeBucket(fallbackPick.type || "") === "Creature" ? "fallback-creature" : "fallback"
+    );
   }
 
   // Phase 1: hit the EDHREC type mix using EDHREC-owned matches first.

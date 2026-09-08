@@ -490,6 +490,7 @@ async function getEDHREC(commanderNames) {
       tags: [],
       typeAverages: null,
       roleTargets: null,
+      themeCardLists: {},
       unavailable: true
     };
   }
@@ -501,6 +502,7 @@ async function getEDHREC(commanderNames) {
       tags: [],
       typeAverages: null,
       roleTargets: null,
+      themeCardLists: {},
       unavailable: true
     };
   }
@@ -511,10 +513,23 @@ async function getEDHREC(commanderNames) {
   // Theme pages are still this commander's decks, just sliced by archetype, so
   // their cards belong in the same pool. They also carry much stronger signal:
   // a card is 18% of all Krydle decks but 55% of Krydle Mill decks.
+  // Kept per theme as well as merged, because which theme a card came from is
+  // the only description some themes have. "Toolbox" and "birthing pod" leave
+  // no trace in card text and Scryfall has no functional tag for them, but the
+  // cards on their pages are what those themes mean.
+  const themeCardLists = {};
+
   const themeSlugs = pickEdhrecThemeSlugs(data);
   for (const themeSlug of themeSlugs) {
     const themeData = await fetchEdhrecThemePage(commanderSlug, themeSlug);
-    if (themeData) collectEdhrecCards(themeData, deduped);
+    if (themeData) {
+      collectEdhrecCards(themeData, deduped);
+
+      const perTheme = new Map();
+      collectEdhrecCards(themeData, perTheme);
+      themeCardLists[normalizeThemeName(themeSlug)] =
+        Array.from(perTheme.values()).map((entry) => entry.name);
+    }
     await sleep(120);
   }
 
@@ -527,6 +542,7 @@ async function getEDHREC(commanderNames) {
     tags,
     typeAverages,
     roleTargets,
+    themeCardLists,
     unavailable: false
   };
 }

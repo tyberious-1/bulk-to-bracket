@@ -175,3 +175,34 @@ async function fetchCardDataBatchWithProgress(cardNames, progressCallback) {
 
   return collectCachedCards(uniqueNames);
 }
+
+// Scryfall's functional tags (otag:) are curated by hand rather than derived
+// from card text, so they see what a text search cannot: otag:landfall returns
+// 174 Gruul cards where oracle:landfall returns 120, the difference being cards
+// that trigger on a land entering without ever using the word.
+//
+// Only consulted for themes local text matching could not answer. A 404 means
+// Scryfall has no tag by that name, which is the expected answer for a concept
+// like "toolbox" -- not a failure worth reporting.
+//
+// order=edhrec matters: a tag can match thousands of cards, and one page of the
+// most-played beats one page of the alphabetically first.
+async function fetchScryfallThemeCardNames(theme, commanderColors) {
+  const tag = normalizeThemeName(theme).replace(/\s+/g, "-");
+  if (!tag) return [];
+
+  const identity = commanderColors.length ? commanderColors.join("") : "c";
+  const query = `otag:${tag} identity<=${identity}`;
+  const url = `https://api.scryfall.com/cards/search?q=${encodeURIComponent(query)}&order=edhrec&unique=cards`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    return Array.isArray(data.data) ? data.data.map((card) => card.name).filter(Boolean) : [];
+  } catch (error) {
+    console.warn(`Scryfall theme lookup failed for "${theme}".`, error);
+    return [];
+  }
+}
