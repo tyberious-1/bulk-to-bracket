@@ -172,7 +172,7 @@ function generateWarnings(deck, commanderThemes, bracketInfo) {
   const wipes = deck.filter((c) => c.role === "wipe").length;
   const basics = deck.filter((c) => c.source === "basic-land").length;
   const nonbasics = deck.filter((c) => c.source === "nonbasic-land").length;
-  const fallbackCards = deck.filter((c) => c.source === "fallback" || c.source === "fallback-creature").length;
+  const fallbackCards = deck.filter((c) => c.source === "fallback-theme" || c.source === "fallback-generic").length;
   const nonlandCount = deck.filter((c) => c.role !== "land").length;
 
   // Backfilling from the collection is what this builder is for, so only flag

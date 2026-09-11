@@ -7,12 +7,42 @@
 //
 // Depends on: cards.js, constants.js, csv.js, text.js
 
-function isLikelyEdhrecTagCandidate(tag) {
+// Labels EDHREC uses for page sections rather than themes. Only consulted when
+// a theme has to be guessed from the raw payload -- see extractEdhrecTagsFromData
+// -- because several of these ("artifacts", "enchantments", "lands") are real
+// themes too, and the only thing separating the two readings is where in the
+// payload the string was found.
+//
+// Compared with spaces stripped. EDHREC sends these as slugs -- "topcards",
+// "highsynergycards", "gamechangers" -- so the spaced spellings on this list
+// never matched a single one of them, and every commander page contributed its
+// own section names to the theme list.
+const EDHREC_NON_THEME_LABELS = new Set([
+  "creatures", "instants", "sorceries", "artifacts", "enchantments", "planeswalkers",
+  "lands", "utilityartifacts", "utilitylands", "manaartifacts", "topcards",
+  "highsynergycards", "newcards", "gamechangers", "similarcommanders", "budget",
+  "expensive", "salt", "price", "bracket", "theme", "tribe"
+].map((label) => label.replace(/\s+/g, "")));
+
+// Could this string be the name of a theme at all? Shape only -- no opinion on
+// whether EDHREC meant it as one.
+function isPlausibleThemeName(tag) {
   const value = normalizeThemeName(tag);
   if (!value || value.length < 2 || value.length > 40) return false;
   if (/^[-+]?\d+$/.test(value)) return false;
-  if (["creatures","instants","sorceries","artifacts","enchantments","planeswalkers","lands","utility artifacts","utility lands","mana artifacts","top cards","high synergy cards","new cards","game changers","similar commanders","budget","expensive","salt","price","bracket","theme","tribe"].includes(value)) return false;
   return /[a-z]/.test(value);
+}
+
+function isLikelyEdhrecTagCandidate(tag) {
+  if (!isPlausibleThemeName(tag)) return false;
+
+  // The payload is full of other commanders' names -- partner suggestions and
+  // the "similar commanders" list -- and they read as themes to a walker that
+  // only sees strings. None of EDHREC's 401 theme names contains a comma;
+  // "Grazilaxx, Illithid Scholar" and its kind almost always do.
+  if (normalizeThemeName(tag).includes(",")) return false;
+
+  return !EDHREC_NON_THEME_LABELS.has(normalizeThemeName(tag).replace(/\s+/g, ""));
 }
 
 function getThemeAliases(theme) {
@@ -446,6 +476,67 @@ function getModePreferences(mode, strategyProfile) {
 // detector for. Every owned card's oracle text and subtypes are already cached,
 // which covers any theme whose name appears on the cards that serve it.
 
+// EDHREC theme names against Scryfall functional tag names.
+//
+// The two vocabularies describe the same ideas and agree on almost none of the
+// spellings: EDHREC names a theme as a plural noun for the deck that plays it,
+// Scryfall tags the card with a verb or a singular. Passing EDHREC's name
+// straight through as `otag:<name>` therefore missed nearly everything --
+// measured across 8 commanders, 24 of 26 lookups returned zero cards, including
+// every one of reanimator, clones, tokens, artifacts, sacrifice and equipment.
+// The landfall example in fetchScryfallThemeCardNames' comment happens to be
+// one of the few names that lines up.
+//
+// Most of the gap closes mechanically, which getScryfallThemeTags does below:
+// singularize, then try Scryfall's "synergy-" and "-matters" prefixes. Checked
+// against Scryfall's full tag list, that ladder recovers 57 of the 58 themes
+// that resolve to a usable tag at all. The table is for the irregulars it
+// cannot reach -- where Scryfall names the action and EDHREC names the deck.
+//
+// Card counts below are Scryfall's, unfiltered by color, measured 2026-09-10.
+const SCRYFALL_THEME_TAGS = {
+  "reanimator": "reanimate",              // 1067; "reanimator" matches nothing
+  "artifacts": "synergy-artifact",        // 1064; "artifact-matters" is 1 card
+  "enchantress": "synergy-enchantment",   // 250
+  "card draw": "draw-matters",            // 175; bare "draw" is every cantrip
+  "storm": "storm-count-matters",         // 25
+  "spell copy": "copy-spell",             // 195
+  "lifedrain": "drain-life",              // 423
+  "aristocrats": "sacrifice-outlet",      // 1488
+  "infect": "poison-mechanics"            // 169; "synergy-infect" is 2 cards
+};
+
+// Themes that are a strategy rather than a mechanic -- combo, aggro, midrange,
+// cEDH, voltron, stax, toolbox, good stuff, big mana, pillow fort -- have no
+// Scryfall tag at all, by design on Scryfall's part. They fall through to the
+// EDHREC theme-page fingerprint, which is the pass written for exactly them.
+function singularizeThemeSlug(slug) {
+  if (slug.endsWith("ies")) return `${slug.slice(0, -3)}y`;
+  if (slug.endsWith("s") && !slug.endsWith("ss")) return slug.slice(0, -1);
+  return slug;
+}
+
+// Tag names to try for this theme, best first. Callers stop at the first that
+// returns cards.
+function getScryfallThemeTags(theme) {
+  const name = normalizeThemeName(theme);
+  if (!name) return [];
+
+  // A curated mapping is one we have already verified, so do not dilute it
+  // with guesses that could match something broader.
+  if (SCRYFALL_THEME_TAGS[name]) return [SCRYFALL_THEME_TAGS[name]];
+
+  const slug = name.replace(/\s+/g, "-");
+  const singular = singularizeThemeSlug(slug);
+
+  return Array.from(new Set([
+    slug,
+    singular,
+    `synergy-${singular}`,
+    `${singular}-matters`
+  ])).filter(Boolean);
+}
+
 // EDHREC names themes in the plural where cards read singular ("clues" against
 // "sacrifice this Clue"), so try both.
 function getThemeKeywords(theme) {
@@ -493,13 +584,69 @@ function findLocalThemeMatches(theme, collectionData, allOwnedCardData, commande
 // Scryfall lookup.
 const THEME_LOCAL_MATCH_FLOOR = 8;
 
-// Names of every owned card that serves any of this commander's themes.
+// Owned cards serving one theme, by name. Three passes, each only asked when
+// the one before it came up short.
 //
 // Local text matching answers most themes for free. Where it does not -- either
 // the theme is named differently on the cards that serve it, or it is a concept
 // with no text at all -- Scryfall's functional tags are asked instead: they are
 // curated rather than derived, so otag:landfall finds 174 Gruul cards where a
 // text search for "landfall" finds 120.
+async function findThemeCandidates(
+  theme,
+  collectionData,
+  allOwnedCardData,
+  commanderColors,
+  themeCardLists,
+  corpusCards
+) {
+  // Pass one: the theme's own name, against text we already hold.
+  const matches = findLocalThemeMatches(theme, collectionData, allOwnedCardData, commanderColors);
+  if (matches.size >= THEME_LOCAL_MATCH_FLOOR) return matches;
+
+  // Pass two: Scryfall's curated functional tags.
+  const tagged = await fetchScryfallThemeCardNames(theme, commanderColors);
+  for (const name of tagged) {
+    if (!hasOwnedCard(collectionData, name)) continue;
+
+    const normalized = normalizeCardName(name);
+    const card = allOwnedCardData.get(normalized)
+      || allOwnedCardData.get(normalizeCardName(getPrimaryCardName(name)));
+    if (!card) continue;
+    if (getCardType(card).includes("land")) continue;
+    if (!legalForCommander(card.colors, commanderColors)) continue;
+
+    matches.add(normalized);
+  }
+  if (matches.size >= THEME_LOCAL_MATCH_FLOOR) return matches;
+
+  // Pass three: what EDHREC's own theme page says the theme is. The only one
+  // of the three that can describe a theme with no name in the rules text.
+  const exemplarNames = themeCardLists?.[normalizeThemeName(theme)] || [];
+  if (exemplarNames.length < 6) return matches;
+
+  const exemplarData = await fetchCardDataBatchWithProgress(
+    exemplarNames.slice(0, THEME_EXEMPLAR_LIMIT),
+    null
+  );
+  const phrases = deriveThemeFingerprint(Array.from(exemplarData.values()), corpusCards);
+  for (const name of findFingerprintMatches(phrases, collectionData, allOwnedCardData, commanderColors)) {
+    matches.add(name);
+  }
+
+  return matches;
+}
+
+// Every owned card that serves any of this commander's themes, mapped to how
+// well it serves them: `rank` is the best-placed theme it matches and `hits` is
+// how many it matches at all.
+//
+// A flat set of names told the backfill only whether a card was on-theme at
+// all, which is not the question -- EDHREC orders themes by how many decks play
+// them, so the first is what the deck is about and the fifth is a footnote, and
+// a card serving three themes at once is more clearly on-plan than one clipping
+// a single minor one. Two commanders sharing a color identity used to draw the
+// same backfill because rank is the only signal that separates them.
 async function buildThemeCandidateNames(
   commanderThemes,
   collectionData,
@@ -507,45 +654,30 @@ async function buildThemeCandidateNames(
   commanderColors,
   themeCardLists = {}
 ) {
-  const candidates = new Set();
+  const candidates = new Map();
   const corpusCards = Array.from(allOwnedCardData.values());
+  const themes = Array.isArray(commanderThemes) ? commanderThemes : [];
 
-  for (const theme of Array.isArray(commanderThemes) ? commanderThemes : []) {
-    // Pass one: the theme's own name, against text we already hold.
-    const local = findLocalThemeMatches(theme, collectionData, allOwnedCardData, commanderColors);
-    for (const name of local) candidates.add(name);
-    if (local.size >= THEME_LOCAL_MATCH_FLOOR) continue;
-
-    // Pass two: Scryfall's curated functional tags.
-    const tagged = await fetchScryfallThemeCardNames(theme, commanderColors);
-    let taggedMatches = 0;
-    for (const name of tagged) {
-      if (!hasOwnedCard(collectionData, name)) continue;
-
-      const normalized = normalizeCardName(name);
-      const card = allOwnedCardData.get(normalized)
-        || allOwnedCardData.get(normalizeCardName(getPrimaryCardName(name)));
-      if (!card) continue;
-      if (getCardType(card).includes("land")) continue;
-      if (!legalForCommander(card.colors, commanderColors)) continue;
-
-      candidates.add(normalized);
-      taggedMatches += 1;
-    }
-    if (local.size + taggedMatches >= THEME_LOCAL_MATCH_FLOOR) continue;
-
-    // Pass three: what EDHREC's own theme page says the theme is. The only one
-    // of the three that can describe a theme with no name in the rules text.
-    const exemplarNames = themeCardLists?.[normalizeThemeName(theme)] || [];
-    if (exemplarNames.length < 6) continue;
-
-    const exemplarData = await fetchCardDataBatchWithProgress(
-      exemplarNames.slice(0, THEME_EXEMPLAR_LIMIT),
-      null
+  for (let rank = 0; rank < themes.length; rank++) {
+    const matches = await findThemeCandidates(
+      themes[rank],
+      collectionData,
+      allOwnedCardData,
+      commanderColors,
+      themeCardLists,
+      corpusCards
     );
-    const phrases = deriveThemeFingerprint(Array.from(exemplarData.values()), corpusCards);
-    for (const name of findFingerprintMatches(phrases, collectionData, allOwnedCardData, commanderColors)) {
-      candidates.add(name);
+
+    // Counted once per theme however many passes found it, so `hits` measures
+    // themes served rather than passes run.
+    for (const name of matches) {
+      const existing = candidates.get(name);
+      if (!existing) {
+        candidates.set(name, { rank, hits: 1 });
+        continue;
+      }
+      existing.hits += 1;
+      if (rank < existing.rank) existing.rank = rank;
     }
   }
 

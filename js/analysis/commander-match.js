@@ -8,7 +8,7 @@
 // recommendation pool.
 //
 // Depends on: cards.js, csv.js, deck-stats.js, edhrec.js, manabase.js,
-//   text.js, themes.js, type-plan.js
+//   scryfall.js, text.js, themes.js, type-plan.js
 
 // EDHREC writes a partner pair as "A // B", the very separator a two-faced
 // card's own name uses. A CSV lists a two-faced card under the whole name, so
@@ -39,6 +39,62 @@ function findOwnedRankedCommanders(collection, rankings) {
   }
 
   return owned.sort((a, b) => b.decks - a.decks);
+}
+
+// Owned commanders EDHREC's color pages never listed.
+//
+// findOwnedRankedCommanders reads names alone, which is why it costs no
+// Scryfall traffic -- but it can only see commanders EDHREC ranks, and those
+// pages carry the most-played ones. A collection's obscure or very new legends
+// are absent entirely, so filtering to a color identity showed a shorter list
+// than the collection can actually offer.
+//
+// Answering "what else could head a deck of these colors" needs the card
+// itself: whether it can be a commander at all, and what its identity is. That
+// is why this takes hydrated card data where the ranked scan does not.
+//
+// Backgrounds are excluded for free: canBeCommander's text rule looks for "can
+// be your commander", which a planeswalker commander says and a Background --
+// "Commander creatures you own have ..." -- does not.
+function findOwnedUnrankedCommanders(collection, cardData, rankedCommanders) {
+  const ranked = new Set();
+  for (const commander of rankedCommanders || []) {
+    for (const name of commander.names || []) {
+      ranked.add(normalizeCardName(name));
+      ranked.add(normalizeCardName(getPrimaryCardName(name)));
+    }
+  }
+
+  const unranked = [];
+  const seen = new Set();
+
+  for (const entry of getCollectionEntries(collection)) {
+    const normalizedName = entry.normalizedName;
+    if (ranked.has(normalizedName) || seen.has(normalizedName)) continue;
+
+    const card = cardData.get(normalizedName)
+      || cardData.get(normalizeCardName(getPrimaryCardName(normalizedName)));
+    if (!card) continue;
+    if (!canBeCommander(card)) continue;
+
+    seen.add(normalizedName);
+    unranked.push({
+      name: card.name,
+      // EDHREC often has a page for a commander its color pages do not rank,
+      // so derive the slug rather than give up on the match check.
+      slug: toEdhrecSlug(getPrimaryCardName(card.name)),
+      decks: 0,
+      colors: Array.isArray(card.colors) ? card.colors : [],
+      names: [card.name],
+      isPair: false,
+      deckSize: 99,
+      unranked: true
+    });
+  }
+
+  // No deck count to rank these by, so name order is the only one that means
+  // anything.
+  return unranked.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // Every card of this commander's pool the collection can actually play: owned,

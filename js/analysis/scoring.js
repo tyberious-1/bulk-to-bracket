@@ -147,9 +147,48 @@ const ROLE_TEXT_PATTERNS = {
 
 const SUPPORT_ROLES = ["ramp", "draw", "removal", "wipe"];
 
+// A sweeper pattern can be narrowed by the words that follow it, and the
+// widened wipe list above matches on the prefix alone. "Deals 4 damage to each
+// creature with flying" is an anti-flier card, not a board wipe.
+//
+// This is not a rare edge. Green has almost no real sweepers, so the false
+// positives were the *only* wipes it had: all six cards this collection offered
+// a mono-green deck -- Needle Storm, Silklash Spider, Gale Force, Canopy Surge,
+// Howling Gale, Clip Wings -- clear nothing but fliers. The support phase runs
+// before anything else and has a wipe target to hit, so every green build spent
+// two or three slots on the same handful of them. Silklash Spider turned up in
+// 11 of 12 green decks and Needle Storm in 10, every one a generic backfill.
+//
+// One-sided sweepers stay sweepers on purpose: "each creature your opponents
+// control" clears three boards at a four-player table, which is the job.
+const WIPE_EVASION_QUALIFIER = /\b(?:with|without)\s+(?:flying|reach|defender|shadow|horsemanship|protection)\b/;
+
+// True when every occurrence of the pattern is narrowed to a slice of the board
+// rather than the whole of it. Bounded to the sentence the match sits in, so a
+// later clause like "Creatures with flying can't block" cannot disqualify a
+// genuine sweeper.
+function wipeMatchIsNarrowed(text, pattern) {
+  let from = 0;
+
+  for (;;) {
+    const at = text.indexOf(pattern, from);
+    if (at === -1) return true;
+
+    const sentence = text.slice(at + pattern.length).split(".")[0];
+    if (!WIPE_EVASION_QUALIFIER.test(sentence)) return false;
+
+    from = at + pattern.length;
+  }
+}
+
 function cardMatchesRole(card, role) {
   const text = getCardText(card);
-  return (ROLE_TEXT_PATTERNS[role] || []).some((pattern) => text.includes(pattern));
+
+  return (ROLE_TEXT_PATTERNS[role] || []).some((pattern) => {
+    if (!text.includes(pattern)) return false;
+    if (role === "wipe" && wipeMatchIsNarrowed(text, pattern)) return false;
+    return true;
+  });
 }
 
 // One role per card, first match winning, which is what the builder's role

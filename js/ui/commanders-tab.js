@@ -10,6 +10,11 @@
 //   edhrec.js, scryfall.js, state.js, status.js, text.js
 
 let ownedCommanders = [];
+// Commanders EDHREC does not rank, found by reading the collection's card data
+// rather than EDHREC's lists. Collection-wide rather than per-color, so the
+// scan runs at most once and every colour filter afterwards is instant.
+let unrankedCommanders = [];
+let unrankedScanDone = false;
 let commanderMatches = new Map();
 let commanderSortMode = "decks";
 let commanderScanBusy = false;
@@ -38,6 +43,8 @@ function activateTab(tabName) {
 // rebuilds the list on the spot rather than asking to rank again.
 function resetCommanderScan() {
   ownedCommanders = [];
+  unrankedCommanders = [];
+  unrankedScanDone = false;
   commanderMatches = new Map();
 
   const collection = getOwnedCollection();
@@ -100,6 +107,18 @@ function getSortedCommanders() {
   });
 }
 
+// Only offered under a colour filter: unranked commanders are the long tail of
+// the collection, and the unfiltered list is already every commander EDHREC
+// ranks.
+function getFilteredUnrankedCommanders() {
+  if (!commanderColorFilter.size) return [];
+  return unrankedCommanders.filter(matchesColorFilter);
+}
+
+function findOwnedCommanderBySlugInList(slug, list) {
+  return list.find((commander) => commander.slug === slug) || null;
+}
+
 function renderMatchCell(commander) {
   const match = commanderMatches.get(commander.slug);
 
@@ -114,6 +133,27 @@ function renderMatchCell(commander) {
   return `
     <div class="match-value">${match.percent}%</div>
     <div class="match-detail">${match.usable} candidates / ${match.slots} slots</div>
+  `;
+}
+
+// One row, ranked or not. An unranked commander has no deck count to show --
+// EDHREC may still have a page for it, so the Check button is offered all the
+// same and records "no EDHREC page" if there is none.
+function renderCommanderRow(commander, position) {
+  return `
+    <tr${commander.unranked ? ` class="commander-unranked"` : ""}>
+      <td class="col-rank">${position}</td>
+      <td>
+        <span class="commander-name">${escapeHtml(commander.name)}</span>
+        ${commander.isPair ? `<span class="commander-tag">partners</span>` : ""}
+      </td>
+      <td class="col-colors">${renderCommanderPips(commander.colors)}</td>
+      <td class="col-decks">${commander.unranked ? `<span class="match-empty">&mdash;</span>` : commander.decks.toLocaleString()}</td>
+      <td class="col-match">${renderMatchCell(commander)}</td>
+      <td class="col-build">
+        <button class="build-btn" type="button" data-build-slug="${escapeHtml(commander.slug)}">Build</button>
+      </td>
+    </tr>
   `;
 }
 
@@ -144,8 +184,10 @@ function renderCommandersTab() {
   }
 
   const rows = getSortedCommanders();
-  const checkedCount = rows.filter(getCommanderMatchResult).length;
+  const unrankedRows = getFilteredUnrankedCommanders();
+  const checkedCount = [...rows, ...unrankedRows].filter(getCommanderMatchResult).length;
   const filtered = commanderColorFilter.size > 0;
+  const canScanUnranked = filtered && !unrankedScanDone;
 
   panel.innerHTML = `
     <div class="color-filter">
@@ -163,10 +205,11 @@ function renderCommandersTab() {
     <div class="commanders-toolbar">
       <div class="commanders-count">
         ${filtered
-          ? `${rows.length} of ${ownedCommanders.length} commanders shown`
+          ? `${rows.length} of ${ownedCommanders.length} commanders shown${unrankedRows.length ? ` &middot; ${unrankedRows.length} unranked` : ""}`
           : `${rows.length} commanders owned`} &middot; ${checkedCount} checked
       </div>
       <div class="commanders-actions">
+        ${canScanUnranked ? `<button id="findUnrankedBtn" type="button">Find unranked commanders</button>` : ""}
         <button id="sortCommandersBtn" type="button">
           Sort by ${commanderSortMode === "match" ? "EDHREC decks" : "match"}
         </button>
@@ -186,28 +229,22 @@ function renderCommandersTab() {
         </tr>
       </thead>
       <tbody>
-        ${rows.length ? "" : `
+        ${rows.length || unrankedRows.length ? "" : `
           <tr>
             <td colspan="6" class="commanders-empty">
-              You own no commander of exactly that color identity.
+              You own no commander of exactly that color identity.${canScanUnranked
+                ? " Commanders EDHREC does not rank are not searched yet -- use Find unranked commanders."
+                : ""}
             </td>
           </tr>
         `}
-        ${rows.map((commander, index) => `
-          <tr>
-            <td class="col-rank">${index + 1}</td>
-            <td>
-              <span class="commander-name">${escapeHtml(commander.name)}</span>
-              ${commander.isPair ? `<span class="commander-tag">partners</span>` : ""}
-            </td>
-            <td class="col-colors">${renderCommanderPips(commander.colors)}</td>
-            <td class="col-decks">${commander.decks.toLocaleString()}</td>
-            <td class="col-match">${renderMatchCell(commander)}</td>
-            <td class="col-build">
-              <button class="build-btn" type="button" data-build-slug="${escapeHtml(commander.slug)}">Build</button>
-            </td>
+        ${rows.map((commander, index) => renderCommanderRow(commander, index + 1)).join("")}
+        ${unrankedRows.length ? `
+          <tr class="commanders-group">
+            <td colspan="6">Not ranked by EDHREC &middot; ${unrankedRows.length} owned</td>
           </tr>
-        `).join("")}
+        ` : ""}
+        ${unrankedRows.map((commander, index) => renderCommanderRow(commander, rows.length + index + 1)).join("")}
       </tbody>
     </table>
   `;
@@ -247,6 +284,47 @@ async function rankOwnedCommanders() {
   } catch (error) {
     console.error(error);
     showToast(error.message || "Unable to read EDHREC commander rankings.");
+    updateProgress(0, "Error");
+  } finally {
+    setCommanderScanBusy(false);
+    renderCommandersTab();
+  }
+}
+
+// The one place this tab pays for Scryfall data.
+//
+// Ranking reads names alone; deciding whether an unlisted card could be a
+// commander needs the card. That is the whole collection hydrated -- about 84
+// requests cold, but free after a build, which fills the same persisted cache
+// with every owned name. Kept behind a button for the cold case.
+async function scanUnrankedCommanders() {
+  const collection = getOwnedCollection();
+  if (!collection || commanderScanBusy) return;
+
+  setCommanderScanBusy(true);
+  try {
+    updateProgress(5, "Reading your collection...");
+    const cardData = await fetchCardDataBatchWithProgress(
+      collection.uniqueRawNames,
+      (done, total) => {
+        updateProgress(
+          5 + Math.floor((done / Math.max(total, 1)) * 90),
+          "Reading your collection...",
+          `${done} / ${total}`
+        );
+      }
+    );
+
+    unrankedCommanders = findOwnedUnrankedCommanders(collection, cardData, ownedCommanders);
+    unrankedScanDone = true;
+
+    updateProgress(100, "Collection scanned", `${unrankedCommanders.length} unranked commanders`);
+    if (!unrankedCommanders.length) {
+      showToast("Every commander you own is already ranked by EDHREC.");
+    }
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || "Unable to scan the collection for commanders.");
     updateProgress(0, "Error");
   } finally {
     setCommanderScanBusy(false);
@@ -329,7 +407,8 @@ async function buildFromCommander(commander) {
 }
 
 function findOwnedCommanderBySlug(slug) {
-  return ownedCommanders.find((commander) => commander.slug === slug) || null;
+  return findOwnedCommanderBySlugInList(slug, ownedCommanders)
+    || findOwnedCommanderBySlugInList(slug, unrankedCommanders);
 }
 
 function bindCommandersTab() {
@@ -343,6 +422,11 @@ function bindCommandersTab() {
   panel.addEventListener("click", (event) => {
     if (event.target.id === "rankCommandersBtn") {
       rankOwnedCommanders();
+      return;
+    }
+
+    if (event.target.id === "findUnrankedBtn") {
+      scanUnrankedCommanders();
       return;
     }
 

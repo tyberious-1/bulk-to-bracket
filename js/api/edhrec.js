@@ -167,7 +167,42 @@ function extractLikelyTags(value, weights) {
   }
 }
 
+// EDHREC's own answer to "what is this commander's deck about", in
+// panels.taglinks: theme names with the number of decks behind each.
+//
+// Preferred over extractLikelyTags below, which walks the whole payload and
+// cannot tell a theme from a page section or from the name of a similar
+// commander. For a popular commander the walk lands on the right answer by
+// weight of numbers; for a niche one the junk outranks the real themes
+// entirely. Abdel Adrian's page lists Blink and Tokens, and the walk returned
+// "brago, king eternal | newcards | highsynergycards | topcards | gamechangers"
+// -- five strings, not one of them a theme, leaving the backfill nothing to
+// aim at and the whole deck filled generically.
+//
+// Only the shape of the name is checked here. The section-label list is not,
+// because a taglink is a theme by construction: "Artifacts" in this panel means
+// the archetype, where the same word as a cardlist header means a card type.
+function extractEdhrecTaglinkThemes(data) {
+  const taglinks = data?.panels?.taglinks;
+  if (!Array.isArray(taglinks)) return [];
+
+  return taglinks
+    .map((tag) => ({
+      name: normalizeThemeName(tag?.value || tag?.slug || ""),
+      count: Number(tag?.count || 0)
+    }))
+    .filter((tag) => isPlausibleThemeName(tag.name))
+    .sort((a, b) => b.count - a.count)
+    .map((tag) => tag.name);
+}
+
 function extractEdhrecTagsFromData(data) {
+  const named = extractEdhrecTaglinkThemes(data);
+  if (named.length) return named.slice(0, 5);
+
+  // No taglinks panel at all -- fall back to reading the payload for anything
+  // theme-shaped, section labels and similar commanders filtered out as best
+  // they can be.
   const weights = new Map();
   extractLikelyTags(data, weights);
   return Array.from(weights.entries())

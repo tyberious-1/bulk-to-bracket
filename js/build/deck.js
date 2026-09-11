@@ -24,11 +24,34 @@
 // and the slot goes to something that does a different job.
 const FALLBACK_REDUNDANCY_WEIGHT = 4;
 
-// What a card is worth for serving the deck's theme. It has to clear the
-// generic bonuses in scoreFallbackCard -- base 5, curve 4, "is a creature" 6 --
-// or a vanilla body in the right colors goes on beating a card that does what
-// the deck is built to do.
-const FALLBACK_THEME_BONUS = 10;
+// Theme fit, for ordering within the on-theme tier.
+//
+// This used to be a flat +10 added to every theme match, competing against
+// generic bonuses that add up to about the same -- base 5, curve 4, "is a
+// creature" 6 -- so a vanilla body in the right colors regularly outbid a card
+// doing what the deck was built to do. The tier split below settles that
+// contest instead: theme cards are no longer scored against generic ones, only
+// against each other. What is left for the score to decide is which theme card,
+// and there the answer is the one serving the theme EDHREC ranked highest, or
+// the most of them.
+//
+// Sized to matter against the curve and role terms it now competes with, which
+// span about 4 points each.
+const FALLBACK_THEME_RANK_BONUS = 12;
+const FALLBACK_THEME_RANK_DECAY = 2;
+const FALLBACK_THEME_BREADTH_BONUS = 3;
+
+// Floored rather than allowed to reach zero: a fifth-ranked theme is still the
+// commander's, and should still beat a card that matches nothing.
+function getThemeFitBonus(match) {
+  if (!match) return 0;
+
+  const rank = Math.max(0, Number(match.rank) || 0);
+  const hits = Math.max(1, Number(match.hits) || 1);
+
+  return Math.max(2, FALLBACK_THEME_RANK_BONUS - rank * FALLBACK_THEME_RANK_DECAY)
+    + (hits - 1) * FALLBACK_THEME_BREADTH_BONUS;
+}
 
 // exemptTraits holds what the deck is *trying* to repeat. A Dragon tribal
 // commander wants its fourth and tenth Dragon as much as its first, so charging
@@ -50,6 +73,31 @@ function getRedundancyPenalty(keys, redundancyCounts) {
     if (seen > mostRepeated) mostRepeated = seen;
   }
   return mostRepeated * FALLBACK_REDUNDANCY_WEIGHT;
+}
+
+// The backfill is gated on theme rather than nudged towards it: the on-theme
+// tier is offered to every picker first, and the generic tier is only reached
+// once nothing on-theme can fill the slot.
+//
+// Scoring the two together never worked, because the terms that decide a
+// generic card -- curve, "is a creature", role -- are the same for every
+// commander sharing a color identity. Whatever weight the theme term carried,
+// four Dimir commanders drew nearly half the same backfill. Ordering by tier
+// makes theme the first question and leaves score to break ties inside it.
+function pickFromTiers(tiers, pick) {
+  for (const tier of tiers) {
+    const found = pick(tier);
+    if (found) return found;
+  }
+  return null;
+}
+
+function isThemeFallback(card) {
+  return Boolean(card && card.themeMatch);
+}
+
+function getFallbackSource(card) {
+  return isThemeFallback(card) ? "fallback-theme" : "fallback-generic";
 }
 
 // Same contract as pickBestCardForBucket, but the ranking has to be re-decided
@@ -119,9 +167,10 @@ function buildDeckFromScoredPool(
   // Cards besides the commanders: 99 alone, 98 for a pair.
   const deckSize = Number(options.deckSize) || 99;
 
-  // Owned cards that serve one of this commander's themes, resolved before the
+  // Owned cards that serve one of this commander's themes, mapped to the rank
+  // of the best theme they serve and how many they serve. Resolved before the
   // build because finding them can require a network lookup.
-  const themeCardNames = options.themeCardNames instanceof Set ? options.themeCardNames : new Set();
+  const themeCardNames = options.themeCardNames instanceof Map ? options.themeCardNames : new Map();
 
   const strategyProfile = getCommanderStrategyProfile(commanderName, commanderThemes, commanderColors);
 
@@ -160,7 +209,8 @@ function buildDeckFromScoredPool(
 
   const curvePlan = buildCurvePlan(targetNonlandCount);
 
-  const fallbackPool = [];
+  const themeFallbackPool = [];
+  const genericFallbackPool = [];
   const collectionEntries = getCollectionEntries(collectionData);
   for (const entry of collectionEntries) {
     const normalizedName = entry.normalizedName;
@@ -175,24 +225,34 @@ function buildDeckFromScoredPool(
     if (fit.tier >= 2) continue;
     const modeFitAdjustment = fit.tier === 0 ? 12 : -10;
 
-    fallbackPool.push({
+    const themeMatch = themeCardNames.get(normalizedName) || null;
+
+    const candidate = {
       name: card.name,
       role: detectRole(card),
       score: scoreFallbackCard(card, commanderThemes, strategyProfile, commanderColors, modePrefs)
         + modeFitAdjustment
-        + (themeCardNames.has(normalizedName) ? FALLBACK_THEME_BONUS : 0),
+        + getThemeFitBonus(themeMatch),
       type: getCardType(card),
       cmc: card.cmc,
       colors: card.colors,
       modeFitTier: fit.tier,
+      themeMatch,
       // Precomputed: the pickers read these once per candidate per slot.
       redundancyKeys: getCardRedundancyKeys(card, planTraits),
       roles: getRoleContributions(card)
-    });
+    };
+
+    if (themeMatch) themeFallbackPool.push(candidate);
+    else genericFallbackPool.push(candidate);
   }
 
+  // Asked in order, so a generic card is only ever reached once the on-theme
+  // tier has nothing left that fits the slot.
+  const fallbackTiers = [themeFallbackPool, genericFallbackPool];
+
   scoredNonlands.sort((a, b) => b.score - a.score);
-  fallbackPool.sort((a, b) => b.score - a.score);
+  for (const tier of fallbackTiers) tier.sort((a, b) => b.score - a.score);
 
   const buckets = ["Creature", "Artifact", "Enchantment", "Instant", "Sorcery", "Planeswalker"];
 
@@ -309,7 +369,7 @@ function buildDeckFromScoredPool(
       continue;
     }
 
-    const fallbackPick = pickBestForRole(fallbackPool, neediestRole, true);
+    const fallbackPick = pickFromTiers(fallbackTiers, (tier) => pickBestForRole(tier, neediestRole, true));
     if (!fallbackPick) {
       // Nothing owned and legal can serve this role -- a collection with no
       // board wipes in these colors, say. Stop asking rather than spin.
@@ -317,10 +377,7 @@ function buildDeckFromScoredPool(
       continue;
     }
 
-    addCard(
-      fallbackPick,
-      getDeckTypeBucket(fallbackPick.type || "") === "Creature" ? "fallback-creature" : "fallback"
-    );
+    addCard(fallbackPick, getFallbackSource(fallbackPick));
   }
 
   // Phase 1: hit the EDHREC type mix using EDHREC-owned matches first.
@@ -333,9 +390,10 @@ function buildDeckFromScoredPool(
         continue;
       }
 
-      const fallbackPick = pickBestFallbackCard(fallbackPool, usedNames, commanderKeys, bucket, curvePlan, redundancyCounts);
+      const fallbackPick = pickFromTiers(fallbackTiers, (tier) =>
+        pickBestFallbackCard(tier, usedNames, commanderKeys, bucket, curvePlan, redundancyCounts));
       if (fallbackPick) {
-        addCard(fallbackPick, bucket === "Creature" ? "fallback-creature" : "fallback");
+        addCard(fallbackPick, getFallbackSource(fallbackPick));
         continue;
       }
 
@@ -353,31 +411,33 @@ function buildDeckFromScoredPool(
       continue;
     }
 
-    const fallbackPick = pickBestFallbackCard(fallbackPool, usedNames, commanderKeys, neededBucket, curvePlan, redundancyCounts);
+    const fallbackPick = pickFromTiers(fallbackTiers, (tier) =>
+      pickBestFallbackCard(tier, usedNames, commanderKeys, neededBucket, curvePlan, redundancyCounts));
     if (fallbackPick) {
-      addCard(fallbackPick, neededBucket === "Creature" ? "fallback-creature" : "fallback");
+      addCard(fallbackPick, getFallbackSource(fallbackPick));
     }
   }
 
   // Phase 3: fill the remaining slots with the best cards, prioritizing whatever type and role is still short.
-  const combinedPool = [...scoredNonlands, ...fallbackPool];
+  //
+  // The EDHREC pool rides along with both tiers rather than sitting in one of
+  // them: it is this commander's own card list, so it is on-theme by
+  // construction and should never be skipped in favour of a generic backfill.
+  const flexibleTiers = fallbackTiers.map((tier) => [...scoredNonlands, ...tier]);
   while (deck.length < targetNonlandCount) {
-    const best = chooseBestFlexibleCard(combinedPool, deck, typePlan, roleTargets, usedNames, commanderKeys);
+    const best = pickFromTiers(flexibleTiers, (tier) =>
+      chooseBestFlexibleCard(tier, deck, typePlan, roleTargets, usedNames, commanderKeys));
     if (!best) break;
 
-    const bucket = getDeckTypeBucket(best.type || best.type_line || "");
-    const source = scoredNonlands.includes(best)
-      ? "edhrec"
-      : bucket === "Creature" ? "fallback-creature" : "fallback";
-
-    addCard(best, source);
+    addCard(best, scoredNonlands.includes(best) ? "edhrec" : getFallbackSource(best));
   }
 
   // Phase 4: emergency creature backfill if the collection was extremely spell-heavy.
   const creatureRule = typePlan?.buckets?.Creature;
   if (creatureRule) {
     while ((countByType(deck).Creature || 0) < creatureRule.min && deck.length) {
-      const fallbackCreature = pickBestFallbackCard(fallbackPool, usedNames, commanderKeys, "Creature", curvePlan, redundancyCounts);
+      const fallbackCreature = pickFromTiers(fallbackTiers, (tier) =>
+        pickBestFallbackCard(tier, usedNames, commanderKeys, "Creature", curvePlan, redundancyCounts));
       if (!fallbackCreature) break;
 
       let replaceIndex = -1;
@@ -400,7 +460,7 @@ function buildDeckFromScoredPool(
       releaseCurvePick(curvePlan, deck[replaceIndex].cmc);
       adjustRedundancy(deck[replaceIndex], -1);
       deck.splice(replaceIndex, 1);
-      addCard(fallbackCreature, "fallback-creature");
+      addCard(fallbackCreature, getFallbackSource(fallbackCreature));
     }
   }
 
@@ -513,8 +573,8 @@ function generateCardReasons(card, commanderThemes, strategyProfile, commanderCo
   }
 
   if (card.source === "edhrec") reasons.push("edhrec match");
-  if (card.source === "fallback") reasons.push("collection fallback");
-  if (card.source === "fallback-creature") reasons.push("creature fallback");
+  if (card.source === "fallback-theme") reasons.push("theme fallback");
+  if (card.source === "fallback-generic") reasons.push("collection fallback");
 
   return Array.from(new Set(reasons)).slice(0, 5);
 }

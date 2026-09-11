@@ -1,7 +1,7 @@
 // Scryfall access: single-card lookups, autocomplete, and the batched
 // collection endpoint used to hydrate an entire uploaded CSV.
 //
-// Depends on: cache.js, constants.js, http.js, text.js
+// Depends on: cache.js, constants.js, http.js, text.js, themes.js
 
 function pickCommanderImage(data) {
   if (data.image_uris?.normal) return data.image_uris.normal;
@@ -176,22 +176,22 @@ async function fetchCardDataBatchWithProgress(cardNames, progressCallback) {
   return collectCachedCards(uniqueNames);
 }
 
-// Scryfall's functional tags (otag:) are curated by hand rather than derived
-// from card text, so they see what a text search cannot: otag:landfall returns
-// 174 Gruul cards where oracle:landfall returns 120, the difference being cards
-// that trigger on a land entering without ever using the word.
+// A tag matching more of the format than this is describing Magic rather than
+// a deck theme. Measured against a color identity, the two worst offenders --
+// triggered-ability and activated-ability -- sit at 6,235 and 4,510, while the
+// broadest genuine theme, five-color burn, reaches 3,028. One page of a
+// mechanic tag is just the format's most-played staples, which is precisely the
+// generic filler the theme gate exists to keep out.
+const SCRYFALL_THEME_TAG_MAX_CARDS = 3500;
+
+// Cards carrying one functional tag, within a color identity.
 //
-// Only consulted for themes local text matching could not answer. A 404 means
-// Scryfall has no tag by that name, which is the expected answer for a concept
-// like "toolbox" -- not a failure worth reporting.
+// A 404 means Scryfall has no tag by that name. That is the expected answer for
+// most candidates getScryfallThemeTags proposes, so it is not worth reporting.
 //
 // order=edhrec matters: a tag can match thousands of cards, and one page of the
 // most-played beats one page of the alphabetically first.
-async function fetchScryfallThemeCardNames(theme, commanderColors) {
-  const tag = normalizeThemeName(theme).replace(/\s+/g, "-");
-  if (!tag) return [];
-
-  const identity = commanderColors.length ? commanderColors.join("") : "c";
+async function fetchScryfallTaggedCardNames(tag, identity) {
   const query = `otag:${tag} identity<=${identity}`;
   const url = `https://api.scryfall.com/cards/search?q=${encodeURIComponent(query)}&order=edhrec&unique=cards`;
 
@@ -200,9 +200,32 @@ async function fetchScryfallThemeCardNames(theme, commanderColors) {
     if (!response.ok) return [];
 
     const data = await response.json();
+    if (Number(data.total_cards || 0) > SCRYFALL_THEME_TAG_MAX_CARDS) return [];
+
     return Array.isArray(data.data) ? data.data.map((card) => card.name).filter(Boolean) : [];
   } catch (error) {
-    console.warn(`Scryfall theme lookup failed for "${theme}".`, error);
+    console.warn(`Scryfall tag lookup failed for "${tag}".`, error);
     return [];
   }
+}
+
+// Scryfall's functional tags (otag:) are curated by hand rather than derived
+// from card text, so they see what a text search cannot: otag:landfall returns
+// 174 Gruul cards where oracle:landfall returns 120, the difference being cards
+// that trigger on a land entering without ever using the word.
+//
+// Only consulted for themes local text matching could not answer. EDHREC's name
+// for a theme is rarely Scryfall's name for the tag, so several spellings are
+// tried in turn -- see getScryfallThemeTags. The first that returns anything
+// wins; a theme Scryfall has no tag for costs a handful of 404s and falls
+// through to the EDHREC theme-page fingerprint.
+async function fetchScryfallThemeCardNames(theme, commanderColors) {
+  const identity = commanderColors.length ? commanderColors.join("") : "c";
+
+  for (const tag of getScryfallThemeTags(theme)) {
+    const names = await fetchScryfallTaggedCardNames(tag, identity);
+    if (names.length) return names;
+  }
+
+  return [];
 }

@@ -1025,6 +1025,27 @@ button:disabled {
   text-align: right;
 }
 
+/* The divider between the commanders EDHREC ranks and the rest of the
+   collection. Styled as a heading rather than a row so the two groups do not
+   read as one continuous ranking. */
+.commanders-table .commanders-group td {
+  padding: 14px 10px 6px;
+  border-bottom: 1px solid #374151;
+  color: #9ca3af;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.commanders-table tr.commanders-group:hover td {
+  background: none;
+}
+
+.commanders-table .commander-unranked .commander-name {
+  font-weight: 500;
+  color: #d1d5db;
+}
+
 .commander-name {
   font-weight: 600;
 }

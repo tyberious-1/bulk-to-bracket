@@ -176,8 +176,12 @@ function displayBuildBreakdown(deck) {
   const el = document.getElementById("buildBreakdown");
 
   const edhrecCount = deck.filter((c) => c.source === "edhrec").length;
-  const fallbackCreatureCount = deck.filter((c) => c.source === "fallback-creature").length;
-  const fallbackCount = deck.filter((c) => c.source === "fallback").length;
+  // Split by theme fit rather than by card type: the backfill is gated on
+  // theme now, so "how many slots did the gate hold for" is the number worth
+  // reading. A generic count above zero means the collection ran out of
+  // on-theme cards, not that the builder chose to wander.
+  const themeFallbackCount = deck.filter((c) => c.source === "fallback-theme").length;
+  const genericFallbackCount = deck.filter((c) => c.source === "fallback-generic").length;
   const nonbasicCount = deck.filter((c) => c.source === "nonbasic-land").length;
   const basicCount = deck.filter((c) => c.source === "basic-land").length;
 
@@ -186,8 +190,8 @@ function displayBuildBreakdown(deck) {
       <div class="info-card-title">Build Breakdown</div>
       <div class="build-breakdown-grid">
         <div class="build-breakdown-item"><span>EDHREC Matches</span><strong>${edhrecCount}</strong></div>
-        <div class="build-breakdown-item"><span>Fallback Creatures</span><strong>${fallbackCreatureCount}</strong></div>
-        <div class="build-breakdown-item"><span>Other Fallbacks</span><strong>${fallbackCount}</strong></div>
+        <div class="build-breakdown-item"><span>On-Theme Fallbacks</span><strong>${themeFallbackCount}</strong></div>
+        <div class="build-breakdown-item"><span>Generic Fallbacks</span><strong>${genericFallbackCount}</strong></div>
         <div class="build-breakdown-item"><span>Nonbasic Lands</span><strong>${nonbasicCount}</strong></div>
         <div class="build-breakdown-item"><span>Basic Lands</span><strong>${basicCount}</strong></div>
       </div>
