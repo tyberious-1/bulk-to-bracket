@@ -182,23 +182,57 @@ function extractLikelyTags(value, weights) {
 // Only the shape of the name is checked here. The section-label list is not,
 // because a taglink is a theme by construction: "Artifacts" in this panel means
 // the archetype, where the same word as a cardlist header means a card type.
+//
+// The top 5 are always kept -- that much was already working. Beyond that, a
+// theme is admitted only if it clears both an absolute floor and a share of
+// the top theme's count, rather than by a flat rank cutoff.
+//
+// A flat cutoff cannot tell "a real secondary mechanic" from "one deck that
+// happened to get tagged": raising it to a flat 8 pulled in Beasts for
+// Quickbeam on a single deck out of seven, and Angels for Daxos on 4 of 146
+// (2.7%). The two-part test rejects both while admitting The Earth King's
+// actual payoff -- "Power Matters" sits at rank 7, 15 of 91 decks (16.5%),
+// which the flat top-5 dropped entirely and left its whole backfill generic.
+//
+// Both bars are needed together, not either alone: Quickbeam's Beasts clears
+// the 12% relative bar (1 of 7) but not the floor, and Anowon's Reanimator (76
+// decks) clears the floor easily but not the relative bar (6.3% of 1,211) --
+// a real theme, just not this commander's.
+const EDHREC_THEME_BASE_COUNT = 5;
+const EDHREC_THEME_MAX_COUNT = 8;
+const EDHREC_THEME_MIN_ABSOLUTE_DECKS = 10;
+const EDHREC_THEME_MIN_RELATIVE_SHARE = 0.12;
+
 function extractEdhrecTaglinkThemes(data) {
   const taglinks = data?.panels?.taglinks;
   if (!Array.isArray(taglinks)) return [];
 
-  return taglinks
+  const ranked = taglinks
     .map((tag) => ({
       name: normalizeThemeName(tag?.value || tag?.slug || ""),
       count: Number(tag?.count || 0)
     }))
     .filter((tag) => isPlausibleThemeName(tag.name))
-    .sort((a, b) => b.count - a.count)
-    .map((tag) => tag.name);
+    .sort((a, b) => b.count - a.count);
+
+  if (!ranked.length) return [];
+
+  const topCount = ranked[0].count || 1;
+  const chosen = ranked.slice(0, EDHREC_THEME_BASE_COUNT);
+
+  for (const tag of ranked.slice(EDHREC_THEME_BASE_COUNT)) {
+    if (chosen.length >= EDHREC_THEME_MAX_COUNT) break;
+    if (tag.count < EDHREC_THEME_MIN_ABSOLUTE_DECKS) continue;
+    if (tag.count < topCount * EDHREC_THEME_MIN_RELATIVE_SHARE) continue;
+    chosen.push(tag);
+  }
+
+  return chosen.map((tag) => tag.name);
 }
 
 function extractEdhrecTagsFromData(data) {
   const named = extractEdhrecTaglinkThemes(data);
-  if (named.length) return named.slice(0, 5);
+  if (named.length) return named;
 
   // No taglinks panel at all -- fall back to reading the payload for anything
   // theme-shaped, section labels and similar commanders filtered out as best

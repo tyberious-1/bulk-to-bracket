@@ -232,9 +232,13 @@ function detectTribalThemes(cards) {
 }
 
 async function detectCommanderThemes(edhrecCards, edhrecTags, collectionData, allOwnedCardData, commanderColors) {
+  // edhrecTags already carries extractEdhrecTagsFromData's own count-based
+  // selection (see EDHREC_THEME_MAX_COUNT in edhrec.js) -- re-truncating to 5
+  // here would throw away exactly the secondary themes that selection was
+  // built to keep, "Power Matters" among them.
   const cleanedTags = Array.from(new Set((edhrecTags || []).map(normalizeThemeName).filter(Boolean)));
   if (cleanedTags.length) {
-    return cleanedTags.slice(0, 5);
+    return cleanedTags;
   }
 
   const themeCards = [];

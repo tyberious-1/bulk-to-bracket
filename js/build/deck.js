@@ -281,7 +281,17 @@ function buildDeckFromScoredPool(
     if (!card) return false;
     const key = normalizeCardName(card.name);
     if (usedNames.has(key) || commanderKeys.has(key)) return false;
-    deck.push({ ...card, source });
+
+    // Candidate objects (scoredNonlands, both fallback tiers) never carry
+    // oracle text -- only name/type/cmc/colors/score -- so getRoleContributions
+    // returns [] if called on one directly. Resolved here, once, against the
+    // real collection record, and stashed on the deck entry as `roles`: this is
+    // the only reliable way anything downstream (getSupportPackageCounts, and
+    // through it bracket.js) can read "every job this card does" rather than
+    // silently getting nothing back.
+    const roles = getRoleContributions(getRedundancySource(card) || card);
+
+    deck.push({ ...card, source, roles });
     usedNames.add(key);
     recordCurvePick(curvePlan, card.cmc);
     adjustRedundancy(card, 1);

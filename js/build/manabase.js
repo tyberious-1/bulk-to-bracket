@@ -103,6 +103,67 @@ function getLandManaProfile(card) {
     }
   }
 
+  // A "sacrifice this land: search your library for a basic Swamp, Mountain,
+  // or Forest card" effect (Jund Panorama, Grasslands, Krosan Verge...), or the
+  // untyped "search your library for a basic land card" (Evolving Wilds,
+  // Terramorphic Expanse, Ash Barrens), never says "add" -- it doesn't produce
+  // mana itself, it becomes a different land -- so the loop above never sees
+  // it. Scanned separately here, one line at a time to match how the loop
+  // above is already scoped, so an unrelated ability elsewhere on the card
+  // can't attach a color this clause never named.
+  //
+  // A typed fetch is filed as reliable, the same as a typed dual, not
+  // conditional: "reliable" already means "any one of these colors, your
+  // choice" rather than "all of them at once" -- a Land - Forest Island
+  // doesn't tap for both simultaneously either. Once one of these cracks it
+  // behaves exactly like a basic forever after, which is the same guarantee a
+  // dual gives, just decided once at crack time instead of re-decided every
+  // turn. An untyped fetch is filed as flexible instead, one slot more
+  // permissive than a typed one -- it can become any of the deck's colors, not
+  // a fixed subset, the same shape "add one mana of the chosen color" already
+  // gets credit for above. What a dual does NOT cost that either of these does
+  // is a real activation: mana plus sacrificing the land itself, and usually a
+  // tapped basic at the end of it. searchesForBasics flags that, so
+  // evaluateNonbasicLand can charge for the setup instead of silently
+  // pretending it is free.
+  //
+  // Measured against this collection: 13 owned nonbasic lands carry one of
+  // these two effects (Obscura Storefront, Grasslands, Krosan Verge, Jund
+  // Panorama, Naya Panorama, Sheltering Landscape, Riveteers Overlook typed;
+  // Ash Barrens, Evolving Wilds, Terramorphic Expanse, Warped Landscape,
+  // Myriad Landscape, Blighted Woodland untyped), and every one of them scored
+  // zero relevant colors and ate evaluateNonbasicLand's flat -20 no-fixing
+  // penalty, regardless of how well the fetched types matched the deck.
+  let searchesForBasics = false;
+  for (const line of text.split("\n")) {
+    if (!line.includes("search your library for")) continue;
+
+    let namedType = false;
+    for (const [subtype, color] of Object.entries(BASIC_LAND_SUBTYPE_COLORS)) {
+      if (line.includes(subtype)) {
+        reliable.add(color);
+        namedType = true;
+      }
+    }
+    if (namedType) {
+      searchesForBasics = true;
+      continue;
+    }
+
+    // Evolving Wilds, Terramorphic Expanse, Ash Barrens: "search your library
+    // for a basic land card", no type named at all. This is strictly more
+    // flexible than a typed fetch -- any of the deck's colors, not a fixed
+    // subset -- which is exactly what `flexible` already models for a "mana of
+    // the chosen color" tap. Two lands (Myriad Landscape, Blighted Woodland)
+    // fetch up to two; Myriad Landscape's must share a type, so it only ever
+    // realizes one color despite touching two cards.
+    if (line.includes("basic land card")) {
+      searchesForBasics = true;
+      if (line.includes("two basic land cards") && !line.includes("share a")) flexible += 2;
+      else flexible += 1;
+    }
+  }
+
   // No parsable ability at all: trust produced_mana rather than call the land
   // colorless. Filter lands always print their ability, so this only catches
   // cards whose mana comes from somewhere the text doesn't spell out.
@@ -121,7 +182,8 @@ function getLandManaProfile(card) {
     conditional: sortColorsWubrg(Array.from(conditional)),
     flexible,
     freeAnyColor,
-    freeAnyType
+    freeAnyType,
+    searchesForBasics
   };
 }
 
@@ -189,6 +251,15 @@ function evaluateNonbasicLand(card, commanderColors, strategyProfile, modePrefs,
   if (text.includes("enters tapped")) score -= 2;
   if (text.includes("enters tapped unless")) score += 1;
   if (text.includes("pay 1 life")) score -= 0.5;
+
+  // A dual gives you either of its colors for free, forever, from the turn it
+  // enters. A search-for-a-basic land is charging for the same eventual
+  // guarantee: a real activation (mana plus sacrificing the land), and the
+  // fetched basic itself usually enters tapped on top of that. Charged once
+  // regardless of how many types are named -- the cost is paying the ability,
+  // not paying it once per color it could have fetched.
+  if (mana.searchesForBasics) score -= 3;
+
   if (reliableSources === 0 && relevantConditional.length === 0) score -= 20;
 
   if (strategyProfile.monoColor) {

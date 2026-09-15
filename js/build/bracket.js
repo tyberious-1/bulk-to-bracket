@@ -6,7 +6,7 @@
 // brackets 1 and 2 are defined by what a deck does not do, and summing the
 // things a good deck does have cannot express that.
 //
-// Depends on: cards.js, text.js, themes.js
+// Depends on: cards.js, deck-stats.js, text.js, themes.js
 
 function getBracketLabel(bracket) {
   const labels = {
@@ -41,10 +41,16 @@ function estimateDeckBracket(deck, commanderThemes, commanderColors, commanderNa
   const names = deck.map((c) => normalizeCardName(c.name));
   const nonlands = deck.filter((c) => c.role !== "land");
 
-  const rampCount = nonlands.filter((c) => c.role === "ramp").length;
-  const drawCount = nonlands.filter((c) => c.role === "draw").length;
-  const removalCount = nonlands.filter((c) => c.role === "removal").length;
-  const wipeCount = nonlands.filter((c) => c.role === "wipe").length;
+  // By contribution, not by a card's single primary role -- the same reading
+  // Phase 0 itself used to decide the deck was done drafting for each role.
+  // A card whose primary role is "draw" still counts here if its text also
+  // reads as removal (a counterspell that also cantrips, say), matching what
+  // the builder actually built rather than detectRole's first-match label.
+  const roleCounts = getSupportPackageCounts(deck);
+  const rampCount = roleCounts.ramp.total;
+  const drawCount = roleCounts.draw.total;
+  const removalCount = roleCounts.removal.total;
+  const wipeCount = roleCounts.wipe.total;
 
   const avgCmc =
     nonlands.length > 0
@@ -152,24 +158,27 @@ function estimateDeckBracket(deck, commanderThemes, commanderColors, commanderNa
   if (extraTurnCount === 1) reasons.push("one extra-turn spell, which cannot chain");
   if (compactComboCount === 1) reasons.push("one combo piece, no pair");
   reasons.push(`avg CMC: ${avgCmc.toFixed(2)}`);
-  reasons.push(`ramp/draw/removal/wipes: ${rampCount}/${drawCount}/${removalCount}/${wipeCount}`);
+  reasons.push(`ramp/draw/removal/wipes (by contribution): ${rampCount}/${drawCount}/${removalCount}/${wipeCount}`);
 
   return {
     bracket,
     label: getBracketLabel(bracket),
     score,
     reasons,
-    gameChangers
+    gameChangers,
+    roleCounts
   };
 }
 
 function generateWarnings(deck, commanderThemes, bracketInfo) {
   const warnings = [];
   const creatures = deck.filter((c) => getCardType(c).includes("creature")).length;
-  const ramp = deck.filter((c) => c.role === "ramp").length;
-  const draw = deck.filter((c) => c.role === "draw").length;
-  const removal = deck.filter((c) => c.role === "removal").length;
-  const wipes = deck.filter((c) => c.role === "wipe").length;
+  // By contribution (estimateDeckBracket already computed this once) rather
+  // than a card's single primary role -- see the comment there.
+  const ramp = bracketInfo.roleCounts.ramp.total;
+  const draw = bracketInfo.roleCounts.draw.total;
+  const removal = bracketInfo.roleCounts.removal.total;
+  const wipes = bracketInfo.roleCounts.wipe.total;
   const basics = deck.filter((c) => c.source === "basic-land").length;
   const nonbasics = deck.filter((c) => c.source === "nonbasic-land").length;
   const fallbackCards = deck.filter((c) => c.source === "fallback-theme" || c.source === "fallback-generic").length;

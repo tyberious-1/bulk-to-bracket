@@ -117,9 +117,73 @@ function isGenericStaple(card) {
 // Shared by detectRole and getRoleContributions so the two can never disagree
 // about what counts as ramp.
 const ROLE_TEXT_PATTERNS = {
-  ramp: ["add {", "create a treasure", "create treasure", "search your library for a land"],
+  // "Add {" catches mana rocks/dorks and the land-search trigger below catches
+  // fetch effects, and neither matches an extra-land-drop effect -- Exploration,
+  // Azusa's Many Journeys, Ghirapur Orrery -- which ramps by a different
+  // mechanism (more lands per turn, not more mana per land). None of this
+  // collection's 6 owned extra-land-drop cards were reaching any pattern here;
+  // two (Ghirapur Orrery, Beanstalk Wurm) got no role at all.
+  //
+  // "search your library for" is a trigger phrase here, not a literal match on
+  // its own -- cardMatchesRole narrows it with searchesLibraryForLand below.
+  // The old literal pattern was "search your library for a land", which only
+  // matches that exact untyped wording. Nearly every real land tutor is typed
+  // differently: "for a basic land card", "for a basic Forest card", "for a
+  // Mountain card" (a cycling reminder). Enumerating every basic-type
+  // combination as flat substrings isn't tenable -- six types times
+  // basic/untyped times singular/plural -- so this collection's 127 owned land
+  // tutors were caught 3 different ways and missed the other 124, Cultivate and
+  // Rampant Growth included.
+  // "less to cast" is a trigger for cost reduction ("Spells you cast cost {1}
+  // less to cast", "This spell costs {2} less to cast if..."), and covers every
+  // magnitude with one substring rather than enumerating {1} through {5} --
+  // MTG's templating always ends the clause with that exact phrase regardless
+  // of the number. "convoke" and "affinity for" are their own fixed reminder
+  // text, no magnitude to worry about. All three accelerate the game plan the
+  // same way a mana rock does; they were previously invisible to ramp
+  // entirely. 113 owned cards carry one of the three.
+  ramp: [
+    "add {", "create a treasure", "create treasure", "search your library for",
+    "play an additional land", "play two additional lands",
+    "less to cast", "convoke", "affinity for"
+  ],
   draw: ["draw a card", "draw two cards", "draw three cards", "whenever you draw"],
-  removal: ["destroy target", "exile target", "counter target spell", "return target permanent"],
+  // Green rarely gets "destroy target creature" and answers a board almost
+  // entirely through fight and power-damage effects instead -- across this
+  // collection's 48 owned mono-green fight/power-damage cards, exactly none
+  // were reaching any of these four patterns. Every fight/power-damage removal
+  // slot in every green deck was falling through to no role at all, which the
+  // support-package phase reads as "the collection owns 8 fewer removal cards
+  // than it does," pushing generic backfill in to make up a gap that wasn't
+  // really there.
+  //
+  // Both the "fights"/"fight" verb forms are needed: MTG templates them
+  // differently depending on the sentence's grammatical subject ("it fights
+  // target creature" vs. "you may have it fight target creature"). "fight
+  // each other" covers the "choose target creature you control and target
+  // creature you don't control ... fight each other" template, which refers
+  // back to two already-named creatures rather than repeating "target".
+  // "damage to target creature" catches fixed-amount burn removal the same
+  // way "damage equal to its power to" above catches fight-adjacent burn --
+  // one substring covers every magnitude ("deals 2 damage...", "deals 5
+  // damage...") since the amount sits before the phrase, not inside it.
+  // "target opponent/player sacrifices" is the edict this file's own comment
+  // on the wipe list below already says is removal, not a wipe -- it just was
+  // never added. "return target creature to its owner's hand" is bounce,
+  // template-fixed the same way. None of the three have a numeral to worry
+  // about; "gets -" does (see hasLethalStatDrop below).
+  removal: [
+    "destroy target", "exile target", "counter target spell", "return target permanent",
+    "fights target creature", "fight target creature",
+    "fights up to one target creature", "fight up to one target creature",
+    "fights another target creature", "fight another target creature",
+    "fight each other",
+    "damage equal to its power to",
+    "damage to target creature",
+    "target opponent sacrifices", "target player sacrifices",
+    "return target creature to its owner's hand",
+    "gets -"
+  ],
   // Sweepers are written a dozen ways and this list used to know three of them,
   // one of which ("each creature gets") matches no card ever printed -- the
   // wording is "all creatures get -X/-X". Across 6,056 owned nonland cards the
@@ -181,10 +245,58 @@ function wipeMatchIsNarrowed(text, pattern) {
   }
 }
 
+// "search your library for" alone would also match a creature tutor, an
+// artifact tutor, any tutor at all -- it only counts as ramp if the same
+// sentence names something land-shaped. Inverted from wipeMatchIsNarrowed:
+// that one disqualifies a match unless every occurrence is narrowed; this one
+// counts the card as soon as one occurrence is broadened by a nearby land
+// word, since a card with several search modes only needs one of them to
+// fetch land. Checked against every owned card that searches the library for
+// anything (180 total): 127 of 127 real land tutors caught, 0 of 53 true
+// non-land tutors (creature/artifact/etc. searches) false-matched.
+const LAND_SEARCH_KEYWORD = /\b(?:basic|lands?|forest|plains|island|swamp|mountain|wastes)\b/;
+
+function searchesLibraryForLand(text, pattern) {
+  let from = 0;
+
+  for (;;) {
+    const at = text.indexOf(pattern, from);
+    if (at === -1) return false;
+
+    const periodAt = text.indexOf(".", at);
+    const sentence = text.slice(at, periodAt === -1 ? text.length : periodAt + 1);
+    if (LAND_SEARCH_KEYWORD.test(sentence)) return true;
+
+    from = at + pattern.length;
+  }
+}
+
+// A -X/-X effect below this magnitude is a combat trick -- it shrinks a
+// blocker, it doesn't kill one -- while at or above it, it's lethal to nearly
+// anything played in Commander. The threshold is a judgment call, not a rules
+// number: picked so Grasp of Darkness and Lash of the Whip (-4/-4) count while
+// Rookie Mistake (-2/-0) and Waker of Waves (a static -1/-0) don't. It also
+// sits on a real gap in this collection's numbers: 47 cards read -1/-1, 30
+// read -2/-2, 8 read -3/-3, then only 9 read -4/-4 -- the population thins out
+// exactly where "kills most things" starts being true, rather than splitting a
+// dense curve in the middle.
+const LETHAL_STAT_DROP_MINIMUM = 4;
+
+function hasLethalStatDrop(text) {
+  const match = text.match(/gets? -(\d+)\/-\1\b/);
+  return Boolean(match) && Number(match[1]) >= LETHAL_STAT_DROP_MINIMUM;
+}
+
 function cardMatchesRole(card, role) {
   const text = getCardText(card);
 
   return (ROLE_TEXT_PATTERNS[role] || []).some((pattern) => {
+    if (role === "ramp" && pattern === "search your library for") {
+      return searchesLibraryForLand(text, pattern);
+    }
+    if (role === "removal" && pattern === "gets -") {
+      return hasLethalStatDrop(text);
+    }
     if (!text.includes(pattern)) return false;
     if (role === "wipe" && wipeMatchIsNarrowed(text, pattern)) return false;
     return true;

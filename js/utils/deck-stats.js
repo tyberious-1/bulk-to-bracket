@@ -60,6 +60,13 @@ function normalizeRoleTargets(edhrecRoleTargets) {
 // the numbers overlap: a removal spell that draws appears under both, and a
 // board wipe that draws is counted as a wipe here where its primary role is
 // draw. The gap between the two is the deck's double duty.
+//
+// Reads the precomputed `roles` field addCard (deck.js) attaches to every
+// entry, rather than calling getRoleContributions(card) here. A deck entry
+// carries only name/type/cmc/colors/score -- never oracle text -- so that call
+// would silently return [] for every card and `total` would sit at zero for
+// every role. `roles` is resolved once, against the real collection record, at
+// the only point the build still has that record in scope.
 function getSupportPackageCounts(deck) {
   const counts = {};
   for (const role of SUPPORT_ROLES) counts[role] = { primary: 0, total: 0 };
@@ -67,7 +74,7 @@ function getSupportPackageCounts(deck) {
   for (const card of deck || []) {
     if (card.role === "land") continue;
     if (counts[card.role]) counts[card.role].primary += 1;
-    for (const role of getRoleContributions(card)) counts[role].total += 1;
+    for (const role of card.roles || []) counts[role].total += 1;
   }
 
   return counts;
