@@ -52,7 +52,7 @@ async function generateDeck() {
   const file = csvFileInput?.files?.[0];
 
   currentRunContext = null;
-  setCurrentThemeFocus("");
+  setCurrentThemeFocus(takePendingThemeFocus() || "");
   document.getElementById("postBuildControls").classList.add("hidden");
 
   clearLog();
@@ -98,6 +98,7 @@ async function generateDeck() {
     const edhrecData = await getEDHREC(commanders.names);
     const edhrecCards = Array.isArray(edhrecData?.cards) ? edhrecData.cards : [];
     const edhrecTags = Array.isArray(edhrecData?.tags) ? edhrecData.tags : [];
+    const edhrecAllTags = Array.isArray(edhrecData?.allTags) ? edhrecData.allTags : [];
     if (edhrecData?.unavailable) {
       logMessage("EDHREC could not be reached. Continuing with Scryfall + collection-based build logic.");
     }
@@ -146,7 +147,7 @@ async function generateDeck() {
       commanders.colors
     );
     displayThemes(commanderThemes);
-    renderPriorityButtons(commanderThemes, allOwnedCardData);
+    renderPriorityButtons(commanderThemes, allOwnedCardData, edhrecAllTags);
     logMessage(`Detected themes: ${commanderThemes.join(", ") || "none"}`);
 
     updateProgress(58, "Matching your collection...");
@@ -183,6 +184,7 @@ async function generateDeck() {
       ownedCardData,
       allOwnedCardData,
       commanderThemes,
+      edhrecAllTags,
       typeAverages: edhrecData?.typeAverages || null,
       roleTargets: edhrecData?.roleTargets || null,
       themeCardLists: edhrecData?.themeCardLists || {}
@@ -235,6 +237,7 @@ async function performBuildFromContext() {
     ownedCardData,
     allOwnedCardData,
     commanderThemes,
+    edhrecAllTags,
     typeAverages,
     roleTargets
   } = currentRunContext;
@@ -260,6 +263,29 @@ async function performBuildFromContext() {
         label: "Collection Fallback",
         labels: ["Collection Fallback"]
       }));
+
+  // A manually focused theme (the "Other Themes" dropdown) is often outside
+  // this commander's own EDHREC page -- Vehicles for Saheeli, say -- so an
+  // owned card can match the theme perfectly and never appear in edhrecCards.
+  // pickBestCardForBucket draws from scoredNonlands almost exclusively (the
+  // fallback pool is only reached once it runs dry), so a card that never
+  // gets scored here never gets picked no matter how large its theme bonus
+  // would be. Widen the pool to the full collection for theme matches only
+  // when a theme is actually focused, so the bonus in scoreCard has cards to
+  // apply to.
+  if (modePrefs.themeFocus) {
+    const alreadyIncluded = new Set(ownedCandidates.map((c) => normalizeCardName(c.name)));
+    for (const [normalizedName, card] of allOwnedCardData) {
+      if (alreadyIncluded.has(normalizedName) || !card) continue;
+      if (getCardType(card).includes("land")) continue;
+      if (!legalForCommander(card.colors, commanders.colors)) continue;
+      if (!cardMatchesThemeFocus(card, modePrefs)) continue;
+      alreadyIncluded.add(normalizedName);
+      ownedCandidates.push({ name: card.name, synergy: 0, decks: 0, label: "", labels: [] });
+      ownedCardData.set(normalizedName, card);
+    }
+  }
+
   const totalToScore = ownedCandidates.length;
 
   for (const edhrecCard of ownedCandidates) {
@@ -315,7 +341,7 @@ async function performBuildFromContext() {
       ? `After legality checks, ${scoredNonlands.length} nonland cards remain in the EDHREC candidate pool.`
       : `After legality checks, ${scoredNonlands.length} nonland cards remain in the collection fallback pool.`
   );
-  renderPriorityButtons(commanderThemes, allOwnedCardData);
+  renderPriorityButtons(commanderThemes, allOwnedCardData, edhrecAllTags);
 
   updateProgress(88, "Finding collection cards that fit the themes...");
   // Resolved here rather than inside the builder: local text matching answers
@@ -378,6 +404,7 @@ async function performBuildFromContext() {
 
 generateBtn.addEventListener("click", generateDeck);
 copyExportBtn.addEventListener("click", copyMoxfieldExport);
+copyPreviewBtn.addEventListener("click", copyPreviewText);
 
 // Parse on selection rather than at build time, so the commanders tab has a
 // collection to work from without waiting for a deck to be built.
@@ -450,6 +477,7 @@ if (priorityButtonsWrap) {
 
 bindPreviewHoverImages();
 bindCommandersTab();
+bindThemeTab();
 hydrateCardCacheFromStorage();
 renderPreviewEmptyState();
 renderCommandersTab();

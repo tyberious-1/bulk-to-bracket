@@ -32,6 +32,7 @@ function activateTab(tabName) {
   });
 
   if (tabName === "commanders") renderCommandersTab();
+  if (tabName === "theme") renderThemeTab();
 }
 
 // A new collection invalidates everything derived from the old one: which

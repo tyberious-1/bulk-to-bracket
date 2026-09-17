@@ -551,6 +551,15 @@ button:disabled {
   margin-bottom: 10px;
   margin-top: 14px;
   color: #e5e7eb;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.preview-copy-btn {
+  margin-top: 0;
+  padding: 6px 12px;
+  font-size: 13px;
 }
 
 .export-preview {
@@ -906,6 +915,30 @@ button:disabled {
   gap: 8px;
 }
 
+.theme-dropdown {
+  padding: 8px 12px;
+  border: 1px solid #4b5563;
+  border-radius: 8px;
+  background: #1f2937;
+  color: white;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.theme-dropdown:hover {
+  border-color: #6b7280;
+}
+
+.theme-dropdown:focus {
+  outline: none;
+  border-color: #2563eb;
+}
+
+.theme-dropdown option {
+  background: #1f2937;
+  color: white;
+}
+
 /* Two commanders (partner, Background, Doctor's companion) sit side by side. */
 .commander-image-wrap.has-partner {
   display: flex;
@@ -1130,6 +1163,44 @@ button:disabled {
 }
 
 .commanders-empty {
+  color: #9ca3af;
+  text-align: center;
+  padding: 24px 10px;
+}
+
+.theme-tab-search {
+  margin-bottom: 14px;
+}
+
+.theme-tab-catalog {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid #374151;
+}
+
+.theme-tab-pick {
+  margin-top: 0;
+  padding: 6px 12px;
+  font-size: 13px;
+  background: #374151;
+  border-radius: 999px;
+}
+
+.theme-tab-pick:hover {
+  background: #4b5563;
+}
+
+.theme-tab-pick.active {
+  background: #2563eb;
+}
+
+.theme-tab-empty,
+.theme-tab-status {
   color: #9ca3af;
   text-align: center;
   padding: 24px 10px;

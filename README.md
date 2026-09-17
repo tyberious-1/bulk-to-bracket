@@ -6,7 +6,7 @@ https://tyberious-1.github.io/bulk-to-bracket/
 
 Bulk to Bracket is a web app that lets you:
 
-* choose any Commander
+* choose any Commander — by name, from your owned collection, or by theme/tribe
 * import your **ManaBox CSV collection export**
 * analyze your owned cards
 * pull synergy + averages from EDHREC
@@ -30,9 +30,13 @@ This prevents issues like overloading instants or underfilling creatures.
 
 ## 🚀 How It Works
 
-### 1) Select a Commander
+### 1) Pick a Commander
 
-Start typing your commander’s name and choose from autocomplete.
+Three ways to get there, all on their own tab:
+
+* **Build a Deck** — type a commander’s name and choose from autocomplete.
+* **Your Commanders** — every commander your uploaded collection owns, ranked by how many decks EDHREC has for it, with a one-click **Build** to load it.
+* **Theme / Tribal** — pick a theme (Aristocrats, Voltron, Storm, Vehicles, Earthbending, …) or a tribal type (Elves, Zombies, Allies, …) first, then choose from the owned commanders EDHREC ranks highly for it. Picking a commander here carries the theme along, so the very first deck it builds is already focused on it.
 
 ### 2) Upload ManaBox CSV
 

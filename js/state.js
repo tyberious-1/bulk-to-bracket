@@ -15,6 +15,23 @@ function setCurrentThemeFocus(theme) {
   currentThemeFocus = String(theme || "");
 }
 
+// Set by the Theme/Tribal tab before handing a commander to the build flow,
+// so the very first generateDeck() run already focuses that theme instead of
+// requiring a manual click on a priority button after the fact. Consumed
+// once (takePendingThemeFocus clears it) so a later plain rebuild -- typing a
+// new commander by hand -- doesn't inherit a stale focus.
+let pendingThemeFocus = null;
+
+function setPendingThemeFocus(theme) {
+  pendingThemeFocus = theme || null;
+}
+
+function takePendingThemeFocus() {
+  const theme = pendingThemeFocus;
+  pendingThemeFocus = null;
+  return theme;
+}
+
 // The resolved commander cards, kept here because the partner field's
 // legality filter has to consult the current primary pick on every keystroke.
 let commanderCard = null;

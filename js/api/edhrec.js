@@ -11,7 +11,7 @@
 // the builder then backfills the rest with no commander-specific signal at
 // all. Each detected theme has its own page with a different card list, so
 // pulling the top few multiplies the candidate pool for a few extra requests.
-const EDHREC_THEME_PAGE_LIMIT = 5;
+const EDHREC_THEME_PAGE_LIMIT = 12;
 
 // Below this many decks a theme page's inclusion rates are noise -- EDHREC
 // serves pages built from as few as four decks, where one deck is 25%.
@@ -199,7 +199,7 @@ function extractLikelyTags(value, weights) {
 // decks) clears the floor easily but not the relative bar (6.3% of 1,211) --
 // a real theme, just not this commander's.
 const EDHREC_THEME_BASE_COUNT = 5;
-const EDHREC_THEME_MAX_COUNT = 8;
+const EDHREC_THEME_MAX_COUNT = 12;
 const EDHREC_THEME_MIN_ABSOLUTE_DECKS = 10;
 const EDHREC_THEME_MIN_RELATIVE_SHARE = 0.12;
 
@@ -230,6 +230,26 @@ function extractEdhrecTaglinkThemes(data) {
   return chosen.map((tag) => tag.name);
 }
 
+// The full taglink list, unfiltered by the relative-share gate above. That
+// gate exists to keep noise themes out of the build logic (scoring, type
+// targets) -- but the "Other Themes" dropdown is opt-in, a user picking a
+// long-tail theme by name is not the same risk as the builder silently
+// backfilling on one. So the dropdown gets everything EDHREC's "more tags"
+// section shows, and only the curated list feeds the build itself.
+function extractAllEdhrecTaglinkNames(data) {
+  const taglinks = data?.panels?.taglinks;
+  if (!Array.isArray(taglinks)) return [];
+
+  return taglinks
+    .map((tag) => ({
+      name: normalizeThemeName(tag?.value || tag?.slug || ""),
+      count: Number(tag?.count || 0)
+    }))
+    .filter((tag) => isPlausibleThemeName(tag.name))
+    .sort((a, b) => b.count - a.count)
+    .map((tag) => tag.name);
+}
+
 function extractEdhrecTagsFromData(data) {
   const named = extractEdhrecTaglinkThemes(data);
   if (named.length) return named;
@@ -242,7 +262,7 @@ function extractEdhrecTagsFromData(data) {
   return Array.from(weights.entries())
     .sort((a, b) => b[1] - a[1])
     .map(([tag]) => tag)
-    .slice(0, 5);
+    .slice(0, 12);
 }
 
 function parseEdhrecSectionAverage(section) {
@@ -557,6 +577,7 @@ async function getEDHREC(commanderNames) {
     return {
       cards: [],
       tags: [],
+      allTags: [],
       typeAverages: null,
       roleTargets: null,
       themeCardLists: {},
@@ -569,6 +590,7 @@ async function getEDHREC(commanderNames) {
     return {
       cards: [],
       tags: [],
+      allTags: [],
       typeAverages: null,
       roleTargets: null,
       themeCardLists: {},
@@ -603,12 +625,14 @@ async function getEDHREC(commanderNames) {
   }
 
   const tags = extractEdhrecTagsFromData(data);
+  const allTags = extractAllEdhrecTaglinkNames(data);
   const typeAverages = extractEdhrecTypeAverages(data);
   const roleTargets = extractEdhrecRoleTargets(data, tags);
 
   return {
     cards: Array.from(deduped.values()),
     tags,
+    allTags,
     typeAverages,
     roleTargets,
     themeCardLists,
@@ -647,6 +671,44 @@ function extractEdhrecCommanderList(data, colorPage) {
   }
 
   return entries;
+}
+
+// A tag page (https://json.edhrec.com/pages/tags/<slug>.json) mixes commander
+// cardlists in with regular card sections (Creatures, Instants, Mana
+// Artifacts, ...) -- only "Top Commanders" and "New Commanders" name actual
+// commanders, so filter on the header rather than walking every section the
+// way extractEdhrecCommanderList does for color pages.
+function extractEdhrecTagCommanders(data) {
+  const cardlists = data?.container?.json_dict?.cardlists;
+  if (!Array.isArray(cardlists)) return [];
+
+  const entries = [];
+  for (const section of cardlists) {
+    if (!/commander/i.test(String(section?.header || ""))) continue;
+    for (const entry of Array.isArray(section.cardviews) ? section.cardviews : []) {
+      if (!entry?.name) continue;
+      entries.push({
+        name: entry.name,
+        slug: String(entry.slug || toEdhrecSlug(getPrimaryCardName(entry.name))),
+        decks: Number(entry.num_decks || 0)
+      });
+    }
+  }
+
+  return entries;
+}
+
+// A theme's tag page can 403/404 (typo, or EDHREC just doesn't track it) --
+// treated the same as a missing color page, an empty result rather than an
+// error the caller has to handle.
+async function fetchEdhrecTagCommanders(themeSlug) {
+  try {
+    const data = await fetchJsonWithTimeout(`${EDHREC_TAGS_BASE}${themeSlug}.json`, {}, 12000);
+    return edhrecPayloadHasCards(data) ? extractEdhrecTagCommanders(data) : [];
+  } catch (error) {
+    console.warn(`EDHREC tag page unavailable: ${themeSlug}`, error);
+    return [];
+  }
 }
 
 // A missing color page costs that identity's commanders, not the whole scan.

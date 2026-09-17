@@ -45,11 +45,88 @@ function isLikelyEdhrecTagCandidate(tag) {
   return !EDHREC_NON_THEME_LABELS.has(normalizeThemeName(tag).replace(/\s+/g, ""));
 }
 
+// Plural EDHREC tribal theme names mapped to the singular "X tribal" alias
+// detectCardTags' tribal loop can actually produce. Module-level so the
+// Theme/Tribal tab can enumerate every pickable tribal name without
+// duplicating this table.
+const TRIBAL_PLURAL_ALIASES = {
+  allies: "ally tribal",
+  bears: "bear tribal",
+  elves: "elf tribal",
+  zombies: "zombie tribal",
+  dragons: "dragon tribal",
+  vampires: "vampire tribal",
+  humans: "human tribal",
+  goblins: "goblin tribal",
+  angels: "angel tribal",
+  cats: "cat tribal",
+  merfolk: "merfolk tribal",
+  slivers: "sliver tribal",
+  demons: "demon tribal",
+  faeries: "faerie tribal",
+  knights: "knight tribal",
+  pirates: "pirate tribal",
+  wizards: "wizard tribal",
+  spirits: "spirit tribal",
+  soldiers: "soldier tribal",
+  hydras: "hydra tribal",
+  ninjas: "ninja tribal",
+  elementals: "elemental tribal",
+  shapeshifters: "shapeshifter tribal",
+  warriors: "warrior tribal",
+  clerics: "cleric tribal",
+  dogs: "dog tribal",
+  snakes: "snake tribal",
+  beasts: "beast tribal",
+  wolves: "wolf tribal",
+  giants: "giant tribal",
+  oozes: "ooze tribal",
+  wurms: "wurm tribal",
+  frogs: "frog tribal",
+  insects: "insect tribal",
+  rogues: "rogue tribal",
+  spiders: "spider tribal",
+  squirrels: "squirrel tribal",
+  mutants: "mutant tribal",
+  gods: "god tribal",
+  dwarves: "dwarf tribal",
+  lizards: "lizard tribal",
+  rabbits: "rabbit tribal",
+  bats: "bat tribal",
+  druids: "druid tribal",
+  monks: "monk tribal",
+  orcs: "orc tribal",
+  devils: "devil tribal",
+  robots: "robot tribal",
+  crabs: "crab tribal",
+  phoenixes: "phoenix tribal",
+  praetors: "praetor tribal",
+  plants: "plant tribal",
+  turtles: "turtle tribal",
+  archers: "archer tribal",
+  illusions: "illusion tribal",
+  unicorns: "unicorn tribal",
+  monkeys: "monkey tribal",
+  avatars: "avatar tribal",
+  horses: "horse tribal",
+  rebels: "rebel tribal",
+  nightmares: "nightmare tribal",
+  kithkin: "kithkin tribal",
+  griffins: "griffin tribal",
+  advisors: "advisor tribal",
+  satyrs: "satyr tribal",
+  shamans: "shaman tribal",
+  foxes: "fox tribal",
+  daleks: "dalek tribal",
+  atogs: "atog tribal"
+};
+
 function getThemeAliases(theme) {
   const normalized = normalizeThemeName(theme);
   const aliases = new Set([normalized]);
 
   const directAliases = {
+    "the ring": ["the ring tempts you"],
     "+1/+1 counters": ["counters", "countersmatter"],
     "counters matter": ["counters", "countersmatter"],
     "-1/-1 counters": ["counters"],
@@ -105,78 +182,7 @@ function getThemeAliases(theme) {
     for (const alias of directAliases[normalized]) aliases.add(alias);
   }
 
-  const singularMap = {
-    bears: "bear tribal",
-    elves: "elf tribal",
-    zombies: "zombie tribal",
-    dragons: "dragon tribal",
-    vampires: "vampire tribal",
-    humans: "human tribal",
-    goblins: "goblin tribal",
-    angels: "angel tribal",
-    cats: "cat tribal",
-    merfolk: "merfolk tribal",
-    slivers: "sliver tribal",
-    demons: "demon tribal",
-    faeries: "faerie tribal",
-    knights: "knight tribal",
-    pirates: "pirate tribal",
-    wizards: "wizard tribal",
-    spirits: "spirit tribal",
-    soldiers: "soldier tribal",
-    hydras: "hydra tribal",
-    ninjas: "ninja tribal",
-    elementals: "elemental tribal",
-    shapeshifters: "shapeshifter tribal",
-    warriors: "warrior tribal",
-    clerics: "cleric tribal",
-    dogs: "dog tribal",
-    snakes: "snake tribal",
-    beasts: "beast tribal",
-    wolves: "wolf tribal",
-    giants: "giant tribal",
-    oozes: "ooze tribal",
-    wurms: "wurm tribal",
-    frogs: "frog tribal",
-    insects: "insect tribal",
-    rogues: "rogue tribal",
-    spiders: "spider tribal",
-    squirrels: "squirrel tribal",
-    mutants: "mutant tribal",
-    gods: "god tribal",
-    dwarves: "dwarf tribal",
-    lizards: "lizard tribal",
-    rabbits: "rabbit tribal",
-    bats: "bat tribal",
-    druids: "druid tribal",
-    monks: "monk tribal",
-    orcs: "orc tribal",
-    devils: "devil tribal",
-    robots: "robot tribal",
-    crabs: "crab tribal",
-    phoenixes: "phoenix tribal",
-    praetors: "praetor tribal",
-    plants: "plant tribal",
-    turtles: "turtle tribal",
-    archers: "archer tribal",
-    illusions: "illusion tribal",
-    unicorns: "unicorn tribal",
-    monkeys: "monkey tribal",
-    avatars: "avatar tribal",
-    horses: "horse tribal",
-    rebels: "rebel tribal",
-    nightmares: "nightmare tribal",
-    kithkin: "kithkin tribal",
-    griffins: "griffin tribal",
-    advisors: "advisor tribal",
-    satyrs: "satyr tribal",
-    shamans: "shaman tribal",
-    foxes: "fox tribal",
-    daleks: "dalek tribal",
-    atogs: "atog tribal"
-  };
-
-  if (singularMap[normalized]) aliases.add(singularMap[normalized]);
+  if (TRIBAL_PLURAL_ALIASES[normalized]) aliases.add(TRIBAL_PLURAL_ALIASES[normalized]);
   if (normalized.endsWith(" tribal")) aliases.add(normalized);
   return Array.from(aliases);
 }
@@ -388,7 +394,7 @@ async function detectCommanderThemes(edhrecCards, edhrecTags, collectionData, al
     .map(([theme]) => theme);
 
   const tribalThemes = detectTribalThemes(combinedCards);
-  return [...normalThemes, ...tribalThemes].slice(0, 6);
+  return [...normalThemes, ...tribalThemes].slice(0, 12);
 }
 
 function getCommanderStrategyProfile(commanderName, commanderThemes, commanderColors) {
@@ -548,7 +554,24 @@ function getThemeKeywords(theme) {
   if (!name) return [];
 
   const keywords = [name];
-  if (name.endsWith("s")) keywords.push(name.slice(0, -1));
+
+  // Handle irregular plurals from EDHREC tribals before naive singularization
+  const irregularSingulars = {
+    allies: "ally",
+    dwarves: "dwarf",
+    elves: "elf",
+    kithkin: "kithkin",
+    merfolk: "merfolk",
+    phoenixes: "phoenix",
+    wolves: "wolf"
+  };
+
+  if (irregularSingulars[name]) {
+    keywords.push(irregularSingulars[name]);
+  } else if (name.endsWith("s")) {
+    keywords.push(name.slice(0, -1));
+  }
+
   return keywords;
 }
 

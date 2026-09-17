@@ -335,6 +335,17 @@ function detectCardTags(card) {
     tags.push("gowide");
   }
   if (type.includes("artifact")) tags.push("artifacts");
+  if (type.includes("vehicle") || /\bcrew\s+\d/.test(text)) tags.push("vehicles");
+
+  // Airbending/Waterbending/Earthbending/Firebending are real keyword
+  // abilities (Avatar: The Last Airbender set), not just flavor text -- e.g.
+  // Avatar Kyoshi, Earthbender: "earthbend 8, then untap that land." Scryfall
+  // doesn't retain `keywords` through convertScryfallCard, so this reads the
+  // oracle text the same way the keyword line itself would print it.
+  for (const element of ["air", "water", "earth", "fire"]) {
+    if (new RegExp(`\\b${element}bend(ing)?\\b`).test(text)) tags.push(`${element}bending`);
+  }
+
   if (type.includes("enchantment")) tags.push("enchantments");
   if (text.includes("landfall") || text.includes("search your library for a land")) tags.push("lands");
   if (type.includes("instant") || type.includes("sorcery")) tags.push("spellslinger");
@@ -383,6 +394,24 @@ function detectCardTags(card) {
 
   // Themes below here exist in EDHREC's vocabulary but had no detector, so
   // focusing on them used to match nothing and left the deck unchanged.
+
+  if (type.includes("saga")) tags.push("sagas");
+  if (text.includes("cascade")) tags.push("cascade");
+  if (text.includes("amass")) tags.push("amass");
+  if (text.includes("mutate")) tags.push("mutate");
+  if (text.includes("discover")) tags.push("discover");
+  if (text.includes("affinity for")) tags.push("affinity");
+  if (text.includes("populate")) tags.push("populate");
+  if (text.includes("the ring tempts you")) tags.push("the ring tempts you");
+  if (text.includes("additional combat phase")) tags.push("extra combats");
+  if (text.includes("extra turn")) tags.push("extra turns");
+  // The reminder text is the only reliable signal -- the bare word "storm"
+  // shows up in plenty of unrelated ability and flavor text.
+  if (text.includes("copy it for each spell cast before it this turn")) tags.push("storm");
+  if (text.includes("venture into the dungeon")) tags.push("dungeon");
+  if (/\bdredge\s+\d/.test(text)) tags.push("dredge");
+  if (/\bdescend\s+\d/.test(text)) tags.push("descend");
+  if (text.includes("explore")) tags.push("explore");
 
   if (
     type.includes("equipment") ||
@@ -458,6 +487,24 @@ function detectCardTags(card) {
   return tags;
 }
 
+// Every literal tag detectCardTags can actually produce (tribal types are
+// handled separately, via " tribal" suffix matching in getSupportedThemes).
+// A theme whose aliases fall entirely outside this vocabulary can never be
+// matched no matter what the collection holds -- getSupportedThemes uses
+// this to tell "no detector for this theme" apart from "no support in this
+// collection" rather than greying out an option it has no way to check.
+const DETECTABLE_CARD_TAGS = new Set([
+  "graveyard", "tokens", "gowide", "artifacts", "enchantments", "lands",
+  "spellslinger", "sacrifice", "counters", "countersmatter", "lifegain",
+  "reanimator", "group hug", "opponent draw", "cantrips", "wheels", "blink",
+  "voltron", "unblockable", "infect", "ninjutsu", "theft", "control",
+  "spell copy", "card draw", "hatebears", "vehicles",
+  "airbending", "waterbending", "earthbending", "firebending",
+  "sagas", "cascade", "amass", "mutate", "discover", "affinity", "populate",
+  "the ring tempts you", "extra combats", "extra turns", "storm", "dungeon",
+  "dredge", "descend", "explore"
+]);
+
 function getThemeFocusAdjustment(card, tags, modePrefs) {
   if (!modePrefs.themeFocus) return 0;
 
@@ -507,7 +554,13 @@ function getEdhrecReferenceBonus(edhrecCard, modePrefs) {
   }
 
   let bonus = 0;
-  if (modePrefs.themeFocus) bonus += themeMatch ? 12 : -10;
+  if (modePrefs.themeFocus) {
+    bonus += themeMatch ? 12 : -10;
+    // When a theme is focused, don't boost non-matching cards even if they're
+    // from the average deck section. This prevents cards like Cankerbloom (removal)
+    // from being picked over focused theme matches like Elves.
+    if (!themeMatch) return bonus;
+  }
   if (averageDeckSection) bonus += 6;
 
   return bonus;
@@ -547,6 +600,15 @@ function getSupportedThemes(themes, allOwnedCardData) {
   }));
 
   const supported = new Set();
+
+  // A theme with no detector coverage can never match a card regardless of
+  // what the collection holds -- that's a gap in detectCardTags, not
+  // evidence the collection lacks support, so don't grey it out on a check
+  // that was never capable of passing.
+  for (const spec of specs) {
+    const checkable = spec.tribes.length > 0 || Array.from(spec.aliases).some((alias) => DETECTABLE_CARD_TAGS.has(alias));
+    if (!checkable) supported.add(spec.theme);
+  }
 
   for (const card of allOwnedCardData.values()) {
     if (supported.size === specs.length) break;

@@ -4,6 +4,7 @@ const SCRYFALL_NAMED = "https://api.scryfall.com/cards/named?exact=";
 const SCRYFALL_AUTOCOMPLETE = "https://api.scryfall.com/cards/autocomplete?q=";
 const SCRYFALL_COLLECTION = "https://api.scryfall.com/cards/collection";
 const EDHREC_BASE = "https://json.edhrec.com/pages/commanders/";
+const EDHREC_TAGS_BASE = "https://json.edhrec.com/pages/tags/";
 const SCRYFALL_CARD_SEARCH = "https://scryfall.com/search?q=!";
 
 const WUBRG_ORDER = ["W", "U", "B", "R", "G", "C"];
@@ -25,12 +26,24 @@ const COLOR_TO_BASIC = {
   G: "Forest"
 };
 
+// getThemeAliases (themes.js) maps plural EDHREC tribal theme names (e.g.
+// "Constructs", "Orcs") to singular entries here via its singularMap/
+// directAliases tables -- a plural whose singular is missing from this list
+// can never be detected no matter what the collection holds, the same class
+// of bug DETECTABLE_CARD_TAGS guards against in scoring.js. Keep this list a
+// superset of every singular those tables reference.
 const TRIBAL_TYPES = [
-  "angel", "artifact creature", "bear", "bird", "cat", "cleric", "demon", "devil",
-  "dinosaur", "dragon", "drake", "druid", "elf", "faerie", "goblin", "human",
-  "hydra", "knight", "merfolk", "pirate", "rat", "samurai", "shaman", "sliver",
-  "snake", "soldier", "spirit", "treefolk", "vampire", "warlock", "warrior",
-  "wizard", "wolf", "zombie"
+  "advisor", "ally", "angel", "archer", "artifact creature", "artificer", "atog",
+  "avatar", "bat", "bear", "beast", "bird", "cat", "cleric", "construct",
+  "crab", "dalek", "demon", "devil", "dinosaur", "dog", "dragon", "drake",
+  "druid", "dwarf", "elemental", "elf", "faerie", "fox", "frog", "giant",
+  "god", "goblin", "golem", "griffin", "horse", "human", "hydra", "illusion",
+  "insect", "kithkin", "knight", "lizard", "merfolk", "monk", "monkey",
+  "mutant", "nightmare", "ninja", "ooze", "orc", "phoenix", "pirate", "plant",
+  "praetor", "rabbit", "rat", "rebel", "robot", "rogue", "samurai", "satyr",
+  "shaman", "shapeshifter", "sliver", "snake", "soldier", "spider", "spirit",
+  "squirrel", "thopter", "treefolk", "turtle", "unicorn", "vampire",
+  "warlock", "warrior", "wizard", "wolf", "wurm", "zombie"
 ];
 
 const GAME_CHANGERS = new Set([

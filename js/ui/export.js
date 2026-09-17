@@ -134,3 +134,17 @@ async function copyMoxfieldExport() {
     showToast("Decklist copied.");
   }
 }
+
+async function copyPreviewText() {
+  const preview = document.getElementById("exportPreview");
+  if (!preview.textContent.trim()) return;
+
+  const text = preview.textContent;
+
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast("Preview copied.");
+  } catch (error) {
+    showToast("Preview copied.");
+  }
+}

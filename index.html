@@ -14,6 +14,7 @@
     <div class="tabs" role="tablist">
       <button class="tab-btn active" type="button" data-tab="build">Build a Deck</button>
       <button class="tab-btn" type="button" data-tab="commanders">Your Commanders</button>
+      <button class="tab-btn" type="button" data-tab="theme">Theme / Tribal</button>
     </div>
 
     <div class="panel progress-panel">
@@ -112,7 +113,9 @@
           <div id="supportPackage" class="support-package"></div>
           <div id="warningsPanel" class="warnings-panel"></div>
 
-          <div class="preview-heading">Grouped Preview</div>
+          <div class="preview-heading">Grouped Preview
+            <button id="copyPreviewBtn" type="button" class="preview-copy-btn">Copy Preview Text</button>
+          </div>
           <div id="exportPreview" class="export-preview"></div>
 
           <div class="preview-heading">Plain Text Export</div>
@@ -126,6 +129,13 @@
       <div class="panel">
         <h2>Commanders You Own</h2>
         <div id="commandersPanel"></div>
+      </div>
+    </div>
+
+    <div class="tab-panel hidden" data-tab="theme">
+      <div class="panel">
+        <h2>Pick a Theme or Tribal Type</h2>
+        <div id="themePanel"></div>
       </div>
     </div>
   </div>
@@ -158,6 +168,7 @@
   <script src="js/ui/hover-preview.js"></script>
   <script src="js/ui/report.js"></script>
   <script src="js/ui/commanders-tab.js"></script>
+  <script src="js/ui/theme-tab.js"></script>
   <script src="js/ui/export.js"></script>
   <script src="js/main.js"></script>
 </body>

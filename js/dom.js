@@ -6,6 +6,7 @@ const autocompleteList = document.getElementById("autocompleteList");
 const csvFileInput = document.getElementById("csvFile");
 const generateBtn = document.getElementById("generateBtn");
 const copyExportBtn = document.getElementById("copyExportBtn");
+const copyPreviewBtn = document.getElementById("copyPreviewBtn");
 
 const commanderImage = document.getElementById("commanderImage");
 const commanderMeta = document.getElementById("commanderMeta");

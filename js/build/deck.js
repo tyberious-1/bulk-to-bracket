@@ -227,6 +227,13 @@ function buildDeckFromScoredPool(
 
     const themeMatch = themeCardNames.get(normalizedName) || null;
 
+    // When a theme is focused, filter to cards matching that specific theme.
+    // fit.tier === 0 is exactly cardMatchesThemeFocus (classifyBackfillModeFit
+    // computed it above) -- checking tribal types only here missed every
+    // non-tribal focused theme (Vehicles, Spellslinger, Aristocrats, ...),
+    // silently routing real matches into the generic tier instead.
+    const matchesFocusedTheme = !modePrefs.themeFocus || fit.tier === 0;
+
     const candidate = {
       name: card.name,
       role: detectRole(card),
@@ -243,7 +250,7 @@ function buildDeckFromScoredPool(
       roles: getRoleContributions(card)
     };
 
-    if (themeMatch) themeFallbackPool.push(candidate);
+    if (themeMatch && matchesFocusedTheme) themeFallbackPool.push(candidate);
     else genericFallbackPool.push(candidate);
   }
 
@@ -298,13 +305,30 @@ function buildDeckFromScoredPool(
     return true;
   }
 
-  // Phase 0: the support package, before anything else spends the slots.
-  //
-  // The role targets used to be read only by chooseBestFlexibleCard, which never
-  // runs -- phase 1 fills every bucket to its target first, so the deck was
-  // already full by the time anything asked how much ramp or draw it had. Four
-  // low-coverage commanders each came out missing at least one target. Fill the
-  // package first, then let the type mix and the themes have what is left.
+  // Phase 0: hit the EDHREC type mix using EDHREC-owned matches first.
+  // Type distribution is the primary constraint; support roles adapt to what remains.
+  for (const bucket of buckets) {
+    const target = Number(typePlan?.buckets?.[bucket]?.target || 0);
+    while (getTypePlanBucketNeed(deck, typePlan, bucket) > 0 && deck.length < targetNonlandCount) {
+      const edhrecPick = pickBestCardForBucket(scoredNonlands, usedNames, commanderKeys, bucket, curvePlan);
+      if (edhrecPick) {
+        addCard(edhrecPick, "edhrec");
+        continue;
+      }
+
+      const fallbackPick = pickFromTiers(fallbackTiers, (tier) =>
+        pickBestFallbackCard(tier, usedNames, commanderKeys, bucket, curvePlan, redundancyCounts));
+      if (fallbackPick) {
+        addCard(fallbackPick, getFallbackSource(fallbackPick));
+        continue;
+      }
+
+      break;
+    }
+  }
+
+  // Phase 1: fill the support package (ramp, draw, removal, wipe) with remaining slots.
+  // Support roles adapt to the type distribution already established in Phase 0.
   const supportRoles = ["ramp", "draw", "removal", "wipe"];
   const exhaustedRoles = new Set();
 
@@ -322,9 +346,9 @@ function buildDeckFromScoredPool(
     return counts;
   }
 
-  // A role slot still answers to the type plan, or ten ramp artifacts arrive
-  // before the type mix gets a say. Target rather than max: this phase runs
-  // first, so leave the buckets room to be filled properly afterwards.
+  // A role slot still answers to the type plan, respecting the type distribution
+  // established in Phase 0. Target rather than max: leave the buckets room to stay
+  // balanced rather than overloading a type with support roles.
   function bucketHasRoomForRole(bucket) {
     const rule = typePlan?.buckets?.[bucket];
     if (!rule) return true;
@@ -388,27 +412,6 @@ function buildDeckFromScoredPool(
     }
 
     addCard(fallbackPick, getFallbackSource(fallbackPick));
-  }
-
-  // Phase 1: hit the EDHREC type mix using EDHREC-owned matches first.
-  for (const bucket of buckets) {
-    const target = Number(typePlan?.buckets?.[bucket]?.target || 0);
-    while (getTypePlanBucketNeed(deck, typePlan, bucket) > 0 && deck.length < targetNonlandCount) {
-      const edhrecPick = pickBestCardForBucket(scoredNonlands, usedNames, commanderKeys, bucket, curvePlan);
-      if (edhrecPick) {
-        addCard(edhrecPick, "edhrec");
-        continue;
-      }
-
-      const fallbackPick = pickFromTiers(fallbackTiers, (tier) =>
-        pickBestFallbackCard(tier, usedNames, commanderKeys, bucket, curvePlan, redundancyCounts));
-      if (fallbackPick) {
-        addCard(fallbackPick, getFallbackSource(fallbackPick));
-        continue;
-      }
-
-      break;
-    }
   }
 
   // Phase 2: satisfy missing type minimums from the rest of the collection.
