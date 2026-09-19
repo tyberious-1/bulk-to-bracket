@@ -1,10 +1,11 @@
 // The deck assembler.
 //
-// buildDeckFromScoredPool runs five phases: fill the support package the deck
-// needs (ramp, draw, removal, sweepers), hit the EDHREC type mix from
-// EDHREC-owned matches, satisfy any unmet type minimums, fill the remainder
-// with whatever best serves the shortest type and role, then force creatures
-// in if the collection turned out to be spell-heavy. Lands are added last.
+// buildDeckFromScoredPool runs six phases: hit the EDHREC type mix from
+// EDHREC-owned matches, fill the support package the deck needs (ramp, draw,
+// removal, sweepers), satisfy any unmet type minimums, fill the remainder
+// with whatever best serves the shortest type and role, evict into a role
+// that a type bucket has starved, then force creatures in if the collection
+// turned out to be spell-heavy. Lands are added last.
 //
 // Depends on: cards.js, csv.js, deck-stats.js, manabase.js, scoring.js,
 //   text.js, themes.js, type-plan.js
@@ -443,6 +444,94 @@ function buildDeckFromScoredPool(
     if (!best) break;
 
     addCard(best, scoredNonlands.includes(best) ? "edhrec" : getFallbackSource(best));
+  }
+
+  // Phase 3.5: emergency support-role backfill via eviction.
+  //
+  // Phase 0 alone can fill every type bucket to its target -- the bucket
+  // targets are built to sum to targetNonlandCount -- which leaves Phase 1's
+  // role loop nothing to do (deck.length is already full when it starts).
+  // That is fine for most decks, but a theme that lives in the Artifact
+  // bucket (Equipment, here) fills that bucket with on-theme picks before
+  // ramp, which is mostly mana rocks, ever gets a turn: a Sokka and Suki
+  // build left 29 owned, color-legal ramp rocks undrafted while short 5 of
+  // its ramp target, purely because Artifact had already hit 28/28.
+  //
+  // Rather than raise the Artifact bucket's target -- which would let the
+  // theme itself balloon -- evict the worst card from a bucket that has room
+  // above its floor and spend that slot on the missing role instead. An
+  // Equipment is never evicted: growing the deck's Artifact count to make
+  // room for ramp is fine, thinning the theme the fix was asked to leave
+  // alone is not.
+  function isEquipmentCard(card) {
+    // getCardSubtypes reads through getCardType, which lowercases -- an
+    // uppercase needle here would silently never match and this whole
+    // protection would be a no-op.
+    return getCardSubtypes(getRedundancySource(card) || card).includes("equipment");
+  }
+
+  function pickForRoleIgnoringBucketRoom(pool, role, chargeRedundancy) {
+    let best = null;
+    let bestScore = -Infinity;
+
+    for (const card of pool) {
+      const key = normalizeCardName(card.name);
+      if (usedNames.has(key) || commanderKeys.has(key)) continue;
+
+      const roles = card.roles || getRoleContributions(getRedundancySource(card) || card);
+      if (!roles.includes(role)) continue;
+
+      let adjusted = Number(card.score || 0);
+      if (chargeRedundancy) adjusted -= getRedundancyPenalty(card.redundancyKeys, redundancyCounts);
+      if (!curveHasRoom(curvePlan, card.cmc)) adjusted -= 8;
+
+      if (adjusted > bestScore) {
+        best = card;
+        bestScore = adjusted;
+      }
+    }
+
+    return best;
+  }
+
+  for (const role of supportRoles) {
+    let guard = Number(roleTargets[role] || 0) * 2;
+    while (getDeckRoleCounts()[role] < Number(roleTargets[role] || 0) && guard-- > 0) {
+      const edhrecPick = pickForRoleIgnoringBucketRoom(scoredNonlands, role, false);
+      const pick = edhrecPick || pickFromTiers(fallbackTiers, (tier) => pickForRoleIgnoringBucketRoom(tier, role, true));
+      if (!pick) break;
+
+      let replaceIndex = -1;
+      let replaceScore = Infinity;
+      const counts = countByType(deck);
+      const roleCounts = getDeckRoleCounts();
+      for (let i = 0; i < deck.length; i++) {
+        const existing = deck[i];
+        if (isEquipmentCard(existing)) continue;
+        const bucket = getDeckTypeBucket(existing.type || existing.type_line || "");
+        const rule = typePlan?.buckets?.[bucket];
+        if (rule && (counts[bucket] || 0) <= rule.min) continue;
+
+        // Robbing a card another role still needs just moves the shortage
+        // around -- only spend a card whose roles are already at or above
+        // their own targets (or that carries no support role at all).
+        const existingRoles = existing.roles || getRoleContributions(getRedundancySource(existing) || existing);
+        const stillNeeded = existingRoles.some((r) => roleCounts[r] <= Number(roleTargets[r] || 0));
+        if (stillNeeded) continue;
+
+        if ((existing.score || 0) < replaceScore) {
+          replaceScore = existing.score || 0;
+          replaceIndex = i;
+        }
+      }
+
+      if (replaceIndex === -1) break;
+      usedNames.delete(normalizeCardName(deck[replaceIndex].name));
+      releaseCurvePick(curvePlan, deck[replaceIndex].cmc);
+      adjustRedundancy(deck[replaceIndex], -1);
+      deck.splice(replaceIndex, 1);
+      addCard(pick, edhrecPick ? "edhrec" : getFallbackSource(pick));
+    }
   }
 
   // Phase 4: emergency creature backfill if the collection was extremely spell-heavy.
