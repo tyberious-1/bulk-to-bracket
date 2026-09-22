@@ -24,7 +24,11 @@ const THEME_TAB_TAG_OVERRIDES = {
   enchantments: { label: "Enchantress", slug: "enchantress" },
   counters: { label: "+1/+1 Counters", slug: "plus-1-plus-1-counters" },
   hatebears: { label: "Stax", slug: "stax" },
-  "the ring tempts you": { label: "The Ring", slug: "the-ring" }
+  "the ring tempts you": { label: "The Ring", slug: "the-ring" },
+  // toEdhrecSlug("lands") is "lands", which 403s -- the detector's "lands" tag
+  // covers both landfall and land-tutoring text (see detectCardTags), and
+  // EDHREC's real page for that is "lands-matter".
+  lands: { label: "Lands Matter", slug: "lands-matter" }
 };
 
 // Tribal types with no EDHREC tag page of their own (too rare to track) --
@@ -158,8 +162,9 @@ function renderThemeTabResultsList() {
             <td>
               <span class="commander-name">${escapeHtml(commander.name)}</span>
               ${commander.isPair ? `<span class="commander-tag">partners</span>` : ""}
+              ${commander.unranked ? `<span class="commander-tag">not on EDHREC's top list</span>` : ""}
             </td>
-            <td class="col-decks">${commander.decks.toLocaleString()}</td>
+            <td class="col-decks">${commander.unranked ? "&mdash;" : commander.decks.toLocaleString()}</td>
             <td class="col-build">
               <button class="build-btn" type="button" data-theme-build-slug="${escapeHtml(commander.slug)}">Build</button>
             </td>
@@ -202,6 +207,52 @@ function renderThemeTab() {
   renderThemeTabResultsList();
 }
 
+// EDHREC's tag page hard-caps its commander list at 24 Top Commanders + 5 New
+// Commanders regardless of theme, so a personal collection routinely owns
+// only one or two of those 29 names -- looking sparse even when the matching
+// itself is correct. For a tribal pick this can be supplemented for free:
+// hasTribalType reads the same card type/text detectCardTags already scores
+// with, so any owned legendary creature of that type is a real candidate
+// whether or not EDHREC's top-29 list happened to include it.
+//
+// Best effort only, from whatever the local card cache already has (warmed by
+// a previous build or by "scan unranked commanders" on the Commanders tab) --
+// this must stay instant, so it never triggers a fresh Scryfall fetch.
+function findOwnedTribalCommandersFromCache(collection, tribalPlural, alreadyFound) {
+  const tribalAlias = TRIBAL_PLURAL_ALIASES[tribalPlural] || THEME_TAB_EXTRA_TRIBAL_PLURALS[tribalPlural];
+  if (!tribalAlias) return [];
+  const tribe = tribalAlias.replace(" tribal", "");
+
+  const seen = new Set();
+  for (const commander of alreadyFound) {
+    for (const name of commander.names) seen.add(normalizeCardName(name));
+  }
+
+  const found = [];
+  for (const entry of getCollectionEntries(collection)) {
+    if (seen.has(entry.normalizedName)) continue;
+
+    const card = cardCache.get(entry.normalizedName)
+      || cardCache.get(normalizeCardName(getPrimaryCardName(entry.normalizedName)));
+    if (!card) continue;
+    if (!canBeCommander(card)) continue;
+    if (!hasTribalType(card, tribe)) continue;
+
+    seen.add(entry.normalizedName);
+    found.push({
+      name: card.name,
+      slug: toEdhrecSlug(getPrimaryCardName(card.name)),
+      decks: 0,
+      names: [card.name],
+      isPair: false,
+      deckSize: 99,
+      unranked: true
+    });
+  }
+
+  return found.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 async function selectThemeTabEntry(entry) {
   themeTabSelected = entry;
   themeTabResults = null;
@@ -213,10 +264,15 @@ async function selectThemeTabEntry(entry) {
   try {
     const collection = getOwnedCollection();
     const candidates = await fetchEdhrecTagCommanders(entry.slug);
-    themeTabResults = candidates
+    const ranked = candidates
       .map((candidate) => resolveOwnedCommanderEntry(collection, candidate))
-      .filter(Boolean)
-      .sort((a, b) => b.decks - a.decks);
+      .filter(Boolean);
+
+    const supplemental = entry.kind === "tribal"
+      ? findOwnedTribalCommandersFromCache(collection, entry.tag, ranked)
+      : [];
+
+    themeTabResults = [...ranked, ...supplemental].sort((a, b) => b.decks - a.decks);
   } catch (error) {
     console.error(error);
     themeTabError = error.message || `Unable to load commanders for ${entry.label}.`;

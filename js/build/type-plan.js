@@ -9,12 +9,21 @@
 
 // deckSize is the number of cards besides the commanders: 99 for a single
 // commander, 98 when a partner or Background takes the second slot.
-function buildTypeTargetPlan(edhrecTypeAverages, strategyProfile, targetLandCount, commanderThemes = [], deckSize = 99) {
+function buildTypeTargetPlan(edhrecTypeAverages, strategyProfile, targetLandCount, commanderThemes = [], deckSize = 99, modePrefs = {}) {
   const themeSignals = buildThemeSignalSet(commanderThemes);
   // EDHREC's average land count runs 34-36, which plays land-light in
-  // practice, so treat 36 as the floor and allow up to 42.
-  const requestedLandCount = Math.max(36, Math.min(42, Math.round(Number(edhrecTypeAverages?.Land) || targetLandCount)));
+  // practice -- Wizards' own precons settle closer to 38, so treat that as
+  // the floor and allow up to 42.
+  const requestedLandCount = Math.max(38, Math.min(42, Math.round(Number(edhrecTypeAverages?.Land) || targetLandCount)));
   const targetNonlandCount = deckSize - requestedLandCount;
+
+  // Equipment lives in the Artifact bucket and Auras live in the Enchantment
+  // bucket, but "equipment"/"auras" both alias only to "voltron" (see
+  // getThemeAliases), never to "artifacts"/"enchantments" -- so a voltron
+  // commander/focus never widened either bucket and Auras/Equipment were
+  // capped at the generic default (5-7 slots total) no matter how well they
+  // scored. Widen both when voltron is in play, ambient or explicitly focused.
+  const wantsVoltron = themeSignals.has("voltron") || modePrefs?.focusedThemeSignal === "voltron";
 
   const defaults = {
     Creature: strategyProfile.wantsCreatures
@@ -22,8 +31,8 @@ function buildTypeTargetPlan(edhrecTypeAverages, strategyProfile, targetLandCoun
       : 15,
     Instant: strategyProfile.wantsCantrips ? 10 : 7,
     Sorcery: strategyProfile.wantsCantrips ? 11 : 8,
-    Artifact: themeSignals?.has?.("artifacts") ? 11 : 7,
-    Enchantment: themeSignals?.has?.("enchantments") ? 10 : 5,
+    Artifact: themeSignals?.has?.("artifacts") || modePrefs?.focusedThemeSignal === "artifacts" || wantsVoltron ? 11 : 7,
+    Enchantment: themeSignals?.has?.("enchantments") || modePrefs?.focusedThemeSignal === "enchantments" || wantsVoltron ? 10 : 5,
     Planeswalker: 1
   };
 

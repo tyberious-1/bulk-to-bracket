@@ -505,6 +505,23 @@ const DETECTABLE_CARD_TAGS = new Set([
   "dredge", "descend", "explore"
 ]);
 
+// strategyProfile's wants* flags are an ambient signal: what this
+// commander's decks look like on EDHREC even if the user picked no focus at
+// all. Once the user picks an explicit focus, a *different* natural archetype
+// must not keep competing for slots at full strength -- Charix, the Raging
+// Isle's own top EDHREC archetype is Crabs (195 decks, ahead of Voltron's
+// 154), so wantsTribal/tribalTypes=["crab"] fires regardless of a Voltron
+// focus and crabs were outscoring the equipment/auras the focus asked for.
+function strategyBonusAllowed(modePrefs, signals) {
+  if (!modePrefs.themeFocus) return true;
+  return signals.includes(modePrefs.focusedThemeSignal);
+}
+
+function tribalBonusAllowed(modePrefs, tribe) {
+  if (!modePrefs.themeFocus) return true;
+  return (modePrefs.focusedTribalTypes || []).includes(tribe);
+}
+
 function getThemeFocusAdjustment(card, tags, modePrefs) {
   if (!modePrefs.themeFocus) return 0;
 
@@ -676,13 +693,13 @@ function scoreCard(card, edhrecCard, commanderThemes, strategyProfile, commander
   }
 
   if (strategyProfile.wantsCreatures && isCreatureCard(card)) themeBonus += 5 * modePrefs.creatureBias;
-  if (strategyProfile.wantsTokens && isTokenMaker(card)) themeBonus += 7 * modePrefs.synergyBias;
-  if (strategyProfile.wantsSacrifice && isSacrificeCard(card)) themeBonus += 6 * modePrefs.synergyBias;
-  if (strategyProfile.wantsGoWide && isCreatureCard(card)) themeBonus += 3 * modePrefs.creatureBias;
+  if (strategyProfile.wantsTokens && isTokenMaker(card) && strategyBonusAllowed(modePrefs, ["tokens", "gowide"])) themeBonus += 7 * modePrefs.synergyBias;
+  if (strategyProfile.wantsSacrifice && isSacrificeCard(card) && strategyBonusAllowed(modePrefs, ["sacrifice", "aristocrats"])) themeBonus += 6 * modePrefs.synergyBias;
+  if (strategyProfile.wantsGoWide && isCreatureCard(card) && strategyBonusAllowed(modePrefs, ["tokens", "gowide"])) themeBonus += 3 * modePrefs.creatureBias;
 
   if (strategyProfile.wantsTribal) {
     for (const tribe of strategyProfile.tribalTypes) {
-      if (hasTribalType(card, tribe)) themeBonus += 10 * modePrefs.tribalBias;
+      if (hasTribalType(card, tribe) && tribalBonusAllowed(modePrefs, tribe)) themeBonus += 10 * modePrefs.tribalBias;
     }
   }
 
@@ -722,13 +739,13 @@ function scoreFallbackCard(card, commanderThemes, strategyProfile, commanderColo
   score += getThemeFocusAdjustment(card, tags, modePrefs);
 
   if (strategyProfile.wantsCreatures && isCreatureCard(card)) score += 6 * modePrefs.creatureBias;
-  if (strategyProfile.wantsTokens && isTokenMaker(card)) score += 8 * modePrefs.synergyBias;
-  if (strategyProfile.wantsSacrifice && isSacrificeCard(card)) score += 7 * modePrefs.synergyBias;
-  if (strategyProfile.wantsGoWide && isCreatureCard(card)) score += 3 * modePrefs.creatureBias;
+  if (strategyProfile.wantsTokens && isTokenMaker(card) && strategyBonusAllowed(modePrefs, ["tokens", "gowide"])) score += 8 * modePrefs.synergyBias;
+  if (strategyProfile.wantsSacrifice && isSacrificeCard(card) && strategyBonusAllowed(modePrefs, ["sacrifice", "aristocrats"])) score += 7 * modePrefs.synergyBias;
+  if (strategyProfile.wantsGoWide && isCreatureCard(card) && strategyBonusAllowed(modePrefs, ["tokens", "gowide"])) score += 3 * modePrefs.creatureBias;
 
   if (strategyProfile.wantsTribal) {
     for (const tribe of strategyProfile.tribalTypes) {
-      if (hasTribalType(card, tribe)) score += 12 * modePrefs.tribalBias;
+      if (hasTribalType(card, tribe) && tribalBonusAllowed(modePrefs, tribe)) score += 12 * modePrefs.tribalBias;
     }
   }
 

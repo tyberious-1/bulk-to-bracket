@@ -199,7 +199,7 @@ function buildDeckFromScoredPool(
   }
 
   const recommendedLandCount = recommendLandCount(commanderColors);
-  const typePlan = buildTypeTargetPlan(edhrecTypeAverages, strategyProfile, recommendedLandCount, commanderThemes, deckSize);
+  const typePlan = buildTypeTargetPlan(edhrecTypeAverages, strategyProfile, recommendedLandCount, commanderThemes, deckSize, modePrefs);
   const targetLandCount = typePlan.landCount;
   const targetNonlandCount = typePlan.nonlandCount;
   const edhrecCardLookup = new Map(
