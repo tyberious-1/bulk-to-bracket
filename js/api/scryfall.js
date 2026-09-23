@@ -25,6 +25,18 @@ function readOracleText(data) {
     .join("\n");
 }
 
+// Transform/modal-DFC layouts carry no top-level mana_cost -- it's on
+// card_faces[0] instead (the front face, the one you'd actually list in a
+// decklist and cast from hand). Split-layout cards DO have a top-level
+// mana_cost, but it's both halves joined with " // " (e.g. "{2}{R} // {1}{R}")
+// -- that string is handled by parsePips itself (manabase.js), which only
+// reads the first half, since a split card is cast as one side, not both.
+function readManaCost(data) {
+  if (data?.mana_cost) return String(data.mana_cost);
+  if (!Array.isArray(data?.card_faces)) return "";
+  return String(data.card_faces[0]?.mana_cost || "");
+}
+
 function convertScryfallCard(data) {
   const producedMana =
     Array.isArray(data.produced_mana) ? data.produced_mana :
@@ -44,7 +56,7 @@ function convertScryfallCard(data) {
     layout: String(data.layout || "").toLowerCase(),
     producedMana,
     imageUrl: pickCommanderImage(data),
-    manaCost: String(data.mana_cost || ""),
+    manaCost: readManaCost(data),
     scryfallUrl: data.scryfall_uri || "",
     raw: data
   };

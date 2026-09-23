@@ -197,6 +197,205 @@ function getLandManaProfile(card) {
 // negative for exactly the lands worth playing (Watery Grave -0.21).
 const EDHREC_LAND_INCLUSION_WEIGHT = 30;
 
+// Pip counting for the mana-base math below. Generic numbers and {X} are
+// deliberately excluded -- they never force a specific color, so they carry
+// no color requirement to plan a land base around.
+function parsePips(manaCost) {
+  const pips = { W: 0, U: 0, B: 0, R: 0, G: 0 };
+  // A split card's mana_cost is both halves joined with " // " (you cast one
+  // side, not both) -- count only the first half so the two costs don't sum
+  // as if the card required both simultaneously.
+  const firstCost = String(manaCost || "").split("//")[0];
+  const symbols = firstCost.match(/\{[^}]+\}/g) || [];
+
+  for (const symbol of symbols) {
+    const inner = symbol.slice(1, -1);
+    if (!inner.includes("/")) {
+      if (Object.prototype.hasOwnProperty.call(pips, inner)) pips[inner] += 1;
+      continue;
+    }
+
+    const parts = inner.split("/");
+    const isPhyrexian = parts.includes("P");
+    const colorParts = parts.filter((part) => Object.prototype.hasOwnProperty.call(pips, part));
+    if (colorParts.length === 0) continue;
+
+    if (isPhyrexian) {
+      for (const color of colorParts) pips[color] += 1;
+    } else {
+      for (const color of colorParts) pips[color] += 1 / colorParts.length;
+    }
+  }
+
+  return pips;
+}
+
+// Land count, estimated once before any card is picked. The estimate has to
+// come from the candidate pool rather than the deck itself, because the
+// nonland slot count (deckSize - landCount) has to exist before picking can
+// start -- see the design doc's "Non-goals" for why this stays single-pass.
+function estimateLandCount(candidatePool, commanderColors, roleTargets) {
+  const sorted = [...candidatePool].sort((a, b) => (b.score || 0) - (a.score || 0));
+  const sample = sorted.slice(0, Math.min(160, sorted.length));
+
+  let totalPips = 0;
+  for (const card of sample) {
+    const pips = parsePips(card.manaCost);
+    for (const color of commanderColors) totalPips += pips[color] || 0;
+  }
+  const pipIntensity = sample.length ? totalPips / sample.length : 0;
+
+  const rampTarget = Number(roleTargets?.ramp) || 10;
+  const baseline = recommendLandCount(commanderColors);
+  const raw = baseline + Math.round(pipIntensity * 2) - Math.round((rampTarget - 10) / 3);
+
+  return Math.max(35, Math.min(42, raw));
+}
+
+// Blends the pip-based estimate with EDHREC's own reported average, when it
+// has one. The pip estimate is the primary land-count basis (see the design
+// doc); edhrecTypeAverages.Land, floor/ceiling corrected to [38, 42] the same
+// way it always needed (EDHREC's raw average runs land-light in practice --
+// see the comment on estimateLandCount above), is now only a sanity bound:
+// it keeps a wild pip estimate within 2 lands of what real decks for this
+// commander run, rather than overriding it outright.
+function resolveLandCount(pipEstimate, edhrecTypeAverages) {
+  if (!Number(edhrecTypeAverages?.Land)) return pipEstimate;
+  const edhrecLand = Math.max(38, Math.min(42, Math.round(Number(edhrecTypeAverages.Land))));
+  return Math.max(edhrecLand - 2, Math.min(edhrecLand + 2, pipEstimate));
+}
+
+// Per-color land-source targets, computed from the deck's actual picked
+// nonland cards (not an estimate -- by the time this runs, the deck is
+// already built). Replaces buildBasicManaBase's old "fewest sources so far"
+// identity-only balance with one weighted by real pip counts.
+function computeColorSourceTargets(nonlandDeckCards, commanderColors, landCount) {
+  const targets = {};
+  if (commanderColors.length === 0) return targets;
+
+  const pipTotals = {};
+  for (const color of commanderColors) pipTotals[color] = 0;
+
+  for (const card of nonlandDeckCards) {
+    const pips = parsePips(card.manaCost);
+    for (const color of commanderColors) pipTotals[color] += pips[color] || 0;
+  }
+
+  const grandTotal = commanderColors.reduce((sum, color) => sum + pipTotals[color], 0);
+
+  if (grandTotal <= 0) {
+    const even = Math.floor(landCount / commanderColors.length);
+    let assigned = 0;
+    for (const color of commanderColors) {
+      targets[color] = even;
+      assigned += even;
+    }
+    let i = 0;
+    while (assigned < landCount) {
+      targets[commanderColors[i % commanderColors.length]] += 1;
+      assigned += 1;
+      i += 1;
+    }
+    return targets;
+  }
+
+  // Any color that appears at all is guaranteed enough sources to actually
+  // be castable, even if its pip share is small (a one-card splash). The
+  // flat 12%-of-landCount minimum is thin for a 2- or 3-color identity: a
+  // commander that costs, say, {1}{B}{R} needs both colors reliably every
+  // game, but a deck whose 60 nonland spells happen to skew hard toward one
+  // of them can otherwise starve the other down to that flat minimum even
+  // though it's a primary color, not a splash (see the harness comparison
+  // that caught this -- tools/jxa-harness/compare_report.md). Scale a second
+  // floor down as more colors compete for the same landCount (so a 5-color
+  // splash color still gets much less than a primary one, same as before),
+  // but up when there are few colors sharing it, and take the stronger of
+  // the two.
+  const splashFloor = Math.max(
+    8,
+    Math.round(0.12 * landCount),
+    Math.round(landCount / (commanderColors.length + 0.5))
+    // (tuned empirically against tools/jxa-harness/compare.js: +1 recovered
+    // about half of Rivaz's regression, +0.5 recovered nearly all of it
+    // while leaving Krydle's already-clean result unchanged)
+  );
+  const floored = {};
+  let flooredTotal = 0;
+  for (const color of commanderColors) {
+    floored[color] = pipTotals[color] > 0 ? splashFloor : 0;
+    flooredTotal += floored[color];
+  }
+
+  // Enough colors can each demand the splash floor that the floors alone
+  // overflow landCount (a 5-color deck at a 35-land count: 5 x 8 = 40 > 35).
+  // The fixup loop below only ever reduces a target back down to its own
+  // floor, never below it, so if the floors themselves don't fit, nothing
+  // after this point could recover -- scale every floor down proportionally
+  // right here instead, using a largest-remainder fixup to land on exactly
+  // landCount.
+  if (flooredTotal > landCount) {
+    const scale = landCount / flooredTotal;
+    const scaled = {};
+    let scaledTotal = 0;
+    for (const color of commanderColors) {
+      scaled[color] = floored[color] > 0 ? Math.max(1, Math.floor(floored[color] * scale)) : 0;
+      scaledTotal += scaled[color];
+    }
+
+    const scaledOrder = commanderColors
+      .filter((color) => floored[color] > 0)
+      .sort((a, b) => pipTotals[b] - pipTotals[a]);
+    let j = 0;
+    while (scaledTotal < landCount && scaledOrder.length) {
+      scaled[scaledOrder[j % scaledOrder.length]] += 1;
+      scaledTotal += 1;
+      j += 1;
+    }
+    j = 0;
+    let downGuard = landCount * 4;
+    while (scaledTotal > landCount && scaledOrder.length && downGuard-- > 0) {
+      const color = scaledOrder[j % scaledOrder.length];
+      if (scaled[color] > 1) {
+        scaled[color] -= 1;
+        scaledTotal -= 1;
+      }
+      j += 1;
+    }
+
+    return scaled;
+  }
+
+  const remaining = Math.max(0, landCount - flooredTotal);
+  let assigned = 0;
+  for (const color of commanderColors) {
+    const share = pipTotals[color] / grandTotal;
+    targets[color] = floored[color] + Math.round(share * remaining);
+    assigned += targets[color];
+  }
+
+  // Rounding fixups so targets always sum to exactly landCount. Adjust the
+  // heaviest-pip colors first -- they have the most room above their floor.
+  const order = [...commanderColors].sort((a, b) => pipTotals[b] - pipTotals[a]);
+  let guard = landCount * 4;
+  let i = 0;
+  while (assigned > landCount && guard-- > 0) {
+    const color = order[i % order.length];
+    if (targets[color] > floored[color]) {
+      targets[color] -= 1;
+      assigned -= 1;
+    }
+    i += 1;
+  }
+  i = 0;
+  while (assigned < landCount) {
+    targets[order[i % order.length]] += 1;
+    assigned += 1;
+    i += 1;
+  }
+
+  return targets;
+}
+
 function recommendLandCount(commanderColors) {
   if (commanderColors.length === 0) return 38;
   if (commanderColors.length === 1) return 36;
@@ -204,7 +403,7 @@ function recommendLandCount(commanderColors) {
   return 38;
 }
 
-function evaluateNonbasicLand(card, commanderColors, strategyProfile, modePrefs, edhrecCardLookup = null) {
+function evaluateNonbasicLand(card, commanderColors, strategyProfile, modePrefs, edhrecCardLookup = null, colorTargets = null) {
   if (!getCardType(card).includes("land")) return null;
   if (isBasicLand(card.name)) return null;
 
@@ -223,8 +422,14 @@ function evaluateNonbasicLand(card, commanderColors, strategyProfile, modePrefs,
   const reliableSources = relevantReliable.length + flexibleSources;
 
   let score = 0;
-  score += reliableSources * 6;
-  score += relevantConditional.length * 1.5;
+  const totalColorTargets = commanderColors.reduce((sum, color) => sum + (colorTargets?.[color] || 0), 0);
+  const avgColorTarget = totalColorTargets > 0 ? totalColorTargets / commanderColors.length : 1;
+  const targetWeight = (color) => (colorTargets ? (colorTargets[color] || 0) / avgColorTarget : 1);
+
+  // A flexible source (relevantReliable didn't already cover it) is weighted
+  // like the rest of the deck's colors on average, since it isn't tied to one.
+  score += relevantReliable.reduce((sum, color) => sum + 6 * targetWeight(color), 0) + flexibleSources * 6;
+  score += relevantConditional.reduce((sum, color) => sum + 1.5 * targetWeight(color), 0);
 
   if (normalizedName === "command tower") score += 10;
   if (normalizedName === "exotic orchard") score += 7;
@@ -294,7 +499,7 @@ function evaluateNonbasicLand(card, commanderColors, strategyProfile, modePrefs,
   };
 }
 
-function buildNonbasicManaBase(collectionData, allOwnedCardData, commanderColors, targetLandCount, strategyProfile, modePrefs, edhrecCardLookup = null) {
+function buildNonbasicManaBase(collectionData, allOwnedCardData, commanderColors, targetLandCount, strategyProfile, modePrefs, edhrecCardLookup = null, colorTargets = null) {
   const landPool = [];
   const entries = getCollectionEntries(collectionData);
 
@@ -307,7 +512,7 @@ function buildNonbasicManaBase(collectionData, allOwnedCardData, commanderColors
     if (isBasicLand(card.name)) continue;
     if (!legalForCommander(card.colors, commanderColors)) continue;
 
-    const landCandidate = evaluateNonbasicLand(card, commanderColors, strategyProfile, modePrefs, edhrecCardLookup);
+    const landCandidate = evaluateNonbasicLand(card, commanderColors, strategyProfile, modePrefs, edhrecCardLookup, colorTargets);
     if (!landCandidate) continue;
     landPool.push(landCandidate);
   }
@@ -331,7 +536,7 @@ function buildNonbasicManaBase(collectionData, allOwnedCardData, commanderColors
   return filtered.slice(0, maxNonbasicCount);
 }
 
-function buildBasicManaBase(commanderColors, landCountNeeded, selectedNonbasics = []) {
+function buildBasicManaBase(commanderColors, landCountNeeded, selectedNonbasics = [], colorTargets = null) {
   if (landCountNeeded <= 0) return [];
 
   if (commanderColors.length === 0) {
@@ -356,11 +561,12 @@ function buildBasicManaBase(commanderColors, landCountNeeded, selectedNonbasics 
     }
   }
 
+  const deficit = (color) => sourceCounts[color] - (colorTargets?.[color] ?? 0);
   const lands = [];
-  const colorsSorted = [...commanderColors].sort((a, b) => sourceCounts[a] - sourceCounts[b]);
+  const colorsSorted = [...commanderColors].sort((a, b) => deficit(a) - deficit(b));
 
   for (let i = 0; i < landCountNeeded; i++) {
-    colorsSorted.sort((a, b) => sourceCounts[a] - sourceCounts[b]);
+    colorsSorted.sort((a, b) => deficit(a) - deficit(b));
     const color = colorsSorted[0];
     sourceCounts[color] += 1;
 

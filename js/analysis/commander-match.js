@@ -136,18 +136,28 @@ function computeCommanderMatch(commander, pool, collection, cardData) {
     byBucket[bucket] = (byBucket[bucket] || 0) + 1;
   }
 
-  // No themes to hand it: the type mix comes from EDHREC's own averages here,
-  // and the profile only fills in where those are missing.
+  // No themes or role data to hand it: the type mix comes from EDHREC's own
+  // averages here, and the profile/role targets only fill in where those are
+  // missing (getEdhrecCommanderPool never fetches role targets, only cards
+  // and typeAverages -- this is a slots estimate, not a real build).
+  //
+  // buildRoleTargetPlan trusts whatever land count it's given verbatim (the
+  // real build blends its own pip estimate with EDHREC's average itself, see
+  // manabase.js's resolveLandCount) -- so this caller has to do that blend
+  // too, or pool.typeAverages.Land would go unused and every slots estimate
+  // would silently fall back to the flat color-count number even when EDHREC
+  // actually reported a land average for this commander.
   const strategyProfile = getCommanderStrategyProfile(commander.names[0], [], commander.colors);
-  const typePlan = buildTypeTargetPlan(
+  const plan = buildRoleTargetPlan(
     pool?.typeAverages,
     strategyProfile,
-    recommendLandCount(commander.colors),
+    resolveLandCount(recommendLandCount(commander.colors), pool?.typeAverages),
+    normalizeRoleTargets(null),
     [],
     commander.deckSize
   );
 
-  const slots = Math.max(1, typePlan.nonlandCount);
+  const slots = Math.max(1, plan.nonlandCount);
 
   return {
     usable: usable.length,

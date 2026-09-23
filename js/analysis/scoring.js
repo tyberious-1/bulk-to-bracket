@@ -287,7 +287,35 @@ function hasLethalStatDrop(text) {
   return Boolean(match) && Number(match[1]) >= LETHAL_STAT_DROP_MINIMUM;
 }
 
-function cardMatchesRole(card, role) {
+// "As this [artifact/creature/enchantment] enters, choose a creature type" is
+// the fixed templating for the whole flexible-typal-payoff family (Herald's
+// Horn, Kindred Discovery, Adaptive Automaton, Metallic Mimic, Door of
+// Destinies, Vanquisher's Banner, ...). Every other clause on these cards --
+// a cost reduction, a card-advantage trigger, a +1/+1 anthem -- only does
+// anything if the deck actually runs enough of the chosen type, so outside an
+// actual tribal deck they read as ramp/draw/etc. to a naive text match while
+// functionally doing nothing. `isTribalDeck` restores that condition instead
+// of guessing which type would be chosen.
+function isFlexibleTribalPayoff(card) {
+  return getCardText(card).includes("choose a creature type");
+}
+
+// Whether *this build* is actually leaning tribal, for isFlexibleTribalPayoff's
+// benefit. strategyProfile.wantsTribal is the commander's own overall
+// tendency and applies to the unfocused/default build the same way its other
+// archetype bonuses always have -- but once a theme is focused, the active
+// build narrows to that theme alone, and a commander that supports a tribal
+// path (Charix and crabs, say) while the user is focused on something else
+// entirely (Control) is not, right now, building tribal.
+function isActiveBuildTribal(strategyProfile, modePrefs) {
+  return modePrefs.themeFocus
+    ? modePrefs.focusedTribalTypes.length > 0
+    : strategyProfile.wantsTribal;
+}
+
+function cardMatchesRole(card, role, isTribalDeck = false) {
+  if (!isTribalDeck && isFlexibleTribalPayoff(card)) return false;
+
   const text = getCardText(card);
 
   return (ROLE_TEXT_PATTERNS[role] || []).some((pattern) => {
@@ -305,11 +333,11 @@ function cardMatchesRole(card, role) {
 
 // One role per card, first match winning, which is what the builder's role
 // targets and the curve planner are written against.
-function detectRole(card) {
+function detectRole(card, isTribalDeck = false) {
   if (getCardType(card).includes("land")) return "land";
 
   for (const role of SUPPORT_ROLES) {
-    if (cardMatchesRole(card, role)) return role;
+    if (cardMatchesRole(card, role, isTribalDeck)) return role;
   }
 
   return "synergy";
@@ -318,9 +346,9 @@ function detectRole(card) {
 // Every job a card does, rather than the first one detectRole stops at. A
 // removal spell that also draws is both, and a board wipe that draws is
 // reported as a wipe here where detectRole would only ever call it draw.
-function getRoleContributions(card) {
+function getRoleContributions(card, isTribalDeck = false) {
   if (getCardType(card).includes("land")) return [];
-  return SUPPORT_ROLES.filter((role) => cardMatchesRole(card, role));
+  return SUPPORT_ROLES.filter((role) => cardMatchesRole(card, role, isTribalDeck));
 }
 
 function detectCardTags(card) {
@@ -646,9 +674,9 @@ function getSupportedThemes(themes, allOwnedCardData) {
   return supported;
 }
 
-function classifyBackfillModeFit(card, modePrefs) {
+function classifyBackfillModeFit(card, modePrefs, isTribalDeck = false) {
   const themeMatch = cardMatchesThemeFocus(card, modePrefs);
-  const role = detectRole(card);
+  const role = detectRole(card, isTribalDeck);
   const supportRole = ["ramp", "draw", "removal", "wipe"].includes(role);
 
   const strict = themeMatch;
@@ -672,7 +700,7 @@ function scoreCard(card, edhrecCard, commanderThemes, strategyProfile, commander
   const synergyScore = Number(edhrecCard.synergy || 0) * EDHREC_CARD_SYNERGY_WEIGHT;
 
   let roleBonus = 0;
-  const role = detectRole(card);
+  const role = detectRole(card, isActiveBuildTribal(strategyProfile, modePrefs));
 
   if (role === "ramp") roleBonus = 4;
   else if (role === "draw") roleBonus = 4;
@@ -720,7 +748,7 @@ function scoreCard(card, edhrecCard, commanderThemes, strategyProfile, commander
 function scoreFallbackCard(card, commanderThemes, strategyProfile, commanderColors, modePrefs) {
   let score = 5;
 
-  const role = detectRole(card);
+  const role = detectRole(card, isActiveBuildTribal(strategyProfile, modePrefs));
   if (role === "ramp") score += 4;
   else if (role === "draw") score += 4;
   else if (role === "removal") score += 4;

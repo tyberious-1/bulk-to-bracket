@@ -174,6 +174,7 @@ function buildDeckFromScoredPool(
   const themeCardNames = options.themeCardNames instanceof Map ? options.themeCardNames : new Map();
 
   const strategyProfile = getCommanderStrategyProfile(commanderName, commanderThemes, commanderColors);
+  const isTribalDeck = isActiveBuildTribal(strategyProfile, modePrefs);
 
   // The traits this deck is built to repeat, which the backfill must not be
   // charged for pursuing -- a Dragon tribal deck wants its tenth Dragon as much
@@ -198,17 +199,11 @@ function buildDeckFromScoredPool(
     }
   }
 
-  const recommendedLandCount = recommendLandCount(commanderColors);
-  const typePlan = buildTypeTargetPlan(edhrecTypeAverages, strategyProfile, recommendedLandCount, commanderThemes, deckSize, modePrefs);
-  const targetLandCount = typePlan.landCount;
-  const targetNonlandCount = typePlan.nonlandCount;
   const edhrecCardLookup = new Map(
     (Array.isArray(edhrecCards) ? edhrecCards : []).map((entry) => [normalizeCardName(entry.name), entry])
   );
 
   const roleTargets = normalizeRoleTargets(edhrecRoleTargets);
-
-  const curvePlan = buildCurvePlan(targetNonlandCount);
 
   const themeFallbackPool = [];
   const genericFallbackPool = [];
@@ -222,7 +217,7 @@ function buildDeckFromScoredPool(
     if (getCardType(card).includes("land")) continue;
     if (!legalForCommander(card.colors, commanderColors)) continue;
 
-    const fit = classifyBackfillModeFit(card, modePrefs);
+    const fit = classifyBackfillModeFit(card, modePrefs, isTribalDeck);
     if (fit.tier >= 2) continue;
     const modeFitAdjustment = fit.tier === 0 ? 12 : -10;
 
@@ -237,7 +232,8 @@ function buildDeckFromScoredPool(
 
     const candidate = {
       name: card.name,
-      role: detectRole(card),
+      role: detectRole(card, isTribalDeck),
+      manaCost: card.manaCost,
       score: scoreFallbackCard(card, commanderThemes, strategyProfile, commanderColors, modePrefs)
         + modeFitAdjustment
         + getThemeFitBonus(themeMatch),
@@ -248,7 +244,7 @@ function buildDeckFromScoredPool(
       themeMatch,
       // Precomputed: the pickers read these once per candidate per slot.
       redundancyKeys: getCardRedundancyKeys(card, planTraits),
-      roles: getRoleContributions(card)
+      roles: getRoleContributions(card, isTribalDeck)
     };
 
     if (themeMatch && matchesFocusedTheme) themeFallbackPool.push(candidate);
@@ -262,7 +258,16 @@ function buildDeckFromScoredPool(
   scoredNonlands.sort((a, b) => b.score - a.score);
   for (const tier of fallbackTiers) tier.sort((a, b) => b.score - a.score);
 
-  const buckets = ["Creature", "Artifact", "Enchantment", "Instant", "Sorcery", "Planeswalker"];
+  const recommendedLandCount = recommendLandCount(commanderColors);
+  const combinedPool = [...themeFallbackPool, ...genericFallbackPool];
+  const pipEstimate = estimateLandCount(combinedPool, commanderColors, roleTargets) || recommendedLandCount;
+  const targetLandCount = resolveLandCount(pipEstimate, edhrecTypeAverages);
+  const targetNonlandCount = deckSize - targetLandCount;
+
+  const plan = buildRoleTargetPlan(edhrecTypeAverages, strategyProfile, targetLandCount, roleTargets, commanderThemes, deckSize, modePrefs);
+  const typePlan = { landCount: plan.landCount, nonlandCount: plan.nonlandCount, buckets: plan.typeBuckets };
+
+  const curvePlan = buildCurvePlan(targetNonlandCount, adjustCurveShares(DEFAULT_CURVE_SHARES, roleTargets, strategyProfile));
 
   // Traits of everything already drafted, EDHREC picks included -- a Rogue
   // taken from the EDHREC pool makes the next Rogue no less of a repeat.
@@ -297,7 +302,7 @@ function buildDeckFromScoredPool(
     // the only reliable way anything downstream (getSupportPackageCounts, and
     // through it bracket.js) can read "every job this card does" rather than
     // silently getting nothing back.
-    const roles = getRoleContributions(getRedundancySource(card) || card);
+    const roles = getRoleContributions(getRedundancySource(card) || card, isTribalDeck);
 
     deck.push({ ...card, source, roles });
     usedNames.add(key);
@@ -306,30 +311,9 @@ function buildDeckFromScoredPool(
     return true;
   }
 
-  // Phase 0: hit the EDHREC type mix using EDHREC-owned matches first.
-  // Type distribution is the primary constraint; support roles adapt to what remains.
-  for (const bucket of buckets) {
-    const target = Number(typePlan?.buckets?.[bucket]?.target || 0);
-    while (getTypePlanBucketNeed(deck, typePlan, bucket) > 0 && deck.length < targetNonlandCount) {
-      const edhrecPick = pickBestCardForBucket(scoredNonlands, usedNames, commanderKeys, bucket, curvePlan);
-      if (edhrecPick) {
-        addCard(edhrecPick, "edhrec");
-        continue;
-      }
-
-      const fallbackPick = pickFromTiers(fallbackTiers, (tier) =>
-        pickBestFallbackCard(tier, usedNames, commanderKeys, bucket, curvePlan, redundancyCounts));
-      if (fallbackPick) {
-        addCard(fallbackPick, getFallbackSource(fallbackPick));
-        continue;
-      }
-
-      break;
-    }
-  }
-
-  // Phase 1: fill the support package (ramp, draw, removal, wipe) with remaining slots.
-  // Support roles adapt to the type distribution already established in Phase 0.
+  // Phase 0: fill the support package (ramp, draw, removal, wipe) first.
+  // Support roles are the hard constraint; type buckets are a soft diversity
+  // floor layered on top, not a competing quota.
   const supportRoles = ["ramp", "draw", "removal", "wipe"];
   const exhaustedRoles = new Set();
 
@@ -341,38 +325,33 @@ function buildDeckFromScoredPool(
     for (const card of deck) {
       const source = getRedundancySource(card);
       if (!source) continue;
-      for (const role of getRoleContributions(source)) counts[role] += 1;
+      for (const role of getRoleContributions(source, isTribalDeck)) counts[role] += 1;
     }
 
     return counts;
   }
 
-  // A role slot still answers to the type plan, respecting the type distribution
-  // established in Phase 0. Target rather than max: leave the buckets room to stay
-  // balanced rather than overloading a type with support roles.
-  function bucketHasRoomForRole(bucket) {
-    const rule = typePlan?.buckets?.[bucket];
-    if (!rule) return true;
-    return (countByType(deck)[bucket] || 0) < Number(rule.target || 0);
-  }
-
   function pickBestForRole(pool, role, chargeRedundancy) {
     let best = null;
     let bestScore = -Infinity;
+    const typeCounts = countByType(deck);
 
     for (const card of pool) {
       const key = normalizeCardName(card.name);
       if (usedNames.has(key) || commanderKeys.has(key)) continue;
 
-      const roles = card.roles || getRoleContributions(getRedundancySource(card) || card);
+      const roles = card.roles || getRoleContributions(getRedundancySource(card) || card, isTribalDeck);
       if (!roles.includes(role)) continue;
-      if (!bucketHasRoomForRole(getDeckTypeBucket(card.type || card.type_line || ""))) continue;
 
       let adjusted = Number(card.score || 0);
       if (chargeRedundancy) adjusted -= getRedundancyPenalty(card.redundancyKeys, redundancyCounts);
       // Out-of-band is discouraged here rather than forbidden: a support hole is
       // worse for the deck than a bump in the curve.
       if (!curveHasRoom(curvePlan, card.cmc)) adjusted -= 8;
+
+      const bucket = getDeckTypeBucket(card.type || card.type_line || "");
+      const typeRule = typePlan?.buckets?.[bucket];
+      if (typeRule && (typeCounts[bucket] || 0) > Number(typeRule.target || 0)) adjusted -= 6;
 
       if (adjusted > bestScore) {
         best = card;
@@ -390,7 +369,7 @@ function buildDeckFromScoredPool(
     let largestGap = 0;
     for (const role of supportRoles) {
       if (exhaustedRoles.has(role)) continue;
-      const gap = roleTargets[role] - counts[role];
+      const gap = (plan.roleBuckets[role]?.target || 0) - counts[role];
       if (gap > largestGap) {
         neediestRole = role;
         largestGap = gap;
@@ -415,8 +394,8 @@ function buildDeckFromScoredPool(
     addCard(fallbackPick, getFallbackSource(fallbackPick));
   }
 
-  // Phase 2: satisfy missing type minimums from the rest of the collection.
-  for (const neededBucket of getCardsNeededForTypeMinimums(deck, typePlan)) {
+  // Phase 1: satisfy missing type minimums from the rest of the collection.
+  for (const neededBucket of getCardsNeededForTypeMinimums(deck, typePlan.buckets)) {
     if (deck.length >= targetNonlandCount) break;
 
     const edhrecPick = pickBestCardForBucket(scoredNonlands, usedNames, commanderKeys, neededBucket, curvePlan);
@@ -432,7 +411,7 @@ function buildDeckFromScoredPool(
     }
   }
 
-  // Phase 3: fill the remaining slots with the best cards, prioritizing whatever type and role is still short.
+  // Phase 2: fill the remaining slots with the best cards, prioritizing whatever type and role is still short.
   //
   // The EDHREC pool rides along with both tiers rather than sitting in one of
   // them: it is this commander's own card list, so it is on-theme by
@@ -440,22 +419,24 @@ function buildDeckFromScoredPool(
   const flexibleTiers = fallbackTiers.map((tier) => [...scoredNonlands, ...tier]);
   while (deck.length < targetNonlandCount) {
     const best = pickFromTiers(flexibleTiers, (tier) =>
-      chooseBestFlexibleCard(tier, deck, typePlan, roleTargets, usedNames, commanderKeys));
+      chooseBestFlexibleCard(tier, deck, plan, usedNames, commanderKeys));
     if (!best) break;
 
     addCard(best, scoredNonlands.includes(best) ? "edhrec" : getFallbackSource(best));
   }
 
-  // Phase 3.5: emergency support-role backfill via eviction.
+  // Phase 3: emergency support-role backfill via eviction.
   //
-  // Phase 0 alone can fill every type bucket to its target -- the bucket
-  // targets are built to sum to targetNonlandCount -- which leaves Phase 1's
-  // role loop nothing to do (deck.length is already full when it starts).
-  // That is fine for most decks, but a theme that lives in the Artifact
-  // bucket (Equipment, here) fills that bucket with on-theme picks before
-  // ramp, which is mostly mana rocks, ever gets a turn: a Sokka and Suki
-  // build left 29 owned, color-legal ramp rocks undrafted while short 5 of
-  // its ramp target, purely because Artifact had already hit 28/28.
+  // The role loop runs first now (Phase 0), so by the time this phase starts
+  // a role is normally already at target or already marked exhausted -- this
+  // rarely finds anything left to do. It stays as a safety net for the case
+  // that got it written: a theme living in the same type bucket as a role
+  // (Equipment in Artifact) can still starve that role if the role loop's own
+  // pool was thin and Phase 2's flexible fill then leaned the deck's Artifact
+  // slots toward theme picks before the role's target was reached. A Sokka
+  // and Suki build left 29 owned, color-legal ramp rocks undrafted while
+  // short 5 of its ramp target, purely because Artifact had already hit
+  // 28/28.
   //
   // Rather than raise the Artifact bucket's target -- which would let the
   // theme itself balloon -- evict the worst card from a bucket that has room
@@ -478,7 +459,7 @@ function buildDeckFromScoredPool(
       const key = normalizeCardName(card.name);
       if (usedNames.has(key) || commanderKeys.has(key)) continue;
 
-      const roles = card.roles || getRoleContributions(getRedundancySource(card) || card);
+      const roles = card.roles || getRoleContributions(getRedundancySource(card) || card, isTribalDeck);
       if (!roles.includes(role)) continue;
 
       let adjusted = Number(card.score || 0);
@@ -495,8 +476,8 @@ function buildDeckFromScoredPool(
   }
 
   for (const role of supportRoles) {
-    let guard = Number(roleTargets[role] || 0) * 2;
-    while (getDeckRoleCounts()[role] < Number(roleTargets[role] || 0) && guard-- > 0) {
+    let guard = Number(plan.roleBuckets[role]?.target || 0) * 2;
+    while (getDeckRoleCounts()[role] < Number(plan.roleBuckets[role]?.target || 0) && guard-- > 0) {
       const edhrecPick = pickForRoleIgnoringBucketRoom(scoredNonlands, role, false);
       const pick = edhrecPick || pickFromTiers(fallbackTiers, (tier) => pickForRoleIgnoringBucketRoom(tier, role, true));
       if (!pick) break;
@@ -515,8 +496,8 @@ function buildDeckFromScoredPool(
         // Robbing a card another role still needs just moves the shortage
         // around -- only spend a card whose roles are already at or above
         // their own targets (or that carries no support role at all).
-        const existingRoles = existing.roles || getRoleContributions(getRedundancySource(existing) || existing);
-        const stillNeeded = existingRoles.some((r) => roleCounts[r] <= Number(roleTargets[r] || 0));
+        const existingRoles = existing.roles || getRoleContributions(getRedundancySource(existing) || existing, isTribalDeck);
+        const stillNeeded = existingRoles.some((r) => roleCounts[r] <= Number(plan.roleBuckets[r]?.target || 0));
         if (stillNeeded) continue;
 
         if ((existing.score || 0) < replaceScore) {
@@ -566,6 +547,23 @@ function buildDeckFromScoredPool(
     }
   }
 
+  // Resolve every deck entry back to its full record (candidates only carry
+  // name/type/cmc/score/etc, same reason getRedundancySource exists above)
+  // so pip-counting sees real manaCost strings, not undefined. The commander's
+  // own card(s) are prepended too -- otherwise a color that's only in the
+  // commander's cost (never in the deck's other spells) gets zero pips and
+  // computeColorSourceTargets's splash floor never triggers for it, leaving
+  // the mana base with ~0 sources for a color needed to cast the commander.
+  const resolvedCommanderCards = commanderNames
+    .map((name) => name && (allOwnedCardData.get(normalizeCardName(name))
+      || allOwnedCardData.get(normalizeCardName(getPrimaryCardName(name)))))
+    .filter(Boolean);
+  const resolvedNonlandCards = [
+    ...resolvedCommanderCards,
+    ...deck.map((card) => getRedundancySource(card) || card)
+  ];
+  const colorTargets = computeColorSourceTargets(resolvedNonlandCards, commanderColors, targetLandCount);
+
   const selectedNonbasicLands = buildNonbasicManaBase(
     collectionData,
     allOwnedCardData,
@@ -573,7 +571,8 @@ function buildDeckFromScoredPool(
     targetLandCount,
     strategyProfile,
     modePrefs,
-    edhrecCardLookup
+    edhrecCardLookup,
+    colorTargets
   );
 
   let remainingLandCount = targetLandCount - selectedNonbasicLands.length;
@@ -582,7 +581,8 @@ function buildDeckFromScoredPool(
   const basicLands = buildBasicManaBase(
     commanderColors,
     remainingLandCount,
-    selectedNonbasicLands
+    selectedNonbasicLands,
+    colorTargets
   );
 
   let finalDeck = [...deck, ...selectedNonbasicLands, ...basicLands];
@@ -591,7 +591,8 @@ function buildDeckFromScoredPool(
     const extra = buildBasicManaBase(
       commanderColors,
       1,
-      finalDeck.filter((c) => c.role === "land")
+      finalDeck.filter((c) => c.role === "land"),
+      colorTargets
     );
     finalDeck.push(...extra);
   }
@@ -645,7 +646,7 @@ function getCardSection(cardType) {
 function generateCardReasons(card, commanderThemes, strategyProfile, commanderColors) {
   const reasons = [];
   const tags = detectCardTags(card);
-  const role = detectRole(card);
+  const role = detectRole(card, strategyProfile.wantsTribal);
 
   if (role === "ramp") reasons.push("ramp");
   if (role === "draw") reasons.push("draw");

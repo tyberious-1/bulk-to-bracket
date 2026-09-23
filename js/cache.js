@@ -4,10 +4,17 @@
 //
 // Depends on: text.js
 
-// Bumped to v2: entries no longer carry `legalities`, so a v1 payload would
-// waste most of the quota until it aged out.
-const CARD_CACHE_STORAGE_KEY = "mtg_commander_builder_card_cache_v2";
-const LEGACY_CARD_CACHE_STORAGE_KEYS = ["mtg_commander_builder_card_cache_v1"];
+// Bumped to v3: DFC/split cards persisted under v2 carry an empty manaCost
+// (fixed going forward -- see js/api/scryfall.js's readManaCost and
+// js/build/manabase.js's parsePips). A cache hit never re-fetches, so
+// falling back to v2 data the way earlier bumps did would keep serving that
+// stale, empty manaCost forever for anyone with a warm cache. No fallback to
+// v2 (or v1) this time -- a one-time full re-fetch instead.
+const CARD_CACHE_STORAGE_KEY = "mtg_commander_builder_card_cache_v3";
+const LEGACY_CARD_CACHE_STORAGE_KEYS = [
+  "mtg_commander_builder_card_cache_v1",
+  "mtg_commander_builder_card_cache_v2"
+];
 const MAX_PERSISTED_CACHE_ENTRIES = 8000;
 
 const cardCache = new Map();
@@ -67,21 +74,16 @@ function indexCardByFrontFace(cache, card) {
   cache.set(front, card);
 }
 
-// Reads the current payload, falling back to an older key so a version bump
-// doesn't force a full re-fetch. Superseded payloads are always removed --
-// left in place they would occupy quota the current key needs.
+// Reads the current payload. Legacy keys are only ever cleaned up here, never
+// read as a fallback -- unlike the v1->v2 bump, v2's persisted manaCost for
+// DFC/split cards is wrong, not just differently-shaped, so serving it back
+// would silently undo the fix that motivated this bump.
 function readPersistedCachePayload() {
-  const raw = localStorage.getItem(CARD_CACHE_STORAGE_KEY);
-
-  let legacyRaw = null;
   for (const key of LEGACY_CARD_CACHE_STORAGE_KEYS) {
-    if (!legacyRaw) legacyRaw = localStorage.getItem(key);
     localStorage.removeItem(key);
   }
 
-  // Older entries carry fields the current shape drops; the restore below
-  // reads by name, so the extras are simply ignored.
-  return raw || legacyRaw;
+  return localStorage.getItem(CARD_CACHE_STORAGE_KEY);
 }
 
 function hydrateCardCacheFromStorage() {

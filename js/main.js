@@ -250,6 +250,7 @@ async function performBuildFromContext() {
   );
 
   const modePrefs = getModePreferences(getCurrentBuildMode(), strategyProfile);
+  const isTribalDeck = isActiveBuildTribal(strategyProfile, modePrefs);
 
   updateProgress(78, "Checking legality and scoring cards...");
   const scoredNonlands = [];
@@ -304,7 +305,7 @@ async function performBuildFromContext() {
       continue;
     }
 
-    const role = detectRole(card);
+    const role = detectRole(card, isTribalDeck);
     const score = scoreCard(
       card,
       edhrecCard,

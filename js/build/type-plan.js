@@ -1,28 +1,29 @@
 // Type-mix planning.
 //
-// buildTypeTargetPlan turns EDHREC's average type counts into per-bucket
-// target/min/max rules that always sum to the nonland slot count, so the
-// builder can never overfill instants while starving creatures. The rest of
-// the module answers "what does this deck still need?" against that plan.
+// buildRoleTargetPlan turns role targets (ramp/draw/removal/wipe) into the
+// hard constraint the deck is built against, with type buckets (Creature/
+// Instant/etc.) as a soft diversity floor layered on top. See the design doc
+// for why this flips today's priority.
 //
 // Depends on: deck-stats.js, text.js, themes.js
 
 // deckSize is the number of cards besides the commanders: 99 for a single
 // commander, 98 when a partner or Background takes the second slot.
-function buildTypeTargetPlan(edhrecTypeAverages, strategyProfile, targetLandCount, commanderThemes = [], deckSize = 99, modePrefs = {}) {
+//
+// Role targets (ramp/draw/removal/wipe, plus a synergy catch-all) are now the
+// hard constraint the deck is built against; type buckets (Creature/Instant/
+// etc.) are a soft diversity floor layered on top, not a competing quota. See
+// the design doc for why this flips today's priority.
+function buildRoleTargetPlan(edhrecTypeAverages, strategyProfile, targetLandCount, roleTargets, commanderThemes = [], deckSize = 99, modePrefs = {}) {
   const themeSignals = buildThemeSignalSet(commanderThemes);
-  // EDHREC's average land count runs 34-36, which plays land-light in
-  // practice -- Wizards' own precons settle closer to 38, so treat that as
-  // the floor and allow up to 42.
-  const requestedLandCount = Math.max(38, Math.min(42, Math.round(Number(edhrecTypeAverages?.Land) || targetLandCount)));
+  // targetLandCount is already the final, sanity-bounded number the caller
+  // computed (deck.js blends the pip estimate with EDHREC's average itself
+  // now, see manabase.js's resolveLandCount) -- trust it rather than
+  // re-deriving it here from edhrecTypeAverages.Land, which would silently
+  // reintroduce EDHREC-overrides-everything behavior.
+  const requestedLandCount = Math.round(targetLandCount);
   const targetNonlandCount = deckSize - requestedLandCount;
 
-  // Equipment lives in the Artifact bucket and Auras live in the Enchantment
-  // bucket, but "equipment"/"auras" both alias only to "voltron" (see
-  // getThemeAliases), never to "artifacts"/"enchantments" -- so a voltron
-  // commander/focus never widened either bucket and Auras/Equipment were
-  // capped at the generic default (5-7 slots total) no matter how well they
-  // scored. Widen both when voltron is in play, ambient or explicitly focused.
   const wantsVoltron = themeSignals.has("voltron") || modePrefs?.focusedThemeSignal === "voltron";
 
   const defaults = {
@@ -36,100 +37,60 @@ function buildTypeTargetPlan(edhrecTypeAverages, strategyProfile, targetLandCoun
     Planeswalker: 1
   };
 
-  const buckets = ["Creature", "Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker"];
+  const typeKeys = ["Creature", "Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker"];
   const raw = Object.fromEntries(
-    buckets.map((bucket) => {
+    typeKeys.map((bucket) => {
       const value = Number(edhrecTypeAverages?.[bucket]);
       return [bucket, Number.isFinite(value) && value >= 0 ? value : defaults[bucket]];
     })
   );
 
-  let totalRaw = buckets.reduce((sum, bucket) => sum + (raw[bucket] || 0), 0);
-  if (totalRaw <= 0) totalRaw = buckets.reduce((sum, bucket) => sum + defaults[bucket], 0);
+  let totalRaw = typeKeys.reduce((sum, bucket) => sum + (raw[bucket] || 0), 0);
+  if (totalRaw <= 0) totalRaw = typeKeys.reduce((sum, bucket) => sum + defaults[bucket], 0);
 
-  const scaled = {};
-  let assigned = 0;
-  for (const bucket of buckets) {
+  // Scaled purely to inform the soft target/min below -- type buckets no
+  // longer have to sum to targetNonlandCount, since role buckets do that job.
+  const typeBuckets = {};
+  for (const bucket of typeKeys) {
     const exact = ((raw[bucket] || defaults[bucket]) / totalRaw) * targetNonlandCount;
-    scaled[bucket] = Math.max(bucket === "Planeswalker" ? 0 : 1, Math.round(exact));
-    assigned += scaled[bucket];
+    const target = Math.max(bucket === "Planeswalker" ? 0 : 1, Math.round(exact));
+    const minimumFloor = bucket === "Creature" ? 8 : bucket === "Planeswalker" ? 0 : 1;
+    typeBuckets[bucket] = { target: Math.max(target, minimumFloor), min: minimumFloor };
   }
 
-  const preferenceOrder = ["Creature", "Artifact", "Enchantment", "Instant", "Sorcery", "Planeswalker"];
-  while (assigned < targetNonlandCount) {
-    for (const bucket of preferenceOrder) {
-      scaled[bucket] += 1;
-      assigned += 1;
-      if (assigned >= targetNonlandCount) break;
-    }
-  }
-  while (assigned > targetNonlandCount) {
-    for (const bucket of ["Planeswalker", "Sorcery", "Instant", "Enchantment", "Artifact", "Creature"]) {
-      const minimumFloor = bucket === "Creature"
-        ? 8
-        : bucket === "Planeswalker" ? 0 : 1;
-      if (scaled[bucket] > minimumFloor) {
-        scaled[bucket] -= 1;
-        assigned -= 1;
-      }
-      if (assigned <= targetNonlandCount) break;
-    }
+  const roleKeys = ["ramp", "draw", "removal", "wipe"];
+  const roleBuckets = {};
+  let roleTotal = 0;
+  for (const role of roleKeys) {
+    const target = Math.max(0, Math.round(Number(roleTargets?.[role]) || 0));
+    roleBuckets[role] = { target, min: Math.max(0, target - 2), max: target + 2 };
+    roleTotal += target;
   }
 
-  const providedCreature = Number(edhrecTypeAverages?.Creature);
-  const providedNonlandTotal = buckets.reduce((sum, bucket) => {
-    const value = Number(edhrecTypeAverages?.[bucket]);
-    return sum + (Number.isFinite(value) && value >= 0 ? value : 0);
-  }, 0);
+  const synergyTarget = Math.max(0, targetNonlandCount - roleTotal);
+  roleBuckets.synergy = {
+    target: synergyTarget,
+    min: Math.max(0, synergyTarget - 3),
+    max: synergyTarget + 3
+  };
 
-  const desiredCreatureTargetFromEdhrec =
-    Number.isFinite(providedCreature) && providedCreature > 0
-      ? Math.round(
-        providedNonlandTotal > 0
-          ? (providedCreature / providedNonlandTotal) * targetNonlandCount
-          : providedCreature
-      )
-      : null;
-
-  if (desiredCreatureTargetFromEdhrec && scaled.Creature < desiredCreatureTargetFromEdhrec) {
-    const boost = desiredCreatureTargetFromEdhrec - scaled.Creature;
-    scaled.Creature += boost;
-    assigned += boost;
-  }
-
-  while (assigned > targetNonlandCount) {
-    for (const bucket of ["Planeswalker", "Sorcery", "Instant", "Enchantment", "Artifact"]) {
-      const minimumFloor = bucket === "Planeswalker" ? 0 : 1;
-      if (scaled[bucket] > minimumFloor) {
-        scaled[bucket] -= 1;
-        assigned -= 1;
-      }
-      if (assigned <= targetNonlandCount) break;
-    }
-    if (assigned > targetNonlandCount && scaled.Creature > 8) {
-      scaled.Creature -= 1;
-      assigned -= 1;
-    }
-  }
-
-  const plan = {};
-  for (const bucket of buckets) {
-    const target = scaled[bucket];
-    const flex = 2;
-    const minimumFloor = bucket === "Creature"
-      ? 8
-      : bucket === "Planeswalker" ? 0 : 1;
-    plan[bucket] = {
-      target,
-      min: Math.max(minimumFloor, target - flex),
-      max: Math.max(target, target + flex)
-    };
+  // Rounding fixup: if role targets (unusual EDHREC data) overshoot
+  // targetNonlandCount, trim synergy first since it's the most elastic
+  // bucket, down to its own floor of 0.
+  let assignedTotal = roleTotal + roleBuckets.synergy.target;
+  if (assignedTotal > targetNonlandCount) {
+    const overflow = assignedTotal - targetNonlandCount;
+    const trim = Math.min(overflow, roleBuckets.synergy.target);
+    roleBuckets.synergy.target -= trim;
+    roleBuckets.synergy.min = Math.max(0, roleBuckets.synergy.target - 3);
+    roleBuckets.synergy.max = roleBuckets.synergy.target + 3;
   }
 
   return {
     landCount: requestedLandCount,
     nonlandCount: targetNonlandCount,
-    buckets: plan
+    roleBuckets,
+    typeBuckets
   };
 }
 
@@ -154,6 +115,45 @@ function getCmcBand(cmc) {
 // curve, so these are fixed: a normal descending Commander curve that still
 // leaves room for a real top end.
 const DEFAULT_CURVE_SHARES = { 1: 0.08, 2: 0.20, 3: 0.22, 4: 0.18, 5: 0.13, 6: 0.10, 7: 0.09 };
+
+// Curve shares, nudged by how ramp-heavy the plan is and whether the
+// strategy wants a low, wide curve. Bounded (+/-0.02 to +/-0.05 of total
+// share) so this stays a nudge, not a new curve model.
+function adjustCurveShares(shares, roleTargets, strategyProfile) {
+  const rampTarget = Number(roleTargets?.ramp) || 10;
+  const rampShift = Math.max(-0.02, Math.min(0.05, (rampTarget - 10) * 0.01));
+  const lowCurveFlag = Boolean(
+    strategyProfile?.wantsGoWide || strategyProfile?.wantsTribal || strategyProfile?.wantsCantrips
+  );
+  const curveShift = rampShift - (lowCurveFlag ? 0.02 : 0);
+
+  const lowBands = ["1", "2"];
+  const highBands = ["5", "6", "7"];
+  const adjusted = { ...shares };
+
+  if (curveShift === 0) return adjusted;
+
+  // Positive curveShift: move weight from low bands into high bands.
+  // Negative: the reverse. Each side's shift is split proportionally to its
+  // members' existing share of that side's total.
+  const fromBands = curveShift > 0 ? lowBands : highBands;
+  const toBands = curveShift > 0 ? highBands : lowBands;
+  const magnitude = Math.abs(curveShift);
+
+  const fromTotal = fromBands.reduce((sum, band) => sum + shares[band], 0);
+  const toTotal = toBands.reduce((sum, band) => sum + shares[band], 0);
+
+  for (const band of fromBands) {
+    const share = fromTotal > 0 ? shares[band] / fromTotal : 1 / fromBands.length;
+    adjusted[band] = Math.max(0, shares[band] - magnitude * share);
+  }
+  for (const band of toBands) {
+    const share = toTotal > 0 ? shares[band] / toTotal : 1 / toBands.length;
+    adjusted[band] = shares[band] + magnitude * share;
+  }
+
+  return adjusted;
+}
 
 function buildCurvePlan(nonlandCount, shares = DEFAULT_CURVE_SHARES) {
   const caps = {};
@@ -181,33 +181,14 @@ function releaseCurvePick(curvePlan, cmc) {
   curvePlan.counts[band] = Math.max(0, (curvePlan.counts[band] || 0) - 1);
 }
 
-// No current caller; kept alongside the rest of the plan predicates.
-function canAddCardForTypePlan(card, deck, typePlan, strict = true) {
-  const planBuckets = typePlan?.buckets || typePlan || {};
-  const bucket = getDeckTypeBucket(card.type || card.type_line || "");
-  if (!planBuckets[bucket]) return true;
-  const counts = countByType(deck);
-  const limit = strict ? planBuckets[bucket].max : planBuckets[bucket].max + 2;
-  return counts[bucket] < limit;
-}
-
-function getCardsNeededForTypeMinimums(deck, typePlan) {
-  const planBuckets = typePlan?.buckets || typePlan || {};
+function getCardsNeededForTypeMinimums(deck, typeBuckets) {
   const counts = countByType(deck);
   const needed = [];
-  for (const [bucket, rule] of Object.entries(planBuckets)) {
+  for (const [bucket, rule] of Object.entries(typeBuckets || {})) {
     const deficit = Math.max(0, (rule?.min || 0) - (counts[bucket] || 0));
     for (let i = 0; i < deficit; i++) needed.push(bucket);
   }
   return needed;
-}
-
-function getTypePlanBucketNeed(deck, typePlan, bucket) {
-  const planBuckets = typePlan?.buckets || typePlan || {};
-  const counts = countByType(deck);
-  const rule = planBuckets[bucket];
-  if (!rule) return 0;
-  return Math.max(0, (rule.target || 0) - (counts[bucket] || 0));
 }
 
 function getRoleCounts(deck) {
@@ -215,7 +196,8 @@ function getRoleCounts(deck) {
     ramp: deck.filter((card) => card.role === "ramp").length,
     draw: deck.filter((card) => card.role === "draw").length,
     removal: deck.filter((card) => card.role === "removal").length,
-    wipe: deck.filter((card) => card.role === "wipe").length
+    wipe: deck.filter((card) => card.role === "wipe").length,
+    synergy: deck.filter((card) => card.role === "synergy").length
   };
 }
 
@@ -240,10 +222,11 @@ function pickBestCardForBucket(pool, usedNames, excludedKeys, bucket, curvePlan 
   return bestIgnoringCurve;
 }
 
-function chooseBestFlexibleCard(pool, deck, typePlan, roleTargets, usedNames, excludedKeys) {
-  const counts = countByType(deck);
+function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys) {
+  const typeCounts = countByType(deck);
   const roleCounts = getRoleCounts(deck);
-  const planBuckets = typePlan?.buckets || typePlan || {};
+  const roleBuckets = plan?.roleBuckets || {};
+  const typeBuckets = plan?.typeBuckets || {};
 
   let best = null;
   let bestScore = -Infinity;
@@ -252,26 +235,29 @@ function chooseBestFlexibleCard(pool, deck, typePlan, roleTargets, usedNames, ex
     const key = normalizeCardName(card.name);
     if (usedNames.has(key) || excludedKeys.has(key)) continue;
 
-    const bucket = getDeckTypeBucket(card.type || card.type_line || "");
-    const rule = planBuckets[bucket];
-    const bucketCount = counts[bucket] || 0;
-    if (rule && bucketCount >= rule.max + 2) continue;
+    const roleRule = roleBuckets[card.role];
+    const roleCount = roleCounts[card.role] || 0;
+    if (roleRule && roleCount >= roleRule.max + 2) continue;
 
     let adjustedScore = Number(card.score || 0);
 
-    if (rule) {
-      const target = Number(rule.target || 0);
-      const deficit = Math.max(0, target - bucketCount);
-      const overflow = Math.max(0, bucketCount - target);
+    // Role deficit is the dominant term now -- this is the hard constraint.
+    if (roleRule) {
+      const target = Number(roleRule.target || 0);
+      const deficit = Math.max(0, target - roleCount);
+      const overflow = Math.max(0, roleCount - target);
       adjustedScore += deficit * 30;
       adjustedScore -= overflow * 18;
-      if (bucketCount < (rule.min || 0)) adjustedScore += 35;
-      if (bucketCount >= (rule.max || 999)) adjustedScore -= 28;
+      if (roleCount < (roleRule.min || 0)) adjustedScore += 35;
+      if (roleCount >= (roleRule.max || 999)) adjustedScore -= 28;
     }
 
-    if (roleTargets && roleTargets[card.role]) {
-      const roleDeficit = Math.max(0, Number(roleTargets[card.role]) - Number(roleCounts[card.role] || 0));
-      adjustedScore += roleDeficit * 12;
+    // Type deficit is a minor tiebreaker -- soft diversity, not a gate.
+    const bucket = getDeckTypeBucket(card.type || card.type_line || "");
+    const typeRule = typeBuckets[bucket];
+    if (typeRule) {
+      const typeDeficit = Math.max(0, Number(typeRule.target || 0) - (typeCounts[bucket] || 0));
+      adjustedScore += typeDeficit * 8;
     }
 
     if (bucket === "Creature") adjustedScore += 4;
