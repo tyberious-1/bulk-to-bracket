@@ -156,15 +156,23 @@ function displaySupportPackage(deck, edhrecRoleTargets) {
           const { primary, total } = counts[role];
           const target = targets[role];
           const short = primary < target;
+          const cards = getCardsForRole(deck, role);
           return `
-            <div class="support-row">
-              <span class="support-label">${escapeHtml(SUPPORT_ROLE_LABELS[role])}</span>
-              <span class="support-counts">
-                <strong class="${short ? "support-short" : ""}">${primary}</strong>
-                <span class="support-target">of ${target}</span>
-                ${total > primary ? `<span class="support-secondary">${total} incl. secondary</span>` : ""}
-              </span>
-            </div>
+            <details class="support-row">
+              <summary>
+                <span class="support-label">${escapeHtml(SUPPORT_ROLE_LABELS[role])}</span>
+                <span class="support-counts">
+                  <strong class="${short ? "support-short" : ""}">${primary}</strong>
+                  <span class="support-target">of ${target}</span>
+                  ${total > primary ? `<span class="support-secondary">${total} incl. secondary</span>` : ""}
+                </span>
+              </summary>
+              <div class="support-cardlist">
+                ${cards.primary.map((name) => `<span class="support-card">${escapeHtml(name)}</span>`).join("")}
+                ${cards.secondary.map((name) => `<span class="support-card support-card-secondary">${escapeHtml(name)} <span class="support-card-tag">secondary</span></span>`).join("")}
+                ${!cards.primary.length && !cards.secondary.length ? `<span class="support-cardlist-empty">No cards fill this role.</span>` : ""}
+              </div>
+            </details>
           `;
         }).join("")}
       </div>

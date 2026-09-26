@@ -79,3 +79,21 @@ function getSupportPackageCounts(deck) {
 
   return counts;
 }
+
+// Names behind a support-package count, split the same way `total` vs
+// `primary` is: `primary` did this job as its main role, `secondary` only
+// contributes to it while doing something else primarily.
+function getCardsForRole(deck, role) {
+  const primary = [];
+  const secondary = [];
+
+  for (const card of deck || []) {
+    if (!(card.roles || []).includes(role)) continue;
+    if (card.role === role) primary.push(card.name);
+    else secondary.push(card.name);
+  }
+
+  primary.sort((a, b) => a.localeCompare(b));
+  secondary.sort((a, b) => a.localeCompare(b));
+  return { primary, secondary };
+}
