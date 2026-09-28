@@ -22,6 +22,8 @@ let commanderScanBusy = false;
 // Empty means no filter. "C" stands in for the colorless identity, which is the
 // empty set of colors and so has no pip of its own to toggle.
 let commanderColorFilter = new Set();
+// Empty means no filter on color count. Values are 0-5 representing mono to 5-color.
+let commanderColorCountFilter = new Set();
 
 function activateTab(tabName) {
   document.querySelectorAll(".tab-btn").forEach((btn) => {
@@ -77,15 +79,32 @@ function getCommanderMatchResult(commander) {
   return match && match !== "unavailable" ? match : null;
 }
 
-// An exact identity match: picking U and B offers the commanders of a Dimir
-// deck, not every commander a Dimir deck could run.
+// When only color identity is selected: exact match (picking U and B = Dimir only).
+// When color count is also selected: any commander with those colors and that count.
 function matchesColorFilter(commander) {
-  if (!commanderColorFilter.size) return true;
-
   const colors = commander.colors || [];
-  if (commanderColorFilter.has("C")) return colors.length === 0;
-  if (colors.length !== commanderColorFilter.size) return false;
-  return colors.every((color) => commanderColorFilter.has(color));
+  const hasColorCountFilter = commanderColorCountFilter.size > 0;
+
+  if (commanderColorFilter.size) {
+    if (commanderColorFilter.has("C")) {
+      if (colors.length !== 0) return false;
+    } else if (hasColorCountFilter) {
+      // With color count filter: selected colors must all be present
+      for (const color of commanderColorFilter) {
+        if (!colors.includes(color)) return false;
+      }
+    } else {
+      // Without color count filter: exact match on identity
+      if (colors.length !== commanderColorFilter.size) return false;
+      if (!colors.every((color) => commanderColorFilter.has(color))) return false;
+    }
+  }
+
+  if (commanderColorCountFilter.size) {
+    if (!commanderColorCountFilter.has(colors.length)) return false;
+  }
+
+  return true;
 }
 
 // Checked rows sort by match, and anything unchecked sinks below them -- an
@@ -203,6 +222,25 @@ function renderCommandersTab() {
       ${filtered ? `<button id="clearColorFilterBtn" class="clear-filter-btn" type="button">Clear</button>` : ""}
     </div>
 
+    <div class="color-count-filter">
+      ${[
+        { count: 0, label: "Colorless" },
+        { count: 1, label: "Mono" },
+        { count: 2, label: "Dual" },
+        { count: 3, label: "Tri" },
+        { count: 4, label: "4-Color" },
+        { count: 5, label: "5-Color" }
+      ].map(({ count, label }) => `
+        <button
+          class="color-count-btn ${commanderColorCountFilter.has(count) ? "active" : ""}"
+          type="button"
+          data-filter-count="${count}"
+          title="${label}-color commanders"
+        >${label}</button>
+      `).join("")}
+      ${commanderColorCountFilter.size > 0 ? `<button id="clearColorCountFilterBtn" class="clear-filter-btn" type="button">Clear</button>` : ""}
+    </div>
+
     <div class="commanders-toolbar">
       <div class="commanders-count">
         ${filtered
@@ -215,6 +253,7 @@ function renderCommandersTab() {
           Sort by ${commanderSortMode === "match" ? "EDHREC decks" : "match"}
         </button>
         <button id="checkTopCommandersBtn" type="button">Check top 10</button>
+        <button id="randomCommanderBtn" type="button">Random</button>
       </div>
     </div>
 
@@ -407,6 +446,20 @@ async function buildFromCommander(commander) {
   showToast(`${commander.name} loaded. Upload is already set -- hit Generate Deck.`);
 }
 
+function pickRandomCommander() {
+  const rows = getSortedCommanders();
+  const unrankedRows = getFilteredUnrankedCommanders();
+  const allVisible = [...rows, ...unrankedRows];
+
+  if (!allVisible.length) {
+    showToast("No commanders to pick from. Try removing the color filter or ranking your commanders.");
+    return;
+  }
+
+  const random = allVisible[Math.floor(Math.random() * allVisible.length)];
+  buildFromCommander(random);
+}
+
 function findOwnedCommanderBySlug(slug) {
   return findOwnedCommanderBySlugInList(slug, ownedCommanders)
     || findOwnedCommanderBySlugInList(slug, unrankedCommanders);
@@ -450,6 +503,21 @@ function bindCommandersTab() {
       return;
     }
 
+    const filterCount = event.target.dataset?.filterCount;
+    if (filterCount !== undefined) {
+      const count = parseInt(filterCount);
+      if (commanderColorCountFilter.has(count)) commanderColorCountFilter.delete(count);
+      else commanderColorCountFilter.add(count);
+      renderCommandersTab();
+      return;
+    }
+
+    if (event.target.id === "clearColorCountFilterBtn") {
+      commanderColorCountFilter = new Set();
+      renderCommandersTab();
+      return;
+    }
+
     if (event.target.id === "sortCommandersBtn") {
       commanderSortMode = commanderSortMode === "match" ? "decks" : "match";
       renderCommandersTab();
@@ -458,6 +526,11 @@ function bindCommandersTab() {
 
     if (event.target.id === "checkTopCommandersBtn") {
       checkCommanderMatches(getSortedCommanders().slice(0, 10));
+      return;
+    }
+
+    if (event.target.id === "randomCommanderBtn") {
+      pickRandomCommander();
       return;
     }
 

@@ -160,6 +160,7 @@ function displaySupportPackage(deck, edhrecRoleTargets) {
           return `
             <details class="support-row">
               <summary>
+                <span class="support-arrow">▼</span>
                 <span class="support-label">${escapeHtml(SUPPORT_ROLE_LABELS[role])}</span>
                 <span class="support-counts">
                   <strong class="${short ? "support-short" : ""}">${primary}</strong>
