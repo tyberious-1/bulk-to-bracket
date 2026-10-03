@@ -9,7 +9,7 @@
 
 let hoverPreviewEl = null;
 let hoverImageCache = new Map();
-let previewHoverBound = false;
+let previewHoverBoundContainers = new Set();
 
 function renderPreviewCardLink(cardName, scryfallUrl, imageUrl) {
   const safeName = escapeHtml(cardName || "Unknown Card");
@@ -31,6 +31,44 @@ function renderPreviewCardLink(cardName, scryfallUrl, imageUrl) {
       </a>
     </span>
   `;
+}
+
+function bindPreviewHoverImages(containerId = "exportPreview") {
+  if (previewHoverBoundContainers.has(containerId)) return;
+
+  const preview = document.getElementById(containerId);
+  if (!preview) return;
+
+  preview.addEventListener("mouseover", async (event) => {
+    const link = event.target.closest(".preview-card-link");
+    if (!link || !preview.contains(link)) return;
+
+    const imageUrl = await resolveHoverImageUrl(link);
+    if (!imageUrl) return;
+    if (!link.matches(":hover")) return;
+
+    showCardHoverPreview(imageUrl, event);
+  });
+
+  preview.addEventListener("mousemove", (event) => {
+    const link = event.target.closest(".preview-card-link");
+    if (!link || !preview.contains(link)) return;
+    moveCardHoverPreview(event);
+  });
+
+  preview.addEventListener("mouseout", (event) => {
+    const fromLink = event.target.closest(".preview-card-link");
+    if (!fromLink) return;
+
+    const toElement = event.relatedTarget;
+    if (toElement && fromLink.contains(toElement)) return;
+
+    hideCardHoverPreview();
+  });
+
+  window.addEventListener("scroll", hideCardHoverPreview, { passive: true });
+  window.addEventListener("blur", hideCardHoverPreview);
+  previewHoverBoundContainers.add(containerId);
 }
 
 function ensureHoverPreview() {
@@ -113,42 +151,4 @@ async function resolveHoverImageUrl(link) {
 function hideCardHoverPreview() {
   if (!hoverPreviewEl) return;
   hoverPreviewEl.classList.remove("visible");
-}
-
-function bindPreviewHoverImages() {
-  if (previewHoverBound) return;
-
-  const preview = document.getElementById("exportPreview");
-  if (!preview) return;
-
-  preview.addEventListener("mouseover", async (event) => {
-    const link = event.target.closest(".preview-card-link");
-    if (!link || !preview.contains(link)) return;
-
-    const imageUrl = await resolveHoverImageUrl(link);
-    if (!imageUrl) return;
-    if (!link.matches(":hover")) return;
-
-    showCardHoverPreview(imageUrl, event);
-  });
-
-  preview.addEventListener("mousemove", (event) => {
-    const link = event.target.closest(".preview-card-link");
-    if (!link || !preview.contains(link)) return;
-    moveCardHoverPreview(event);
-  });
-
-  preview.addEventListener("mouseout", (event) => {
-    const fromLink = event.target.closest(".preview-card-link");
-    if (!fromLink) return;
-
-    const toElement = event.relatedTarget;
-    if (toElement && fromLink.contains(toElement)) return;
-
-    hideCardHoverPreview();
-  });
-
-  window.addEventListener("scroll", hideCardHoverPreview, { passive: true });
-  window.addEventListener("blur", hideCardHoverPreview);
-  previewHoverBound = true;
 }

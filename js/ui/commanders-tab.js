@@ -35,6 +35,7 @@ function activateTab(tabName) {
 
   if (tabName === "commanders") renderCommandersTab();
   if (tabName === "theme") renderThemeTab();
+  if (tabName === "analytics") activateAnalyticsTab();
 }
 
 // A new collection invalidates everything derived from the old one: which
@@ -49,6 +50,7 @@ function resetCommanderScan() {
   unrankedCommanders = [];
   unrankedScanDone = false;
   commanderMatches = new Map();
+  resetAnalyticsCache();
 
   const collection = getOwnedCollection();
   if (!collection) return;
