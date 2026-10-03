@@ -832,9 +832,16 @@ async function fetchCollectionCardData() {
   }
 }
 
+let analyticsTabBound = false;
+
+// #analyticsPanel is a static element -- renderAnalyticsPanel() only ever
+// replaces its children via innerHTML, so without this guard every re-render
+// (e.g. switching tabs back and forth) stacks another click listener on it.
 function bindAnalyticsTab() {
   const panel = document.getElementById("analyticsPanel");
   if (!panel) return;
+  if (analyticsTabBound) return;
+  analyticsTabBound = true;
 
   panel.addEventListener("click", (event) => {
     if (event.target.id === "fetchCardDataBtn") {
