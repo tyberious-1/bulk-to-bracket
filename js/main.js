@@ -276,11 +276,61 @@ async function performBuildFromContext() {
   // apply to.
   if (modePrefs.themeFocus) {
     const alreadyIncluded = new Set(ownedCandidates.map((c) => normalizeCardName(c.name)));
+
+    // "Matches the focused theme" is, for almost any tribal focus, nearly the
+    // same test as "is a creature of that type" -- the tribe's own creature
+    // type dominates real card templating far more than its noncreature
+    // support does. Left unbounded, that widens the pool to ~75% creatures
+    // (measured: Lathril, Blade of the Elves with Elves focused -- 124 of the
+    // 127 cards this step added were creatures), flooding Phase 2's flexible
+    // fill with far more creature candidates than the deck's own type target
+    // and overshooting it by double digits. Capping each bucket at its
+    // EDHREC-reported average -- not a multiple of it -- keeps the widening
+    // step from ever growing a type past what the deck is actually trying to
+    // hit. A looser 1.5x cap still landed Lathril, Blade of the Elves 11
+    // creatures over its own target (45 vs. 34); landing on the target
+    // itself got that down to 2 over (36 vs. 34), with no quality cost since
+    // sorting (below) keeps the strongest matches regardless of cap size.
+    const bucketCounts = countByType(
+      ownedCandidates
+        .map((c) => allOwnedCardData.get(normalizeCardName(c.name)))
+        .filter(Boolean)
+    );
+    const bucketCaps = {
+      Creature: Number(typeAverages?.Creature) || 20,
+      Instant: Number(typeAverages?.Instant) || 10,
+      Sorcery: Number(typeAverages?.Sorcery) || 10,
+      Artifact: Number(typeAverages?.Artifact) || 8,
+      Enchantment: Number(typeAverages?.Enchantment) || 8,
+      Planeswalker: Number(typeAverages?.Planeswalker) || 2,
+      Other: 15
+    };
+
+    // Collected and ranked before the cap is applied -- "matches the theme"
+    // is a yes/no filter with no notion of quality, so taking the first N
+    // encountered in the collection Map's iteration order let a vanilla Elf
+    // common fill a slot a genuine payoff could have had. Scored the same way
+    // the fallback tiers already are, so the cards that make it through the
+    // cap are the strongest matches, not an arbitrary subset of them.
+    const widenedMatches = [];
     for (const [normalizedName, card] of allOwnedCardData) {
       if (alreadyIncluded.has(normalizedName) || !card) continue;
       if (getCardType(card).includes("land")) continue;
       if (!legalForCommander(card.colors, commanders.colors)) continue;
       if (!cardMatchesThemeFocus(card, modePrefs)) continue;
+      widenedMatches.push({
+        normalizedName,
+        card,
+        score: scoreFallbackCard(card, commanderThemes, strategyProfile, commanders.colors, modePrefs)
+      });
+    }
+    widenedMatches.sort((a, b) => b.score - a.score);
+
+    for (const { normalizedName, card } of widenedMatches) {
+      const bucket = getDeckTypeBucket(getCardType(card));
+      if ((bucketCounts[bucket] || 0) >= (bucketCaps[bucket] ?? 15)) continue;
+      bucketCounts[bucket] = (bucketCounts[bucket] || 0) + 1;
+
       alreadyIncluded.add(normalizedName);
       ownedCandidates.push({ name: card.name, synergy: 0, decks: 0, label: "", labels: [] });
       ownedCardData.set(normalizedName, card);

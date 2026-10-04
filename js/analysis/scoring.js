@@ -566,9 +566,11 @@ function getThemeFocusAdjustment(card, tags, modePrefs) {
   if (["counters", "countersmatter"].includes(modePrefs.focusedThemeSignal) && normalizedTags.includes("counters")) adjustment += 8;
   if (["graveyard", "reanimator"].includes(modePrefs.focusedThemeSignal) && (normalizedTags.includes("graveyard") || normalizedTags.includes("reanimator"))) adjustment += 9;
 
-  for (const tribe of modePrefs.focusedTribalTypes || []) {
-    if (hasTribalType(card, tribe)) adjustment += 12;
-  }
+  // No per-tribe addition here: scoreCard/scoreFallbackCard's own tribal loop
+  // already adds 10-12 * tribalBias for a focused-tribe match (tribalBonusAllowed
+  // gates it to fire only once that focus is active), so adding it again here
+  // double-counted the same signal and skewed focused tribal builds toward far
+  // more creatures than their type target.
 
   return adjustment;
 }

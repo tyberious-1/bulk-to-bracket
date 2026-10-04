@@ -3501,6 +3501,24 @@ function getSupportPackageCounts(deck) {
 
   return counts;
 }
+
+// Names behind a support-package count, split the same way `total` vs
+// `primary` is: `primary` did this job as its main role, `secondary` only
+// contributes to it while doing something else primarily.
+function getCardsForRole(deck, role) {
+  const primary = [];
+  const secondary = [];
+
+  for (const card of deck || []) {
+    if (!(card.roles || []).includes(role)) continue;
+    if (card.role === role) primary.push(card.name);
+    else secondary.push(card.name);
+  }
+
+  primary.sort((a, b) => a.localeCompare(b));
+  secondary.sort((a, b) => a.localeCompare(b));
+  return { primary, secondary };
+}
 // Bracket estimation and structural warnings.
 //
 // The bracket comes from the criteria the official system names -- Game
@@ -3741,6 +3759,60 @@ function isFreeManaActivation(cost) {
   return symbols.every((symbol) => symbol === "{t}");
 }
 
+// Words a "spend this mana only to cast a(n) ___ spell", "enters tapped
+// unless you control a(n) ___" or "activate only if you control a(n) ___"
+// clause can name that mark it as a theme bet rather than a broad
+// restriction -- "a creature spell" or "an instant or sorcery spell" is
+// something almost any Commander deck eventually casts, but "a Villain
+// spell", "an artifact spell" or "a Mount or Vehicle" is only live if the
+// deck is actually built around that tribe/type. Only words in this set get
+// checked against the deck's own theme; anything else keeps its old
+// unconditional credit.
+const NICHE_LAND_CONDITION_WORDS = new Set([
+  ...TRIBAL_TYPES,
+  "artifact",
+  "vehicle",
+  "enchantment",
+  "mount",
+  "pilot",
+  "villain",
+  "hero"
+]);
+
+// "Spend this mana only to cast a Villain spell" (Villainous Hideout), "...an
+// artifact spell" (Castle Doom), "...artifact spells" (Power Depot), "...a
+// Pilot or Vehicle spell" (Mech Hangar): captures which spell type(s) gate
+// the mana, so evaluateNonbasicLand can check that against the deck's own
+// theme instead of crediting it blindly. Article ("a"/"an") and plural are
+// both optional -- real cards print this both ways.
+function extractSpendRestrictionTags(effect) {
+  const match = effect.match(/spend this mana only to cast (?:an? )?([a-z]+)(?: or ([a-z]+))? spells?/);
+  if (!match) return [];
+  return [match[1], match[2]].filter(Boolean);
+}
+
+// "This land enters tapped unless you control a Mount or Vehicle" -- same
+// idea for the enters-tapped-unless refund below: a clause naming a specific
+// permanent/creature type is a theme bet, unlike "unless you control a basic
+// land" or "two or more other lands", which almost any deck clears.
+function extractTappedUnlessTags(text) {
+  const match = text.match(/enters tapped unless you control an? ([a-z]+)(?: or ([a-z]+))?/);
+  if (!match) return [];
+  return [match[1], match[2]].filter(Boolean);
+}
+
+// "Activate only if you control an artifact" (Spire of Industry) gates the
+// whole ability, any-color mana included, behind a permanent type the same
+// way the clauses above do. Only forwarded when the named type is in
+// NICHE_LAND_CONDITION_WORDS -- "activate only if you control a basic land"
+// (Dark Fortress, Gathering Place, Gleaming Bastion) is the same
+// near-always-true condition the tapped-unless check already leaves alone.
+function extractActivationConditionTags(effect) {
+  const match = effect.match(/activate only if you control an? ([a-z]+)/);
+  if (!match) return [];
+  return match[1] && NICHE_LAND_CONDITION_WORDS.has(match[1]) ? [match[1]] : [];
+}
+
 function readAddedManaColors(effect) {
   const colors = new Set();
 
@@ -3785,6 +3857,9 @@ function getLandManaProfile(card) {
     if (getCardType(card).includes(subtype)) reliable.add(color);
   }
 
+  const restricted = new Set();
+  const restrictedTags = new Set();
+
   for (const line of text.split("\n")) {
     const split = line.indexOf(":");
     if (split === -1) continue;
@@ -3795,10 +3870,25 @@ function getLandManaProfile(card) {
 
     sawManaAbility = true;
     const colors = readAddedManaColors(effect);
+    // "Activate only if you control an artifact" (Spire of Industry) gates
+    // the whole ability the same way a spend restriction does, just phrased
+    // as a precondition instead of a spending rule -- combined here so both
+    // route through the same restricted-credit check below.
+    const gateTags = [...extractSpendRestrictionTags(effect), ...extractActivationConditionTags(effect)];
+
+    // "Add one mana of any color among legendary creature cards in your
+    // graveyard" (The Grey Havens) is a plain {T} tap, but the colors on
+    // offer depend on board state that doesn't exist yet at deckbuilding
+    // time and is often empty early -- nothing like the guaranteed choice a
+    // Command Tower or a real dual gives every turn from the moment it
+    // enters, so it doesn't earn the same "reliable" credit.
+    const stateGatedAnyColor = /mana of any (?:color|type) among/.test(effect);
 
     // "Spend this mana only to cast artifact spells" is mana the deck mostly
-    // can't cast with, so it counts the same as mana behind a cost.
-    const free = isFreeManaActivation(cost) && !effect.includes("spend this mana only");
+    // can't cast with, so it doesn't get the same credit as mana behind a
+    // real cost -- bucketed apart into `restricted` so evaluateNonbasicLand
+    // can check the named spell type against the deck's own theme first.
+    const free = isFreeManaActivation(cost) && !gateTags.length && !stateGatedAnyColor;
 
     if (effect.includes("of the chosen color")) {
       if (free) flexible += 1;
@@ -3808,6 +3898,9 @@ function getLandManaProfile(card) {
       for (const color of colors) reliable.add(color);
       if (effect.includes("mana of any color")) freeAnyColor = true;
       if (effect.includes("mana of any type")) freeAnyType = true;
+    } else if (gateTags.length) {
+      for (const color of colors) restricted.add(color);
+      for (const tag of gateTags) restrictedTags.add(tag);
     } else {
       for (const color of colors) conditional.add(color);
     }
@@ -3885,7 +3978,10 @@ function getLandManaProfile(card) {
     }
   }
 
-  for (const color of reliable) conditional.delete(color);
+  for (const color of reliable) {
+    conditional.delete(color);
+    restricted.delete(color);
+  }
 
   return {
     reliable: sortColorsWubrg(Array.from(reliable)),
@@ -3893,7 +3989,9 @@ function getLandManaProfile(card) {
     flexible,
     freeAnyColor,
     freeAnyType,
-    searchesForBasics
+    searchesForBasics,
+    restrictedColors: sortColorsWubrg(Array.from(restricted)),
+    restrictedTags: Array.from(restrictedTags)
   };
 }
 
@@ -4113,6 +4211,16 @@ function recommendLandCount(commanderColors) {
   return 38;
 }
 
+function landConditionMatchesStrategy(tag, strategyProfile, modePrefs) {
+  if (!NICHE_LAND_CONDITION_WORDS.has(tag)) return true;
+  if ((strategyProfile.tribalTypes || []).includes(tag)) return true;
+  if ((modePrefs.focusedTribalTypes || []).includes(tag)) return true;
+  const signal = modePrefs.focusedThemeSignal;
+  if (signal === tag || signal === `${tag}s`) return true;
+  const aliases = modePrefs.themeFocusAliases || [];
+  return aliases.includes(tag) || aliases.includes(`${tag}s`);
+}
+
 function evaluateNonbasicLand(card, commanderColors, strategyProfile, modePrefs, edhrecCardLookup = null, colorTargets = null) {
   if (!getCardType(card).includes("land")) return null;
   if (isBasicLand(card.name)) return null;
@@ -4131,6 +4239,17 @@ function evaluateNonbasicLand(card, commanderColors, strategyProfile, modePrefs,
   );
   const reliableSources = relevantReliable.length + flexibleSources;
 
+  // A land whose any-color mana is "spend this mana only to cast a Villain
+  // spell" (or artifact/vehicle/ally/...) only earns fixing credit for that
+  // if the deck is actually built to cast that spell type -- otherwise the
+  // mana is close to unusable, no better than the card not fixing at all.
+  const restrictionUsable =
+    !mana.restrictedTags.length ||
+    mana.restrictedTags.some((tag) => landConditionMatchesStrategy(tag, strategyProfile, modePrefs));
+  const relevantRestricted = restrictionUsable
+    ? mana.restrictedColors.filter((c) => commanderColors.includes(c))
+    : [];
+
   let score = 0;
   const totalColorTargets = commanderColors.reduce((sum, color) => sum + (colorTargets?.[color] || 0), 0);
   const avgColorTarget = totalColorTargets > 0 ? totalColorTargets / commanderColors.length : 1;
@@ -4140,6 +4259,7 @@ function evaluateNonbasicLand(card, commanderColors, strategyProfile, modePrefs,
   // like the rest of the deck's colors on average, since it isn't tied to one.
   score += relevantReliable.reduce((sum, color) => sum + 6 * targetWeight(color), 0) + flexibleSources * 6;
   score += relevantConditional.reduce((sum, color) => sum + 1.5 * targetWeight(color), 0);
+  score += relevantRestricted.reduce((sum, color) => sum + 1.5 * targetWeight(color), 0);
 
   if (normalizedName === "command tower") score += 10;
   if (normalizedName === "exotic orchard") score += 7;
@@ -4164,8 +4284,32 @@ function evaluateNonbasicLand(card, commanderColors, strategyProfile, modePrefs,
   // beats one that never can -- so refund part of the tapped penalty rather
   // than stacking a second one on top of it.
   if (text.includes("enters tapped")) score -= 2;
-  if (text.includes("enters tapped unless")) score += 1;
+  if (text.includes("enters tapped unless")) {
+    // "unless you control a Mount or Vehicle" only refunds the tapped
+    // penalty if the deck can actually meet that -- "unless you control a
+    // basic land" or "two or more other lands" isn't gated: it's a
+    // near-always-true condition, not a theme bet.
+    const tappedUnlessTags = extractTappedUnlessTags(text);
+    const conditionUsable =
+      !tappedUnlessTags.length ||
+      tappedUnlessTags.some((tag) => landConditionMatchesStrategy(tag, strategyProfile, modePrefs));
+    if (conditionUsable) score += 1;
+  }
   if (text.includes("pay 1 life")) score -= 0.5;
+
+  // "When this land enters, sacrifice it unless you pay {1}" (Gateway Plaza,
+  // Rupture Spire) or "...unless you tap an untapped permanent you control"
+  // (Command Bridge) is a real cost on top of entering tapped -- a spent
+  // mana or a tapped-down permanent, and the land is simply gone if that
+  // can't be paid -- not just a one-time tempo hit the way "enters tapped"
+  // alone is.
+  if (
+    text.includes("sacrifice it unless you pay") ||
+    text.includes("sacrifice it unless you tap") ||
+    text.includes("sacrifice this land unless")
+  ) {
+    score -= 3;
+  }
 
   // A dual gives you either of its colors for free, forever, from the turn it
   // enters. A search-for-a-basic land is charging for the same eventual
@@ -4175,7 +4319,7 @@ function evaluateNonbasicLand(card, commanderColors, strategyProfile, modePrefs,
   // not paying it once per color it could have fetched.
   if (mana.searchesForBasics) score -= 3;
 
-  if (reliableSources === 0 && relevantConditional.length === 0) score -= 20;
+  if (reliableSources === 0 && relevantConditional.length === 0 && relevantRestricted.length === 0) score -= 20;
 
   if (strategyProfile.monoColor) {
     if (!isSynergisticMonoColorLand(card, commanderColors, strategyProfile)) score -= 12;

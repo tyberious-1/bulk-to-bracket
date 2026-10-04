@@ -19,8 +19,7 @@ EDHREC_BASE = "https://json.edhrec.com/pages/commanders/"
 # count, ramp density, tribal vs non-tribal. Extend this list to widen the
 # comparison in Task 11.
 SAMPLE_COMMANDERS = [
-    "Rivaz of the Claw",
-    "Krydle of Baldur's Gate",
+    "Rosheen Meanderer",
 ]
 
 def slugify_for_edhrec(name):
