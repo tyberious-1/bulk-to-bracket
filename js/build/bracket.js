@@ -189,6 +189,16 @@ function generateWarnings(deck, commanderThemes, bracketInfo) {
   // with the land count.
   const fallbackShare = fallbackCards / Math.max(nonlandCount, 1);
 
+  // Unlike fallbackShare above, this isn't a "most of the deck is weak"
+  // threshold -- the Rosheen Meanderer build that prompted this signal had
+  // only 2 fallback-generic picks in ~60 nonland slots (~3%), which no flat
+  // ratio threshold would catch without also firing constantly on sparse
+  // collections. A fallback-generic card means nothing on-theme or EDHREC-
+  // ranked fit the slot at all, so any presence of one is itself the signal
+  // -- not how many. Drives the minimal-build UI hint in main.js.
+  const fallbackGenericCards = deck.filter((c) => c.source === "fallback-generic").length;
+  const fallbackGenericRatio = fallbackGenericCards / Math.max(nonlandCount, 1);
+
   if (getCommanderTribalThemes(commanderThemes).length && creatures < 22) {
     warnings.push("Low creature count for a tribal deck.");
   }
@@ -203,5 +213,5 @@ function generateWarnings(deck, commanderThemes, bracketInfo) {
   if (fallbackShare >= 0.6) warnings.push("Most of this deck came from collection theme-matching rather than EDHREC overlap — your collection has few of this commander's staples.");
   if (bracketInfo.gameChangers.length >= 4) warnings.push("This build contains several Game Changers and may read stronger than expected at casual tables.");
 
-  return warnings;
+  return { warnings, fallbackGenericRatio };
 }

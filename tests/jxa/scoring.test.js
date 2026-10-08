@@ -63,5 +63,24 @@ runSuite("scoring", {
     const strategyProfile = { wantsTribal: false };
     const tribalFocus = { themeFocus: "crab tribal", focusedTribalTypes: ["crab"] };
     assertTrue(isActiveBuildTribal(strategyProfile, tribalFocus) === true);
+  },
+  "scoreFallbackCard: minimalBuild suppresses the keyword-tag theme bonus": function () {
+    // This is the mechanism behind the Rosheen Meanderer case that prompted
+    // minimal build mode: a card earns this bonus for merely mentioning a
+    // theme word (here "+1/+1 counter") in its own text, with no check that
+    // it actually pays off a counters strategy -- e.g. Human Torch, Johnny
+    // Storm riding this into a slot it has no real synergy with.
+    const card = { type: "Creature", text: "When this creature enters, put a +1/+1 counter on it.", cmc: 3 };
+    const commanderThemes = ["counters"];
+    const strategyProfile = { wantsCreatures: false, wantsTokens: false, wantsSacrifice: false, wantsGoWide: false, wantsTribal: false, tribalTypes: [] };
+    const commanderColors = ["G"];
+
+    const normalModePrefs = getModePreferences("", strategyProfile);
+    const minimalModePrefs = getModePreferences("minimal", strategyProfile);
+
+    const normalScore = scoreFallbackCard(card, commanderThemes, strategyProfile, commanderColors, normalModePrefs);
+    const minimalScore = scoreFallbackCard(card, commanderThemes, strategyProfile, commanderColors, minimalModePrefs);
+
+    assertClose(normalScore - minimalScore, 4, 0.001, "expected exactly the +4 keyword-tag bonus to be missing under minimalBuild");
   }
 });

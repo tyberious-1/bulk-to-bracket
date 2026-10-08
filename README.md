@@ -17,6 +17,20 @@ The builder is designed to preserve **theme synergy** while also respecting the 
 
 ---
 
+## 🟢 Pauper Commander (PDH) Mode
+
+There's a second page, `pauper.html`, for **Pauper Commander (PDH)** — commander
+must be any **uncommon creature** (legendary or not), and every other nonland
+card must be **common** rarity. It's linked from the banner at the top of the
+main app, and links back the same way.
+
+PDH has no EDHREC-equivalent synergy site with a usable API, so pauper builds
+skip EDHREC entirely and are built from **Scryfall data + your own collection**
+only. Full 4-tab parity and partner-commander support both work the same as
+the main app — only commander eligibility and card-pool legality change.
+
+---
+
 The build process:
 
 1. Reads EDHREC average type mix

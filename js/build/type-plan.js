@@ -26,10 +26,22 @@ function buildRoleTargetPlan(edhrecTypeAverages, strategyProfile, targetLandCoun
 
   const wantsVoltron = themeSignals.has("voltron") || modePrefs?.focusedThemeSignal === "voltron";
 
+  // Archetype creature counts per Draftsim's "How Many Creatures in a
+  // Commander Deck" guide: Typal 30+, Aggro/go-wide 30+, Voltron 20-30,
+  // Spellslinger <=25 (its own real-deck example runs 14), Control/generic
+  // 20-30, everything else (combo, low-creature) 15-30.
   const defaults = {
-    Creature: strategyProfile.wantsCreatures
-      ? (strategyProfile.wantsTribal || strategyProfile.wantsGoWide ? 26 : 20)
-      : 15,
+    Creature: strategyProfile.wantsTribal
+      ? 31
+      : strategyProfile.wantsGoWide
+      ? 30
+      : wantsVoltron
+      ? 24
+      : strategyProfile.wantsCantrips
+      ? 15
+      : strategyProfile.wantsCreatures
+      ? 22
+      : 18,
     Instant: strategyProfile.wantsCantrips ? 10 : 7,
     Sorcery: strategyProfile.wantsCantrips ? 11 : 8,
     Artifact: themeSignals?.has?.("artifacts") || modePrefs?.focusedThemeSignal === "artifacts" || wantsVoltron ? 11 : 7,
@@ -54,7 +66,7 @@ function buildRoleTargetPlan(edhrecTypeAverages, strategyProfile, targetLandCoun
   for (const bucket of typeKeys) {
     const exact = ((raw[bucket] || defaults[bucket]) / totalRaw) * targetNonlandCount;
     const target = Math.max(bucket === "Planeswalker" ? 0 : 1, Math.round(exact));
-    const minimumFloor = bucket === "Creature" ? 8 : bucket === "Planeswalker" ? 0 : 1;
+    const minimumFloor = bucket === "Creature" ? 15 : bucket === "Planeswalker" ? 0 : 1;
     typeBuckets[bucket] = { target: Math.max(target, minimumFloor), min: minimumFloor };
   }
 

@@ -9,8 +9,8 @@
 // out of), and a future detector addition shows up here automatically with
 // no second list to keep in sync.
 //
-// Depends on: constants.js, text.js, themes.js, scoring.js, edhrec.js,
-//   commander-match.js, commanders-tab.js, csv.js, dom.js, state.js
+// Depends on: constants.js, text.js, format.js, themes.js, scoring.js,
+//   edhrec.js, commander-match.js, commanders-tab.js, csv.js, dom.js, state.js
 
 // Internal detector tags that aren't real standalone EDHREC tag pages --
 // either 403 outright (confirmed against json.edhrec.com/pages/tags/) or
@@ -28,7 +28,8 @@ const THEME_TAB_TAG_OVERRIDES = {
   // toEdhrecSlug("lands") is "lands", which 403s -- the detector's "lands" tag
   // covers both landfall and land-tutoring text (see detectCardTags), and
   // EDHREC's real page for that is "lands-matter".
-  lands: { label: "Lands Matter", slug: "lands-matter" }
+  lands: { label: "Lands Matter", slug: "lands-matter" },
+  etb: { label: "ETB", slug: "etb" }
 };
 
 // Tribal types with no EDHREC tag page of their own (too rare to track) --
@@ -139,7 +140,9 @@ function renderThemeTabResultsList() {
   if (!results.length) {
     container.innerHTML = `
       <p class="theme-tab-status">
-        None of your owned commanders show up in EDHREC's top commanders for ${escapeHtml(themeTabSelected.label)}.
+        ${isPauperFormat()
+          ? `None of your owned uncommon creatures match ${escapeHtml(themeTabSelected.label)}.`
+          : `None of your owned commanders show up in EDHREC's top commanders for ${escapeHtml(themeTabSelected.label)}.`}
       </p>
     `;
     return;
@@ -218,27 +221,38 @@ function renderThemeTab() {
 // Best effort only, from whatever the local card cache already has (warmed by
 // a previous build or by "scan unranked commanders" on the Commanders tab) --
 // this must stay instant, so it never triggers a fresh Scryfall fetch.
-function findOwnedTribalCommandersFromCache(collection, tribalPlural, alreadyFound) {
-  const tribalAlias = TRIBAL_PLURAL_ALIASES[tribalPlural] || THEME_TAB_EXTRA_TRIBAL_PLURALS[tribalPlural];
-  if (!tribalAlias) return [];
-  const tribe = tribalAlias.replace(" tribal", "");
+//
+// Under pauper format this is the *only* source (see selectThemeTabEntry):
+// EDHREC's tag pages are full-Commander data with no PDH equivalent, same
+// reasoning as findOwnedUnrankedCommanders on the Commanders tab, so a theme
+// pick needs a non-tribal path here too, not just the tribal one this
+// originally covered.
+function cardMatchesThemeTabEntry(card, entry) {
+  if (entry.kind === "tribal") {
+    const tribalAlias = TRIBAL_PLURAL_ALIASES[entry.tag] || THEME_TAB_EXTRA_TRIBAL_PLURALS[entry.tag];
+    const tribe = tribalAlias ? tribalAlias.replace(" tribal", "") : null;
+    return tribe ? hasTribalType(card, tribe) : false;
+  }
+  return detectCardTags(card).includes(entry.tag);
+}
 
+function findOwnedThemeTabCommandersFromCache(collection, entry, alreadyFound) {
   const seen = new Set();
   for (const commander of alreadyFound) {
     for (const name of commander.names) seen.add(normalizeCardName(name));
   }
 
   const found = [];
-  for (const entry of getCollectionEntries(collection)) {
-    if (seen.has(entry.normalizedName)) continue;
+  for (const collectionEntry of getCollectionEntries(collection)) {
+    if (seen.has(collectionEntry.normalizedName)) continue;
 
-    const card = cardCache.get(entry.normalizedName)
-      || cardCache.get(normalizeCardName(getPrimaryCardName(entry.normalizedName)));
+    const card = cardCache.get(collectionEntry.normalizedName)
+      || cardCache.get(normalizeCardName(getPrimaryCardName(collectionEntry.normalizedName)));
     if (!card) continue;
-    if (!canBeCommander(card)) continue;
-    if (!hasTribalType(card, tribe)) continue;
+    if (!canBeActiveCommander(card)) continue;
+    if (!cardMatchesThemeTabEntry(card, entry)) continue;
 
-    seen.add(entry.normalizedName);
+    seen.add(collectionEntry.normalizedName);
     found.push({
       name: card.name,
       slug: toEdhrecSlug(getPrimaryCardName(card.name)),
@@ -263,13 +277,20 @@ async function selectThemeTabEntry(entry) {
 
   try {
     const collection = getOwnedCollection();
-    const candidates = await fetchEdhrecTagCommanders(entry.slug);
-    const ranked = candidates
-      .map((candidate) => resolveOwnedCommanderEntry(collection, candidate))
-      .filter(Boolean);
+    const pauper = isPauperFormat();
 
-    const supplemental = entry.kind === "tribal"
-      ? findOwnedTribalCommandersFromCache(collection, entry.tag, ranked)
+    // EDHREC's tag pages are full-Commander data (any rarity) with no PDH
+    // equivalent -- under pauper format they're the wrong card pool
+    // entirely, so skip the fetch and rely on the cache scan alone, the same
+    // way main.js and the Commanders tab skip EDHREC under this format.
+    const ranked = pauper
+      ? []
+      : (await fetchEdhrecTagCommanders(entry.slug))
+          .map((candidate) => resolveOwnedCommanderEntry(collection, candidate))
+          .filter(Boolean);
+
+    const supplemental = pauper || entry.kind === "tribal"
+      ? findOwnedThemeTabCommandersFromCache(collection, entry, ranked)
       : [];
 
     themeTabResults = [...ranked, ...supplemental].sort((a, b) => b.decks - a.decks);

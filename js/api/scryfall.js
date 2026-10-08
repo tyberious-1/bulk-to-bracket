@@ -53,6 +53,7 @@ function convertScryfallCard(data) {
     rawText: oracleText,
     cmc: Number(data.cmc || 0),
     colors: Array.isArray(data.color_identity) ? data.color_identity : [],
+    rarity: String(data.rarity || "").toLowerCase(),
     layout: String(data.layout || "").toLowerCase(),
     producedMana,
     imageUrl: pickCommanderImage(data),

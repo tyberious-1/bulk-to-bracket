@@ -16,6 +16,7 @@ const toast = document.getElementById("toast");
 const deckStats = document.getElementById("deckStats");
 
 const priorityButtonsWrap = document.getElementById("priorityButtons");
+const minimalBuildToggle = document.getElementById("minimalBuildToggle");
 
 // Second commander field: hidden until the first pick turns out to have a
 // pairing ability (partner, Background, Doctor's companion, ...).

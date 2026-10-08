@@ -9,6 +9,7 @@ scripts=(
   js/constants.js
   js/utils/text.js
   js/utils/cards.js
+  js/format.js
   js/analysis/pairing.js
   js/collection/csv.js
   js/analysis/themes.js

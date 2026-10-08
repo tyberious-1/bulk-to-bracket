@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MTG Pauper Commander ("PDH") Deck Builder</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <div class="app">
+    <h1>MTG Pauper Commander Deck Builder</h1>
+    <p class="format-banner"><a href="index.html">← Full Commander Deck Builder</a></p>
+
+    <div class="tabs" role="tablist">
+      <button class="tab-btn active" type="button" data-tab="build">Build a Deck</button>
+      <button class="tab-btn" type="button" data-tab="commanders">Your Commanders</button>
+      <button class="tab-btn" type="button" data-tab="theme">Theme / Tribal</button>
+      <button class="tab-btn" type="button" data-tab="analytics">Collection Analytics</button>
+    </div>
+
+    <div class="panel progress-panel">
+      <h2>Progress</h2>
+      <div id="progressContainer">
+        <div id="progressBar"></div>
+      </div>
+      <div id="statusText">Idle</div>
+      <div id="subStatusText" class="sub-status"></div>
+    </div>
+
+    <div class="tab-panel" data-tab="build">
+      <div class="panel">
+        <label for="commanderInput">Commander Name</label>
+        <div class="autocomplete-wrap">
+          <input
+            id="commanderInput"
+            type="text"
+            placeholder="Start typing an uncommon creature name..."
+            autocomplete="off"
+          />
+          <div id="autocompleteList" class="autocomplete-list hidden"></div>
+        </div>
+
+        <div id="partnerRow" class="hidden">
+          <label id="partnerLabel" for="partnerInput">Partner</label>
+          <div class="autocomplete-wrap">
+            <input
+              id="partnerInput"
+              type="text"
+              placeholder="Start typing..."
+              autocomplete="off"
+            />
+            <div id="partnerAutocompleteList" class="autocomplete-list hidden"></div>
+          </div>
+        </div>
+
+        <label for="csvFile">Upload ManaBox CSV</label>
+        <input id="csvFile" type="file" accept=".csv" />
+
+        <button id="generateBtn" type="button">Generate Deck</button>
+      </div>
+
+      <div id="emptyState" class="panel empty-state">
+        <h2>How it works</h2>
+        <p>Choose a legal Pauper Commander (any uncommon creature, legendary or not) and upload a ManaBox CSV of cards you own, and the app will build a 99-card, commons-only Commander deck from your collection.</p>
+        <p>Pauper Commander has no EDHREC-equivalent synergy data source here — PDHREC (pdhrec.com) has no CORS-enabled API this static app can call directly, so every pick comes from Scryfall data and your own collection, matched locally.</p>
+        <p>Typal/tribal commanders still get the most synergy out of this tool, since creature types are easy to detect reliably from card text alone. Minimal Build is also available here, same as the full app — commander, mana base, and support package only.</p>
+      </div>
+
+      <div id="postBuildControls" class="panel hidden">
+        <h2>Regenerate With Different Priorities</h2>
+        <div id="priorityButtons" class="priority-buttons"></div>
+      </div>
+
+      <div id="buildModeControls" class="panel hidden">
+        <h2>Build Mode</h2>
+        <p class="build-mode-copy">Stop at the commander, mana base, and support package (ramp/draw/removal/wipe) — no theme guessing, no filler, and the list will be well short of a full 99 cards.</p>
+        <button id="minimalBuildToggle" type="button" class="mode-toggle-btn">Minimal Build</button>
+      </div>
+
+      <div class="results-grid">
+        <div class="panel">
+          <h2>Commander</h2>
+          <div class="commander-column">
+            <div id="commanderImageWrap" class="commander-image-wrap">
+              <div id="commanderImageSkeleton" class="commander-image-skeleton hidden"></div>
+              <img id="commanderImage" class="commander-image hidden" alt="Commander card image" />
+              <img id="partnerImage" class="commander-image hidden" alt="Partner card image" />
+            </div>
+
+            <div id="commanderMeta" class="commander-meta"></div>
+            <div id="colorPips" class="color-pips"></div>
+
+            <h3 class="themes-heading">Detected Themes</h3>
+            <div id="themeChips" class="theme-chips"></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Deck Report</h2>
+
+          <div class="dashboard-grid">
+            <div id="deckStats" class="panel stat-panel"></div>
+            <div class="panel chart-panel">
+              <div class="chart-title">Mana Curve</div>
+              <div class="chart-canvas-wrap">
+                <canvas id="manaCurveChart"></canvas>
+              </div>
+            </div>
+            <div class="panel chart-panel">
+              <div class="chart-title">Card Type Breakdown</div>
+              <div class="chart-canvas-wrap">
+                <canvas id="typeBreakdownChart"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <div id="deckSummary" class="deck-summary"></div>
+          <div id="deckBracket" class="deck-bracket"></div>
+          <div id="deckGameChangers" class="deck-game-changers"></div>
+          <div id="buildBreakdown" class="build-breakdown"></div>
+          <div id="supportPackage" class="support-package"></div>
+          <div id="buildModeHint" class="build-mode-hint hidden"></div>
+          <div id="warningsPanel" class="warnings-panel"></div>
+
+          <div class="preview-heading">Grouped Preview
+            <button id="copyPreviewBtn" type="button" class="preview-copy-btn">Copy Preview Text</button>
+          </div>
+          <div id="exportPreview" class="export-preview"></div>
+
+          <div class="preview-heading">Plain Text Export</div>
+          <textarea id="moxfieldExport" class="export-box" readonly></textarea>
+          <button id="copyExportBtn" type="button">Copy Decklist</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-panel hidden" data-tab="commanders">
+      <div class="panel">
+        <h2>Commanders You Own</h2>
+        <div id="commandersPanel"></div>
+      </div>
+    </div>
+
+    <div class="tab-panel hidden" data-tab="theme">
+      <div class="panel">
+        <h2>Pick a Theme or Tribal Type</h2>
+        <div id="themePanel"></div>
+      </div>
+    </div>
+
+    <div class="tab-panel hidden" data-tab="analytics">
+      <div class="panel">
+        <h2>Collection Analytics</h2>
+        <div id="analyticsPanel"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden">Copied.</div>
+
+  <script src="js/constants.js"></script>
+  <script src="js/utils/text.js"></script>
+  <script src="js/utils/cards.js"></script>
+  <script src="js/format.js"></script>
+  <script>setActiveFormat("pauperCommander");</script>
+  <script src="js/analysis/pairing.js"></script>
+  <script src="js/collection/csv.js"></script>
+  <script src="js/analysis/themes.js"></script>
+  <script src="js/analysis/scoring.js"></script>
+  <script src="js/api/http.js"></script>
+  <script src="js/api/edhrec.js"></script>
+  <script src="js/cache.js"></script>
+  <script src="js/api/scryfall.js"></script>
+  <script src="js/utils/deck-stats.js"></script>
+  <script src="js/build/bracket.js"></script>
+  <script src="js/build/manabase.js"></script>
+  <script src="js/build/type-plan.js"></script>
+  <script src="js/build/deck.js"></script>
+  <script src="js/analysis/commander-match.js"></script>
+  <script src="js/dom.js"></script>
+  <script src="js/state.js"></script>
+  <script src="js/ui/status.js"></script>
+  <script src="js/ui/autocomplete.js"></script>
+  <script src="js/ui/charts.js"></script>
+  <script src="js/ui/commander.js"></script>
+  <script src="js/ui/hover-preview.js"></script>
+  <script src="js/ui/report.js"></script>
+  <script src="js/ui/commanders-tab.js"></script>
+  <script src="js/ui/theme-tab.js"></script>
+  <script src="js/ui/collection-analytics.js"></script>
+  <script src="js/ui/export.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

@@ -245,7 +245,7 @@ function escapeHtml(text) {
 // (either a raw Scryfall payload or our converted shape) and reads it
 // defensively, since the two shapes name the same fields differently.
 //
-// Depends on: constants.js, text.js
+// Depends on: constants.js, text.js, format.js
 
 const COMMANDER_PERMITTED_SUBTYPES = ["creature", "vehicle", "spacecraft"];
 
@@ -329,10 +329,11 @@ function isGameChanger(cardName) {
   return GAME_CHANGERS.has(normalizeCardName(getPrimaryCardName(cardName)));
 }
 
-function legalForCommander(cardColors, commanderColors) {
+function legalForCommander(cardColors, commanderColors, card) {
   for (const color of cardColors) {
     if (!commanderColors.includes(color)) return false;
   }
+  if (isPauperFormat() && card && card.rarity !== "common") return false;
   return true;
 }
 
@@ -352,6 +353,35 @@ function canBeCommander(card) {
   // Artifact Creature", "Legendary Snow Creature"). Legendary Vehicles and
   // Spacecraft are also legal commanders even though they aren't creatures.
   return COMMANDER_PERMITTED_SUBTYPES.some((subtype) => frontType.includes(subtype));
+}
+
+// Pauper Commander (PDH): any uncommon creature, legendary or not. No
+// COMMANDER_PERMITTED_SUBTYPES escape hatch and no "can be your commander"
+// text rule -- PDH's own rule is literally "any uncommon creature."
+function canBePauperCommander(card) {
+  const frontType = getCardType(card).split("//")[0];
+  return card?.rarity === "uncommon" && frontType.includes("creature");
+}
+// The active deck format. Everything else in the pipeline that gates card
+// or commander legality consults this flag rather than knowing about
+// formats itself -- index.html never calls setActiveFormat, so it stays
+// "commander" and every format-aware check below is a no-op for the
+// existing app.
+//
+// Depends on: cards.js
+
+let activeFormat = "commander"; // or "pauperCommander"
+
+function setActiveFormat(format) {
+  activeFormat = format;
+}
+
+function isPauperFormat() {
+  return activeFormat === "pauperCommander";
+}
+
+function canBeActiveCommander(card) {
+  return isPauperFormat() ? canBePauperCommander(card) : canBeCommander(card);
 }
 // Commander pairing rules.
 //
@@ -690,7 +720,14 @@ const TRIBAL_PLURAL_ALIASES = {
   shamans: "shaman tribal",
   foxes: "fox tribal",
   daleks: "dalek tribal",
-  atogs: "atog tribal"
+  atogs: "atog tribal",
+  birds: "bird tribal",
+  dinosaurs: "dinosaur tribal",
+  drakes: "drake tribal",
+  rats: "rat tribal",
+  samurai: "samurai tribal",
+  treefolk: "treefolk tribal",
+  warlocks: "warlock tribal"
 };
 
 function getThemeAliases(theme) {
@@ -747,7 +784,12 @@ function getThemeAliases(theme) {
     "artificers": ["artificer tribal", "artifacts"],
     "golems": ["golem tribal", "artifacts"],
     "thopters": ["thopter tribal", "artifacts", "tokens"],
-    "constructs": ["construct tribal", "artifacts"]
+    "constructs": ["construct tribal", "artifacts"],
+    "x spells": ["x spells"],
+    "burn": ["burn"],
+    "discard": ["discard"],
+    "etb": ["etb"],
+    "clones": ["clones"]
   };
 
   if (directAliases[normalized]) {
@@ -836,7 +878,7 @@ async function detectCommanderThemes(edhrecCards, edhrecTags, collectionData, al
 
     const card = allOwnedCardData.get(entry.normalizedName);
     if (!card) continue;
-    if (!legalForCommander(card.colors, commanderColors)) continue;
+    if (!legalForCommander(card.colors, commanderColors, card)) continue;
 
     if (
       getCardType(card).includes("creature") ||
@@ -1033,6 +1075,7 @@ function getModePreferences(mode, strategyProfile) {
     focusedThemeSignal,
     focusedTribalTypes,
     themeFocusAliases,
+    minimalBuild: modeParts.includes("minimal"),
     synergyBias:
       themeFocus ? 1.45 : 1,
     creatureBias:
@@ -1172,7 +1215,7 @@ function findLocalThemeMatches(theme, collectionData, allOwnedCardData, commande
     const card = allOwnedCardData.get(entry.normalizedName);
     if (!card) continue;
     if (getCardType(card).includes("land")) continue;
-    if (!legalForCommander(card.colors, commanderColors)) continue;
+    if (!legalForCommander(card.colors, commanderColors, card)) continue;
     if (cardMatchesThemeText(card, theme)) matches.add(entry.normalizedName);
   }
 
@@ -1213,7 +1256,7 @@ async function findThemeCandidates(
       || allOwnedCardData.get(normalizeCardName(getPrimaryCardName(name)));
     if (!card) continue;
     if (getCardType(card).includes("land")) continue;
-    if (!legalForCommander(card.colors, commanderColors)) continue;
+    if (!legalForCommander(card.colors, commanderColors, card)) continue;
 
     matches.add(normalized);
   }
@@ -1395,7 +1438,7 @@ function findFingerprintMatches(phrases, collectionData, allOwnedCardData, comma
     const card = allOwnedCardData.get(entry.normalizedName);
     if (!card) continue;
     if (getCardType(card).includes("land")) continue;
-    if (!legalForCommander(card.colors, commanderColors)) continue;
+    if (!legalForCommander(card.colors, commanderColors, card)) continue;
 
     const text = getCardText(card);
     if (phrases.some((phrase) => text.includes(phrase))) matches.add(entry.normalizedName);
@@ -1846,6 +1889,37 @@ function detectCardTags(card) {
   if (/\bdescend\s+\d/.test(text)) tags.push("descend");
   if (text.includes("explore")) tags.push("explore");
 
+  if (String(card.manaCost || "").includes("{X}")) tags.push("x spells");
+
+  if (
+    text.includes("damage to any target") ||
+    text.includes("damage to target player") ||
+    text.includes("damage to target opponent") ||
+    text.includes("damage to each opponent") ||
+    text.includes("damage to that player")
+  ) {
+    tags.push("burn");
+  }
+
+  if (text.includes("discards a card") || text.includes("discards two cards")) {
+    tags.push("discard");
+  }
+
+  // "when/whenever ... enters" catches both "When ~ enters, ..." and
+  // "Whenever a creature enters the battlefield under your control, ..." --
+  // broad on purpose since the ETB theme is defined by having the trigger at
+  // all, not by what it does once it fires.
+  if (/\b(when|whenever)\b[^.]*\benters\b/.test(text)) tags.push("etb");
+
+  if (
+    text.includes("copy of a creature") ||
+    text.includes("copy of target creature") ||
+    text.includes("as a copy of") ||
+    text.includes("becomes a copy")
+  ) {
+    tags.push("clones");
+  }
+
   if (
     type.includes("equipment") ||
     type.includes("aura") ||
@@ -1935,7 +2009,7 @@ const DETECTABLE_CARD_TAGS = new Set([
   "airbending", "waterbending", "earthbending", "firebending",
   "sagas", "cascade", "amass", "mutate", "discover", "affinity", "populate",
   "the ring tempts you", "extra combats", "extra turns", "storm", "dungeon",
-  "dredge", "descend", "explore"
+  "dredge", "descend", "explore", "x spells", "burn", "discard", "etb", "clones"
 ]);
 
 // strategyProfile's wants* flags are an ambient signal: what this
@@ -1971,9 +2045,11 @@ function getThemeFocusAdjustment(card, tags, modePrefs) {
   if (["counters", "countersmatter"].includes(modePrefs.focusedThemeSignal) && normalizedTags.includes("counters")) adjustment += 8;
   if (["graveyard", "reanimator"].includes(modePrefs.focusedThemeSignal) && (normalizedTags.includes("graveyard") || normalizedTags.includes("reanimator"))) adjustment += 9;
 
-  for (const tribe of modePrefs.focusedTribalTypes || []) {
-    if (hasTribalType(card, tribe)) adjustment += 12;
-  }
+  // No per-tribe addition here: scoreCard/scoreFallbackCard's own tribal loop
+  // already adds 10-12 * tribalBias for a focused-tribe match (tribalBonusAllowed
+  // gates it to fire only once that focus is active), so adding it again here
+  // double-counted the same signal and skewed focused tribal builds toward far
+  // more creatures than their type target.
 
   return adjustment;
 }
@@ -2165,8 +2241,17 @@ function scoreFallbackCard(card, commanderThemes, strategyProfile, commanderColo
 
   const tags = detectCardTags(card);
   const themeSignals = buildThemeSignalSet(commanderThemes);
-  for (const tag of tags) {
-    if (themeSignals.has(normalizeThemeName(tag))) score += 4 * modePrefs.synergyBias;
+  // This is the keyword-tag guess minimal mode exists to avoid: a card
+  // earns this bonus for merely mentioning a theme word in its own text
+  // (detectCardTags), with no check that it actually pays off the theme --
+  // the mechanism behind weak picks like Human Torch, Johnny Storm riding a
+  // "+1/+1 counters" mention into a counters-adjacent slot. Skipped here
+  // rather than in buildThemeCandidateNames, since this loop runs whether or
+  // not that function ever gets called.
+  if (!modePrefs.minimalBuild) {
+    for (const tag of tags) {
+      if (themeSignals.has(normalizeThemeName(tag))) score += 4 * modePrefs.synergyBias;
+    }
   }
 
   score += getThemeFocusAdjustment(card, tags, modePrefs);
@@ -3232,6 +3317,7 @@ function convertScryfallCard(data) {
     rawText: oracleText,
     cmc: Number(data.cmc || 0),
     colors: Array.isArray(data.color_identity) ? data.color_identity : [],
+    rarity: String(data.rarity || "").toLowerCase(),
     layout: String(data.layout || "").toLowerCase(),
     producedMana,
     imageUrl: pickCommanderImage(data),
@@ -3710,6 +3796,16 @@ function generateWarnings(deck, commanderThemes, bracketInfo) {
   // with the land count.
   const fallbackShare = fallbackCards / Math.max(nonlandCount, 1);
 
+  // Unlike fallbackShare above, this isn't a "most of the deck is weak"
+  // threshold -- the Rosheen Meanderer build that prompted this signal had
+  // only 2 fallback-generic picks in ~60 nonland slots (~3%), which no flat
+  // ratio threshold would catch without also firing constantly on sparse
+  // collections. A fallback-generic card means nothing on-theme or EDHREC-
+  // ranked fit the slot at all, so any presence of one is itself the signal
+  // -- not how many. Drives the minimal-build UI hint in main.js.
+  const fallbackGenericCards = deck.filter((c) => c.source === "fallback-generic").length;
+  const fallbackGenericRatio = fallbackGenericCards / Math.max(nonlandCount, 1);
+
   if (getCommanderTribalThemes(commanderThemes).length && creatures < 22) {
     warnings.push("Low creature count for a tribal deck.");
   }
@@ -3724,7 +3820,7 @@ function generateWarnings(deck, commanderThemes, bracketInfo) {
   if (fallbackShare >= 0.6) warnings.push("Most of this deck came from collection theme-matching rather than EDHREC overlap — your collection has few of this commander's staples.");
   if (bracketInfo.gameChangers.length >= 4) warnings.push("This build contains several Game Changers and may read stronger than expected at casual tables.");
 
-  return warnings;
+  return { warnings, fallbackGenericRatio };
 }
 // Mana base construction.
 //
@@ -4364,7 +4460,7 @@ function buildNonbasicManaBase(collectionData, allOwnedCardData, commanderColors
     if (!card) continue;
     if (!getCardType(card).includes("land")) continue;
     if (isBasicLand(card.name)) continue;
-    if (!legalForCommander(card.colors, commanderColors)) continue;
+    if (!legalForCommander(card.colors, commanderColors, card)) continue;
 
     const landCandidate = evaluateNonbasicLand(card, commanderColors, strategyProfile, modePrefs, edhrecCardLookup, colorTargets);
     if (!landCandidate) continue;
@@ -4465,10 +4561,22 @@ function buildRoleTargetPlan(edhrecTypeAverages, strategyProfile, targetLandCoun
 
   const wantsVoltron = themeSignals.has("voltron") || modePrefs?.focusedThemeSignal === "voltron";
 
+  // Archetype creature counts per Draftsim's "How Many Creatures in a
+  // Commander Deck" guide: Typal 30+, Aggro/go-wide 30+, Voltron 20-30,
+  // Spellslinger <=25 (its own real-deck example runs 14), Control/generic
+  // 20-30, everything else (combo, low-creature) 15-30.
   const defaults = {
-    Creature: strategyProfile.wantsCreatures
-      ? (strategyProfile.wantsTribal || strategyProfile.wantsGoWide ? 26 : 20)
-      : 15,
+    Creature: strategyProfile.wantsTribal
+      ? 31
+      : strategyProfile.wantsGoWide
+      ? 30
+      : wantsVoltron
+      ? 24
+      : strategyProfile.wantsCantrips
+      ? 15
+      : strategyProfile.wantsCreatures
+      ? 22
+      : 18,
     Instant: strategyProfile.wantsCantrips ? 10 : 7,
     Sorcery: strategyProfile.wantsCantrips ? 11 : 8,
     Artifact: themeSignals?.has?.("artifacts") || modePrefs?.focusedThemeSignal === "artifacts" || wantsVoltron ? 11 : 7,
@@ -4493,7 +4601,7 @@ function buildRoleTargetPlan(edhrecTypeAverages, strategyProfile, targetLandCoun
   for (const bucket of typeKeys) {
     const exact = ((raw[bucket] || defaults[bucket]) / totalRaw) * targetNonlandCount;
     const target = Math.max(bucket === "Planeswalker" ? 0 : 1, Math.round(exact));
-    const minimumFloor = bucket === "Creature" ? 8 : bucket === "Planeswalker" ? 0 : 1;
+    const minimumFloor = bucket === "Creature" ? 15 : bucket === "Planeswalker" ? 0 : 1;
     typeBuckets[bucket] = { target: Math.max(target, minimumFloor), min: minimumFloor };
   }
 
@@ -4926,7 +5034,7 @@ function buildDeckFromScoredPool(
     const card = allOwnedCardData.get(normalizedName);
     if (!card) continue;
     if (getCardType(card).includes("land")) continue;
-    if (!legalForCommander(card.colors, commanderColors)) continue;
+    if (!legalForCommander(card.colors, commanderColors, card)) continue;
 
     const fit = classifyBackfillModeFit(card, modePrefs, isTribalDeck);
     if (fit.tier >= 2) continue;
@@ -5105,156 +5213,163 @@ function buildDeckFromScoredPool(
     addCard(fallbackPick, getFallbackSource(fallbackPick));
   }
 
-  // Phase 1: satisfy missing type minimums from the rest of the collection.
-  for (const neededBucket of getCardsNeededForTypeMinimums(deck, typePlan.buckets)) {
-    if (deck.length >= targetNonlandCount) break;
+  // Minimal Build stops here: the support package (Phase 0 above) plus
+  // the mana base below is the whole list. Phases 1-4 exist to turn
+  // leftover slots into a full, legal 99-card deck -- backfilling type
+  // minimums, flexible fill, eviction, and emergency creatures -- which is
+  // exactly what Minimal Build is asking to skip.
+  if (!modePrefs.minimalBuild) {
+    // Phase 1: satisfy missing type minimums from the rest of the collection.
+    for (const neededBucket of getCardsNeededForTypeMinimums(deck, typePlan.buckets)) {
+      if (deck.length >= targetNonlandCount) break;
 
-    const edhrecPick = pickBestCardForBucket(scoredNonlands, usedNames, commanderKeys, neededBucket, curvePlan);
-    if (edhrecPick) {
-      addCard(edhrecPick, "edhrec");
-      continue;
-    }
+      const edhrecPick = pickBestCardForBucket(scoredNonlands, usedNames, commanderKeys, neededBucket, curvePlan);
+      if (edhrecPick) {
+        addCard(edhrecPick, "edhrec");
+        continue;
+      }
 
-    const fallbackPick = pickFromTiers(fallbackTiers, (tier) =>
-      pickBestFallbackCard(tier, usedNames, commanderKeys, neededBucket, curvePlan, redundancyCounts));
-    if (fallbackPick) {
-      addCard(fallbackPick, getFallbackSource(fallbackPick));
-    }
-  }
-
-  // Phase 2: fill the remaining slots with the best cards, prioritizing whatever type and role is still short.
-  //
-  // The EDHREC pool rides along with both tiers rather than sitting in one of
-  // them: it is this commander's own card list, so it is on-theme by
-  // construction and should never be skipped in favour of a generic backfill.
-  const flexibleTiers = fallbackTiers.map((tier) => [...scoredNonlands, ...tier]);
-  while (deck.length < targetNonlandCount) {
-    const best = pickFromTiers(flexibleTiers, (tier) =>
-      chooseBestFlexibleCard(tier, deck, plan, usedNames, commanderKeys));
-    if (!best) break;
-
-    addCard(best, scoredNonlands.includes(best) ? "edhrec" : getFallbackSource(best));
-  }
-
-  // Phase 3: emergency support-role backfill via eviction.
-  //
-  // The role loop runs first now (Phase 0), so by the time this phase starts
-  // a role is normally already at target or already marked exhausted -- this
-  // rarely finds anything left to do. It stays as a safety net for the case
-  // that got it written: a theme living in the same type bucket as a role
-  // (Equipment in Artifact) can still starve that role if the role loop's own
-  // pool was thin and Phase 2's flexible fill then leaned the deck's Artifact
-  // slots toward theme picks before the role's target was reached. A Sokka
-  // and Suki build left 29 owned, color-legal ramp rocks undrafted while
-  // short 5 of its ramp target, purely because Artifact had already hit
-  // 28/28.
-  //
-  // Rather than raise the Artifact bucket's target -- which would let the
-  // theme itself balloon -- evict the worst card from a bucket that has room
-  // above its floor and spend that slot on the missing role instead. An
-  // Equipment is never evicted: growing the deck's Artifact count to make
-  // room for ramp is fine, thinning the theme the fix was asked to leave
-  // alone is not.
-  function isEquipmentCard(card) {
-    // getCardSubtypes reads through getCardType, which lowercases -- an
-    // uppercase needle here would silently never match and this whole
-    // protection would be a no-op.
-    return getCardSubtypes(getRedundancySource(card) || card).includes("equipment");
-  }
-
-  function pickForRoleIgnoringBucketRoom(pool, role, chargeRedundancy) {
-    let best = null;
-    let bestScore = -Infinity;
-
-    for (const card of pool) {
-      const key = normalizeCardName(card.name);
-      if (usedNames.has(key) || commanderKeys.has(key)) continue;
-
-      const roles = card.roles || getRoleContributions(getRedundancySource(card) || card, isTribalDeck);
-      if (!roles.includes(role)) continue;
-
-      let adjusted = Number(card.score || 0);
-      if (chargeRedundancy) adjusted -= getRedundancyPenalty(card.redundancyKeys, redundancyCounts);
-      if (!curveHasRoom(curvePlan, card.cmc)) adjusted -= 8;
-
-      if (adjusted > bestScore) {
-        best = card;
-        bestScore = adjusted;
+      const fallbackPick = pickFromTiers(fallbackTiers, (tier) =>
+        pickBestFallbackCard(tier, usedNames, commanderKeys, neededBucket, curvePlan, redundancyCounts));
+      if (fallbackPick) {
+        addCard(fallbackPick, getFallbackSource(fallbackPick));
       }
     }
 
-    return best;
-  }
+    // Phase 2: fill the remaining slots with the best cards, prioritizing whatever type and role is still short.
+    //
+    // The EDHREC pool rides along with both tiers rather than sitting in one of
+    // them: it is this commander's own card list, so it is on-theme by
+    // construction and should never be skipped in favour of a generic backfill.
+    const flexibleTiers = fallbackTiers.map((tier) => [...scoredNonlands, ...tier]);
+    while (deck.length < targetNonlandCount) {
+      const best = pickFromTiers(flexibleTiers, (tier) =>
+        chooseBestFlexibleCard(tier, deck, plan, usedNames, commanderKeys));
+      if (!best) break;
 
-  for (const role of supportRoles) {
-    let guard = Number(plan.roleBuckets[role]?.target || 0) * 2;
-    while (getDeckRoleCounts()[role] < Number(plan.roleBuckets[role]?.target || 0) && guard-- > 0) {
-      const edhrecPick = pickForRoleIgnoringBucketRoom(scoredNonlands, role, false);
-      const pick = edhrecPick || pickFromTiers(fallbackTiers, (tier) => pickForRoleIgnoringBucketRoom(tier, role, true));
-      if (!pick) break;
+      addCard(best, scoredNonlands.includes(best) ? "edhrec" : getFallbackSource(best));
+    }
 
-      let replaceIndex = -1;
-      let replaceScore = Infinity;
-      const counts = countByType(deck);
-      const roleCounts = getDeckRoleCounts();
-      for (let i = 0; i < deck.length; i++) {
-        const existing = deck[i];
-        if (isEquipmentCard(existing)) continue;
-        const bucket = getDeckTypeBucket(existing.type || existing.type_line || "");
-        const rule = typePlan?.buckets?.[bucket];
-        if (rule && (counts[bucket] || 0) <= rule.min) continue;
+    // Phase 3: emergency support-role backfill via eviction.
+    //
+    // The role loop runs first now (Phase 0), so by the time this phase starts
+    // a role is normally already at target or already marked exhausted -- this
+    // rarely finds anything left to do. It stays as a safety net for the case
+    // that got it written: a theme living in the same type bucket as a role
+    // (Equipment in Artifact) can still starve that role if the role loop's own
+    // pool was thin and Phase 2's flexible fill then leaned the deck's Artifact
+    // slots toward theme picks before the role's target was reached. A Sokka
+    // and Suki build left 29 owned, color-legal ramp rocks undrafted while
+    // short 5 of its ramp target, purely because Artifact had already hit
+    // 28/28.
+    //
+    // Rather than raise the Artifact bucket's target -- which would let the
+    // theme itself balloon -- evict the worst card from a bucket that has room
+    // above its floor and spend that slot on the missing role instead. An
+    // Equipment is never evicted: growing the deck's Artifact count to make
+    // room for ramp is fine, thinning the theme the fix was asked to leave
+    // alone is not.
+    function isEquipmentCard(card) {
+      // getCardSubtypes reads through getCardType, which lowercases -- an
+      // uppercase needle here would silently never match and this whole
+      // protection would be a no-op.
+      return getCardSubtypes(getRedundancySource(card) || card).includes("equipment");
+    }
 
-        // Robbing a card another role still needs just moves the shortage
-        // around -- only spend a card whose roles are already at or above
-        // their own targets (or that carries no support role at all).
-        const existingRoles = existing.roles || getRoleContributions(getRedundancySource(existing) || existing, isTribalDeck);
-        const stillNeeded = existingRoles.some((r) => roleCounts[r] <= Number(plan.roleBuckets[r]?.target || 0));
-        if (stillNeeded) continue;
+    function pickForRoleIgnoringBucketRoom(pool, role, chargeRedundancy) {
+      let best = null;
+      let bestScore = -Infinity;
 
-        if ((existing.score || 0) < replaceScore) {
-          replaceScore = existing.score || 0;
-          replaceIndex = i;
+      for (const card of pool) {
+        const key = normalizeCardName(card.name);
+        if (usedNames.has(key) || commanderKeys.has(key)) continue;
+
+        const roles = card.roles || getRoleContributions(getRedundancySource(card) || card, isTribalDeck);
+        if (!roles.includes(role)) continue;
+
+        let adjusted = Number(card.score || 0);
+        if (chargeRedundancy) adjusted -= getRedundancyPenalty(card.redundancyKeys, redundancyCounts);
+        if (!curveHasRoom(curvePlan, card.cmc)) adjusted -= 8;
+
+        if (adjusted > bestScore) {
+          best = card;
+          bestScore = adjusted;
         }
       }
 
-      if (replaceIndex === -1) break;
-      usedNames.delete(normalizeCardName(deck[replaceIndex].name));
-      releaseCurvePick(curvePlan, deck[replaceIndex].cmc);
-      adjustRedundancy(deck[replaceIndex], -1);
-      deck.splice(replaceIndex, 1);
-      addCard(pick, edhrecPick ? "edhrec" : getFallbackSource(pick));
+      return best;
     }
-  }
 
-  // Phase 4: emergency creature backfill if the collection was extremely spell-heavy.
-  const creatureRule = typePlan?.buckets?.Creature;
-  if (creatureRule) {
-    while ((countByType(deck).Creature || 0) < creatureRule.min && deck.length) {
-      const fallbackCreature = pickFromTiers(fallbackTiers, (tier) =>
-        pickBestFallbackCard(tier, usedNames, commanderKeys, "Creature", curvePlan, redundancyCounts));
-      if (!fallbackCreature) break;
+    for (const role of supportRoles) {
+      let guard = Number(plan.roleBuckets[role]?.target || 0) * 2;
+      while (getDeckRoleCounts()[role] < Number(plan.roleBuckets[role]?.target || 0) && guard-- > 0) {
+        const edhrecPick = pickForRoleIgnoringBucketRoom(scoredNonlands, role, false);
+        const pick = edhrecPick || pickFromTiers(fallbackTiers, (tier) => pickForRoleIgnoringBucketRoom(tier, role, true));
+        if (!pick) break;
 
-      let replaceIndex = -1;
-      let replaceScore = Infinity;
-      const counts = countByType(deck);
-      for (let i = 0; i < deck.length; i++) {
-        const existing = deck[i];
-        const bucket = getDeckTypeBucket(existing.type || existing.type_line || "");
-        if (bucket === "Creature") continue;
-        const rule = typePlan?.buckets?.[bucket];
-        if (rule && (counts[bucket] || 0) <= rule.min) continue;
-        if ((existing.score || 0) < replaceScore) {
-          replaceScore = existing.score || 0;
-          replaceIndex = i;
+        let replaceIndex = -1;
+        let replaceScore = Infinity;
+        const counts = countByType(deck);
+        const roleCounts = getDeckRoleCounts();
+        for (let i = 0; i < deck.length; i++) {
+          const existing = deck[i];
+          if (isEquipmentCard(existing)) continue;
+          const bucket = getDeckTypeBucket(existing.type || existing.type_line || "");
+          const rule = typePlan?.buckets?.[bucket];
+          if (rule && (counts[bucket] || 0) <= rule.min) continue;
+
+          // Robbing a card another role still needs just moves the shortage
+          // around -- only spend a card whose roles are already at or above
+          // their own targets (or that carries no support role at all).
+          const existingRoles = existing.roles || getRoleContributions(getRedundancySource(existing) || existing, isTribalDeck);
+          const stillNeeded = existingRoles.some((r) => roleCounts[r] <= Number(plan.roleBuckets[r]?.target || 0));
+          if (stillNeeded) continue;
+
+          if ((existing.score || 0) < replaceScore) {
+            replaceScore = existing.score || 0;
+            replaceIndex = i;
+          }
         }
-      }
 
-      if (replaceIndex === -1) break;
-      usedNames.delete(normalizeCardName(deck[replaceIndex].name));
-      releaseCurvePick(curvePlan, deck[replaceIndex].cmc);
-      adjustRedundancy(deck[replaceIndex], -1);
-      deck.splice(replaceIndex, 1);
-      addCard(fallbackCreature, getFallbackSource(fallbackCreature));
+        if (replaceIndex === -1) break;
+        usedNames.delete(normalizeCardName(deck[replaceIndex].name));
+        releaseCurvePick(curvePlan, deck[replaceIndex].cmc);
+        adjustRedundancy(deck[replaceIndex], -1);
+        deck.splice(replaceIndex, 1);
+        addCard(pick, edhrecPick ? "edhrec" : getFallbackSource(pick));
+      }
+    }
+
+    // Phase 4: emergency creature backfill if the collection was extremely spell-heavy.
+    const creatureRule = typePlan?.buckets?.Creature;
+    if (creatureRule) {
+      while ((countByType(deck).Creature || 0) < creatureRule.min && deck.length) {
+        const fallbackCreature = pickFromTiers(fallbackTiers, (tier) =>
+          pickBestFallbackCard(tier, usedNames, commanderKeys, "Creature", curvePlan, redundancyCounts));
+        if (!fallbackCreature) break;
+
+        let replaceIndex = -1;
+        let replaceScore = Infinity;
+        const counts = countByType(deck);
+        for (let i = 0; i < deck.length; i++) {
+          const existing = deck[i];
+          const bucket = getDeckTypeBucket(existing.type || existing.type_line || "");
+          if (bucket === "Creature") continue;
+          const rule = typePlan?.buckets?.[bucket];
+          if (rule && (counts[bucket] || 0) <= rule.min) continue;
+          if ((existing.score || 0) < replaceScore) {
+            replaceScore = existing.score || 0;
+            replaceIndex = i;
+          }
+        }
+
+        if (replaceIndex === -1) break;
+        usedNames.delete(normalizeCardName(deck[replaceIndex].name));
+        releaseCurvePick(curvePlan, deck[replaceIndex].cmc);
+        adjustRedundancy(deck[replaceIndex], -1);
+        deck.splice(replaceIndex, 1);
+        addCard(fallbackCreature, getFallbackSource(fallbackCreature));
+      }
     }
   }
 
@@ -5298,18 +5413,23 @@ function buildDeckFromScoredPool(
 
   let finalDeck = [...deck, ...selectedNonbasicLands, ...basicLands];
 
-  while (finalDeck.length < deckSize) {
-    const extra = buildBasicManaBase(
-      commanderColors,
-      1,
-      finalDeck.filter((c) => c.role === "land"),
-      colorTargets
-    );
-    finalDeck.push(...extra);
-  }
+  // Minimal Build's list is deliberately shorter than deckSize -- padding it
+  // out with basic lands here would silently turn the "support package only"
+  // promise back into a full, deckSize-sized list.
+  if (!modePrefs.minimalBuild) {
+    while (finalDeck.length < deckSize) {
+      const extra = buildBasicManaBase(
+        commanderColors,
+        1,
+        finalDeck.filter((c) => c.role === "land"),
+        colorTargets
+      );
+      finalDeck.push(...extra);
+    }
 
-  if (finalDeck.length > deckSize) {
-    finalDeck = finalDeck.slice(0, deckSize);
+    if (finalDeck.length > deckSize) {
+      finalDeck = finalDeck.slice(0, deckSize);
+    }
   }
 
   return finalDeck;
@@ -5469,7 +5589,7 @@ function findOwnedUnrankedCommanders(collection, cardData, rankedCommanders) {
     const card = cardData.get(normalizedName)
       || cardData.get(normalizeCardName(getPrimaryCardName(normalizedName)));
     if (!card) continue;
-    if (!canBeCommander(card)) continue;
+    if (!canBeActiveCommander(card)) continue;
 
     seen.add(normalizedName);
     unranked.push({
@@ -5509,7 +5629,7 @@ function collectUsablePoolCards(commander, pool, collection, cardData) {
     const card = cardData.get(key) || cardData.get(normalizeCardName(getPrimaryCardName(entry.name)));
     if (!card) continue;
     if (getCardType(card).includes("land")) continue;
-    if (!legalForCommander(card.colors, commander.colors)) continue;
+    if (!legalForCommander(card.colors, commander.colors, card)) continue;
 
     usable.push(card);
   }

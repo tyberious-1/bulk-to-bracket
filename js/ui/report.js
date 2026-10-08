@@ -238,3 +238,21 @@ function displayWarnings(warnings) {
 
   el.appendChild(card);
 }
+
+// Separate from displayWarnings on purpose: this isn't a structural issue
+// with the finished deck, it's a nudge toward a different build mode, so it
+// lives in its own banner rather than reading like one more warning line.
+function displayMinimalBuildHint(fallbackGenericRatio, minimalBuildActive) {
+  const el = document.getElementById("buildModeHint");
+  if (!el) return;
+
+  el.innerHTML = "";
+
+  if (minimalBuildActive || !(fallbackGenericRatio > 0)) {
+    el.classList.add("hidden");
+    return;
+  }
+
+  el.classList.remove("hidden");
+  el.textContent = "Low theme-match confidence for this commander — try Minimal Build for a short, EDHREC-first support package instead of a full 99-card list.";
+}

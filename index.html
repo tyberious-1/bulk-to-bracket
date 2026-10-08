@@ -10,6 +10,7 @@
 <body>
   <div class="app">
     <h1>MTG Commander Deck Builder</h1>
+    <p class="format-banner"><a href="pauper.html">Try Pauper Commander (PDH) →</a></p>
 
     <div class="tabs" role="tablist">
       <button class="tab-btn active" type="button" data-tab="build">Build a Deck</button>
@@ -63,11 +64,18 @@
         <h2>How it works</h2>
         <p>Choose a legal commander, upload a ManaBox CSV of cards you own, and the app will build a legal Commander deck from your collection.</p>
         <p>It uses your owned cards, commander themes, EDHREC synergy, and collection-based fallback logic to fill out the list.</p>
+        <p>Typal/tribal commanders get the most synergy out of this tool, since creature types are easy to detect reliably; other themes may run thinner. If a build leans on weak guesses, try <strong>Minimal Build</strong> for a short list of just the commander, mana base, and support package (ramp/draw/removal/wipe) instead of a full deck.</p>
       </div>
 
       <div id="postBuildControls" class="panel hidden">
         <h2>Regenerate With Different Priorities</h2>
         <div id="priorityButtons" class="priority-buttons"></div>
+      </div>
+
+      <div id="buildModeControls" class="panel hidden">
+        <h2>Build Mode</h2>
+        <p class="build-mode-copy">Stop at the commander, mana base, and support package (ramp/draw/removal/wipe) — no theme guessing, no filler, and the list will be well short of a full 99 cards.</p>
+        <button id="minimalBuildToggle" type="button" class="mode-toggle-btn">Minimal Build</button>
       </div>
 
       <div class="results-grid">
@@ -112,6 +120,7 @@
           <div id="deckGameChangers" class="deck-game-changers"></div>
           <div id="buildBreakdown" class="build-breakdown"></div>
           <div id="supportPackage" class="support-package"></div>
+          <div id="buildModeHint" class="build-mode-hint hidden"></div>
           <div id="warningsPanel" class="warnings-panel"></div>
 
           <div class="preview-heading">Grouped Preview
@@ -153,6 +162,7 @@
   <script src="js/constants.js"></script>
   <script src="js/utils/text.js"></script>
   <script src="js/utils/cards.js"></script>
+  <script src="js/format.js"></script>
   <script src="js/analysis/pairing.js"></script>
   <script src="js/collection/csv.js"></script>
   <script src="js/analysis/themes.js"></script>

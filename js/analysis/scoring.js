@@ -441,6 +441,37 @@ function detectCardTags(card) {
   if (/\bdescend\s+\d/.test(text)) tags.push("descend");
   if (text.includes("explore")) tags.push("explore");
 
+  if (String(card.manaCost || "").includes("{X}")) tags.push("x spells");
+
+  if (
+    text.includes("damage to any target") ||
+    text.includes("damage to target player") ||
+    text.includes("damage to target opponent") ||
+    text.includes("damage to each opponent") ||
+    text.includes("damage to that player")
+  ) {
+    tags.push("burn");
+  }
+
+  if (text.includes("discards a card") || text.includes("discards two cards")) {
+    tags.push("discard");
+  }
+
+  // "when/whenever ... enters" catches both "When ~ enters, ..." and
+  // "Whenever a creature enters the battlefield under your control, ..." --
+  // broad on purpose since the ETB theme is defined by having the trigger at
+  // all, not by what it does once it fires.
+  if (/\b(when|whenever)\b[^.]*\benters\b/.test(text)) tags.push("etb");
+
+  if (
+    text.includes("copy of a creature") ||
+    text.includes("copy of target creature") ||
+    text.includes("as a copy of") ||
+    text.includes("becomes a copy")
+  ) {
+    tags.push("clones");
+  }
+
   if (
     type.includes("equipment") ||
     type.includes("aura") ||
@@ -530,7 +561,7 @@ const DETECTABLE_CARD_TAGS = new Set([
   "airbending", "waterbending", "earthbending", "firebending",
   "sagas", "cascade", "amass", "mutate", "discover", "affinity", "populate",
   "the ring tempts you", "extra combats", "extra turns", "storm", "dungeon",
-  "dredge", "descend", "explore"
+  "dredge", "descend", "explore", "x spells", "burn", "discard", "etb", "clones"
 ]);
 
 // strategyProfile's wants* flags are an ambient signal: what this
@@ -762,8 +793,17 @@ function scoreFallbackCard(card, commanderThemes, strategyProfile, commanderColo
 
   const tags = detectCardTags(card);
   const themeSignals = buildThemeSignalSet(commanderThemes);
-  for (const tag of tags) {
-    if (themeSignals.has(normalizeThemeName(tag))) score += 4 * modePrefs.synergyBias;
+  // This is the keyword-tag guess minimal mode exists to avoid: a card
+  // earns this bonus for merely mentioning a theme word in its own text
+  // (detectCardTags), with no check that it actually pays off the theme --
+  // the mechanism behind weak picks like Human Torch, Johnny Storm riding a
+  // "+1/+1 counters" mention into a counters-adjacent slot. Skipped here
+  // rather than in buildThemeCandidateNames, since this loop runs whether or
+  // not that function ever gets called.
+  if (!modePrefs.minimalBuild) {
+    for (const tag of tags) {
+      if (themeSignals.has(normalizeThemeName(tag))) score += 4 * modePrefs.synergyBias;
+    }
   }
 
   score += getThemeFocusAdjustment(card, tags, modePrefs);

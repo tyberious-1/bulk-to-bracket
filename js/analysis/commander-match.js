@@ -75,7 +75,7 @@ function findOwnedUnrankedCommanders(collection, cardData, rankedCommanders) {
     const card = cardData.get(normalizedName)
       || cardData.get(normalizeCardName(getPrimaryCardName(normalizedName)));
     if (!card) continue;
-    if (!canBeCommander(card)) continue;
+    if (!canBeActiveCommander(card)) continue;
 
     seen.add(normalizedName);
     unranked.push({
@@ -115,7 +115,7 @@ function collectUsablePoolCards(commander, pool, collection, cardData) {
     const card = cardData.get(key) || cardData.get(normalizeCardName(getPrimaryCardName(entry.name)));
     if (!card) continue;
     if (getCardType(card).includes("land")) continue;
-    if (!legalForCommander(card.colors, commander.colors)) continue;
+    if (!legalForCommander(card.colors, commander.colors, card)) continue;
 
     usable.push(card);
   }

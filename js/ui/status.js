@@ -122,7 +122,13 @@ function getCurrentBuildMode() {
   const parts = [];
   const currentThemeFocus = getCurrentThemeFocus();
   if (currentThemeFocus) parts.push(`theme:${currentThemeFocus}`);
+  if (getMinimalBuildEnabled()) parts.push("minimal");
   return parts.join("|");
+}
+
+function updateBuildModeToggle() {
+  const toggle = document.getElementById("minimalBuildToggle");
+  if (toggle) toggle.classList.toggle("active", getMinimalBuildEnabled());
 }
 
 function updateProgress(percent, statusText, subStatus = "") {

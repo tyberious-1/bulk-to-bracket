@@ -17,7 +17,7 @@ let currentRunContext = null;
 async function resolveCommanders(primaryName, partnerName) {
   const primary = await getCommander(primaryName);
   if (!primary) throw new Error("Commander not found on Scryfall.");
-  if (!canBeCommander(primary)) throw new Error("Selected card does not appear to be a legal commander.");
+  if (!canBeActiveCommander(primary)) throw new Error("Selected card does not appear to be a legal commander.");
 
   if (!partnerName) {
     return {
@@ -31,6 +31,9 @@ async function resolveCommanders(primaryName, partnerName) {
 
   const partner = await getCommander(partnerName);
   if (!partner) throw new Error(`Second commander "${partnerName}" was not found on Scryfall.`);
+  if (!canBeActiveCommander(partner)) {
+    throw new Error(`"${partner.name}" does not appear to be a legal commander.`);
+  }
   if (!isLegalCommanderPair(primary, partner)) {
     throw new Error(`${primary.name} and ${partner.name} cannot be commanders together.`);
   }
@@ -53,7 +56,9 @@ async function generateDeck() {
 
   currentRunContext = null;
   setCurrentThemeFocus(takePendingThemeFocus() || "");
+  setMinimalBuildEnabled(false);
   document.getElementById("postBuildControls").classList.add("hidden");
+  document.getElementById("buildModeControls").classList.add("hidden");
 
   clearLog();
   clearCommanderCard();
@@ -93,17 +98,26 @@ async function generateDeck() {
     displayCommanderCard(commanders.primary, commanders.partner);
     logMessage(`Commander found: ${commanders.names.join(" + ")} | Color identity: ${commanders.colors.join("") || "Colorless"}`);
 
-    updateProgress(18, "Fetching EDHREC synergy data...");
-    logMessage("Loading commander recommendations from EDHREC.");
-    const edhrecData = await getEDHREC(commanders.names);
+    let edhrecData = { cards: [], tags: [], allTags: [], typeAverages: null, roleTargets: null, themeCardLists: {} };
+
+    if (!isPauperFormat()) {
+      updateProgress(18, "Fetching EDHREC synergy data...");
+      logMessage("Loading commander recommendations from EDHREC.");
+      edhrecData = await getEDHREC(commanders.names);
+      if (edhrecData?.unavailable) {
+        logMessage("EDHREC could not be reached. Continuing with Scryfall + collection-based build logic.");
+      }
+    } else {
+      logMessage("Pauper Commander mode: EDHREC has no data for uncommon commanders — building entirely from Scryfall and your collection.");
+    }
+
     const edhrecCards = Array.isArray(edhrecData?.cards) ? edhrecData.cards : [];
     const edhrecTags = Array.isArray(edhrecData?.tags) ? edhrecData.tags : [];
     const edhrecAllTags = Array.isArray(edhrecData?.allTags) ? edhrecData.allTags : [];
-    if (edhrecData?.unavailable) {
-      logMessage("EDHREC could not be reached. Continuing with Scryfall + collection-based build logic.");
-    }
     if (!edhrecCards.length) {
-      logMessage("No EDHREC card data available. Falling back to collection/theme-based build logic.");
+      if (!isPauperFormat()) {
+        logMessage("No EDHREC card data available. Falling back to collection/theme-based build logic.");
+      }
     } else {
       logMessage(`EDHREC returned ${edhrecCards.length} candidate cards.`);
     }
@@ -192,10 +206,12 @@ async function generateDeck() {
 
     await performBuildFromContext();
     document.getElementById("postBuildControls").classList.remove("hidden");
+    document.getElementById("buildModeControls").classList.remove("hidden");
   } catch (error) {
     console.error(error);
     currentRunContext = null;
     document.getElementById("postBuildControls").classList.add("hidden");
+    document.getElementById("buildModeControls").classList.add("hidden");
     updateProgress(0, "Error");
     renderPreviewErrorState(error?.message || "Unable to render deck preview.");
     logMessage(`ERROR: ${error.message}`);
@@ -205,13 +221,13 @@ async function generateDeck() {
   }
 }
 
-async function regenerateWithMode(mode) {
-  if (!currentRunContext) return;
-  if (mode.startsWith("theme:")) {
-    const pickedTheme = mode.slice(6);
-    setCurrentThemeFocus(getCurrentThemeFocus() === pickedTheme ? "" : pickedTheme);
-  }
+// Shared by every control that rebuilds from currentRunContext without
+// re-fetching (theme-priority buttons, the Minimal Build toggle). The mode
+// string itself always comes fresh from getCurrentBuildMode() rather than
+// being passed in, so a caller only needs to update state first.
+async function runRegeneration() {
   updatePriorityButtons();
+  updateBuildModeToggle();
   setGenerateEnabled(false);
   try {
     const modeLabel = getCurrentBuildMode() || "default";
@@ -227,6 +243,21 @@ async function regenerateWithMode(mode) {
   } finally {
     setGenerateEnabled(true);
   }
+}
+
+async function regenerateWithMode(mode) {
+  if (!currentRunContext) return;
+  if (mode.startsWith("theme:")) {
+    const pickedTheme = mode.slice(6);
+    setCurrentThemeFocus(getCurrentThemeFocus() === pickedTheme ? "" : pickedTheme);
+  }
+  await runRegeneration();
+}
+
+async function toggleMinimalBuild() {
+  if (!currentRunContext) return;
+  setMinimalBuildEnabled(!getMinimalBuildEnabled());
+  await runRegeneration();
 }
 
 async function performBuildFromContext() {
@@ -316,7 +347,7 @@ async function performBuildFromContext() {
     for (const [normalizedName, card] of allOwnedCardData) {
       if (alreadyIncluded.has(normalizedName) || !card) continue;
       if (getCardType(card).includes("land")) continue;
-      if (!legalForCommander(card.colors, commanders.colors)) continue;
+      if (!legalForCommander(card.colors, commanders.colors, card)) continue;
       if (!cardMatchesThemeFocus(card, modePrefs)) continue;
       widenedMatches.push({
         normalizedName,
@@ -344,7 +375,7 @@ async function performBuildFromContext() {
     const normalizedName = normalizeCardName(edhrecCard.name);
     const card = ownedCardData.get(normalizedName);
 
-    if (!card || getCardType(card).includes("land") || !legalForCommander(card.colors, commanders.colors)) {
+    if (!card || getCardType(card).includes("land") || !legalForCommander(card.colors, commanders.colors, card)) {
       maybeUpdateScoringProgress(processed, totalToScore);
       continue;
     }
@@ -395,17 +426,30 @@ async function performBuildFromContext() {
   renderPriorityButtons(commanderThemes, allOwnedCardData, edhrecAllTags);
 
   updateProgress(88, "Finding collection cards that fit the themes...");
-  // Resolved here rather than inside the builder: local text matching answers
-  // most themes, but the ones it cannot need a Scryfall lookup, and the builder
-  // is synchronous.
-  const themeCardNames = await buildThemeCandidateNames(
-    commanderThemes,
-    collection,
-    allOwnedCardData,
-    commanders.colors,
-    currentRunContext.themeCardLists
+  // Minimal Build skips this entirely: it's the keyword/tag/fingerprint
+  // guessing layer that can produce unconvincing fallback-generic picks when
+  // a theme isn't modeled well (e.g. Rosheen Meanderer's X-cost payoff,
+  // which no detector here recognizes). An empty map here means every
+  // leftover slot falls straight to EDHREC-ranked candidates, then plain
+  // generic-score fallback -- see buildDeckFromScoredPool's phase order.
+  //
+  // Otherwise: resolved here rather than inside the builder, since local text
+  // matching answers most themes, but the ones it cannot need a Scryfall
+  // lookup, and the builder is synchronous.
+  const themeCardNames = modePrefs.minimalBuild
+    ? new Map()
+    : await buildThemeCandidateNames(
+        commanderThemes,
+        collection,
+        allOwnedCardData,
+        commanders.colors,
+        currentRunContext.themeCardLists
+      );
+  logMessage(
+    modePrefs.minimalBuild
+      ? "Minimal Build mode: skipping theme-based collection backfill."
+      : `${themeCardNames.size} owned cards match the detected themes.`
   );
-  logMessage(`${themeCardNames.size} owned cards match the detected themes.`);
 
   updateProgress(90, "Building deck structure and mana base...");
   const finalDeck = buildDeckFromScoredPool(
@@ -424,6 +468,9 @@ async function performBuildFromContext() {
 
   logMessage(`Built final deck with ${finalDeck.length} cards.`);
   logMessage(`Final deck breakdown: ${finalDeck.filter(c => c.role !== "land").length} nonlands, ${finalDeck.filter(c => c.role === "land").length} lands.`);
+  if (modePrefs.minimalBuild) {
+    logMessage(`Minimal Build mode: list stops at ${finalDeck.length} cards (commander + mana base + support package only) — not a full, legal ${commanders.deckSize}-card list.`);
+  }
 
   const sanitizedFinalDeck = sanitizeDeckCards(finalDeck);
 
@@ -434,7 +481,7 @@ async function performBuildFromContext() {
     commanders.names
   );
 
-  const warnings = generateWarnings(sanitizedFinalDeck, commanderThemes, bracketInfo);
+  const { warnings, fallbackGenericRatio } = generateWarnings(sanitizedFinalDeck, commanderThemes, bracketInfo);
 
   updateProgress(97, "Rendering results...");
   displayDeckSummary(sanitizedFinalDeck, commanders.primary.name, commanders.colors);
@@ -443,6 +490,7 @@ async function performBuildFromContext() {
   displayGameChangers(bracketInfo);
   displayBuildBreakdown(sanitizedFinalDeck);
   displaySupportPackage(sanitizedFinalDeck, roleTargets);
+  displayMinimalBuildHint(fallbackGenericRatio, modePrefs.minimalBuild);
   displayWarnings(warnings);
   displayMoxfieldExport(sanitizedFinalDeck, commanders.names, commanderThemes, strategyProfile, commanders.colors);
   renderManaCurve(sanitizedFinalDeck);
@@ -493,7 +541,7 @@ const partnerAutocomplete = createNameAutocomplete({
 const commanderAutocomplete = createNameAutocomplete({
   input: commanderInput,
   list: autocompleteList,
-  isEligible: canBeCommander,
+  isEligible: canBeActiveCommander,
   onSelect: async (name) => {
     updateGenerateButtonState();
     const card = await getCommander(name);
@@ -523,6 +571,12 @@ if (priorityButtonsWrap) {
     if (!button) return;
     if (button.disabled) return;
     regenerateWithMode(button.dataset.mode);
+  });
+}
+
+if (minimalBuildToggle) {
+  minimalBuildToggle.addEventListener("click", () => {
+    toggleMinimalBuild();
   });
 }
 

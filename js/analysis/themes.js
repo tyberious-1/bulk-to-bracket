@@ -118,7 +118,14 @@ const TRIBAL_PLURAL_ALIASES = {
   shamans: "shaman tribal",
   foxes: "fox tribal",
   daleks: "dalek tribal",
-  atogs: "atog tribal"
+  atogs: "atog tribal",
+  birds: "bird tribal",
+  dinosaurs: "dinosaur tribal",
+  drakes: "drake tribal",
+  rats: "rat tribal",
+  samurai: "samurai tribal",
+  treefolk: "treefolk tribal",
+  warlocks: "warlock tribal"
 };
 
 function getThemeAliases(theme) {
@@ -175,7 +182,12 @@ function getThemeAliases(theme) {
     "artificers": ["artificer tribal", "artifacts"],
     "golems": ["golem tribal", "artifacts"],
     "thopters": ["thopter tribal", "artifacts", "tokens"],
-    "constructs": ["construct tribal", "artifacts"]
+    "constructs": ["construct tribal", "artifacts"],
+    "x spells": ["x spells"],
+    "burn": ["burn"],
+    "discard": ["discard"],
+    "etb": ["etb"],
+    "clones": ["clones"]
   };
 
   if (directAliases[normalized]) {
@@ -264,7 +276,7 @@ async function detectCommanderThemes(edhrecCards, edhrecTags, collectionData, al
 
     const card = allOwnedCardData.get(entry.normalizedName);
     if (!card) continue;
-    if (!legalForCommander(card.colors, commanderColors)) continue;
+    if (!legalForCommander(card.colors, commanderColors, card)) continue;
 
     if (
       getCardType(card).includes("creature") ||
@@ -461,6 +473,7 @@ function getModePreferences(mode, strategyProfile) {
     focusedThemeSignal,
     focusedTribalTypes,
     themeFocusAliases,
+    minimalBuild: modeParts.includes("minimal"),
     synergyBias:
       themeFocus ? 1.45 : 1,
     creatureBias:
@@ -600,7 +613,7 @@ function findLocalThemeMatches(theme, collectionData, allOwnedCardData, commande
     const card = allOwnedCardData.get(entry.normalizedName);
     if (!card) continue;
     if (getCardType(card).includes("land")) continue;
-    if (!legalForCommander(card.colors, commanderColors)) continue;
+    if (!legalForCommander(card.colors, commanderColors, card)) continue;
     if (cardMatchesThemeText(card, theme)) matches.add(entry.normalizedName);
   }
 
@@ -641,7 +654,7 @@ async function findThemeCandidates(
       || allOwnedCardData.get(normalizeCardName(getPrimaryCardName(name)));
     if (!card) continue;
     if (getCardType(card).includes("land")) continue;
-    if (!legalForCommander(card.colors, commanderColors)) continue;
+    if (!legalForCommander(card.colors, commanderColors, card)) continue;
 
     matches.add(normalized);
   }
@@ -823,7 +836,7 @@ function findFingerprintMatches(phrases, collectionData, allOwnedCardData, comma
     const card = allOwnedCardData.get(entry.normalizedName);
     if (!card) continue;
     if (getCardType(card).includes("land")) continue;
-    if (!legalForCommander(card.colors, commanderColors)) continue;
+    if (!legalForCommander(card.colors, commanderColors, card)) continue;
 
     const text = getCardText(card);
     if (phrases.some((phrase) => text.includes(phrase))) matches.add(entry.normalizedName);

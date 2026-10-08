@@ -18,6 +18,11 @@ a:hover {
   text-decoration: underline;
 }
 
+.format-banner {
+  margin: -8px 0 16px;
+  font-size: 0.95rem;
+}
+
 .app {
   max-width: 1200px;
   margin: 0 auto;
@@ -87,6 +92,24 @@ button:disabled {
 
 .priority-btn.active {
   background: #059669;
+}
+
+.build-mode-copy {
+  color: #cbd5e1;
+  margin-bottom: 4px;
+}
+
+.mode-toggle-btn.active {
+  background: #059669;
+}
+
+.build-mode-hint {
+  margin-bottom: 12px;
+  background: #1f1a0b;
+  border: 1px solid #b45309;
+  border-radius: 8px;
+  padding: 12px;
+  color: #fcd34d;
 }
 
 #progressContainer {

@@ -15,6 +15,19 @@ function setCurrentThemeFocus(theme) {
   currentThemeFocus = String(theme || "");
 }
 
+// Minimal Build mode: skip theme-based collection backfill and fill leftover
+// slots straight from EDHREC's own ranking instead. Opt-in only, toggled from
+// its own control rather than folded into the theme-focus buttons above.
+let minimalBuildEnabled = false;
+
+function getMinimalBuildEnabled() {
+  return minimalBuildEnabled;
+}
+
+function setMinimalBuildEnabled(enabled) {
+  minimalBuildEnabled = Boolean(enabled);
+}
+
 // Set by the Theme/Tribal tab before handing a commander to the build flow,
 // so the very first generateDeck() run already focuses that theme instead of
 // requiring a manual click on a priority button after the fact. Consumed

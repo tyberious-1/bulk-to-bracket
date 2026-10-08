@@ -636,7 +636,7 @@ function buildNonbasicManaBase(collectionData, allOwnedCardData, commanderColors
     if (!card) continue;
     if (!getCardType(card).includes("land")) continue;
     if (isBasicLand(card.name)) continue;
-    if (!legalForCommander(card.colors, commanderColors)) continue;
+    if (!legalForCommander(card.colors, commanderColors, card)) continue;
 
     const landCandidate = evaluateNonbasicLand(card, commanderColors, strategyProfile, modePrefs, edhrecCardLookup, colorTargets);
     if (!landCandidate) continue;

@@ -2,7 +2,7 @@
 // (either a raw Scryfall payload or our converted shape) and reads it
 // defensively, since the two shapes name the same fields differently.
 //
-// Depends on: constants.js, text.js
+// Depends on: constants.js, text.js, format.js
 
 const COMMANDER_PERMITTED_SUBTYPES = ["creature", "vehicle", "spacecraft"];
 
@@ -86,10 +86,11 @@ function isGameChanger(cardName) {
   return GAME_CHANGERS.has(normalizeCardName(getPrimaryCardName(cardName)));
 }
 
-function legalForCommander(cardColors, commanderColors) {
+function legalForCommander(cardColors, commanderColors, card) {
   for (const color of cardColors) {
     if (!commanderColors.includes(color)) return false;
   }
+  if (isPauperFormat() && card && card.rarity !== "common") return false;
   return true;
 }
 
@@ -109,4 +110,12 @@ function canBeCommander(card) {
   // Artifact Creature", "Legendary Snow Creature"). Legendary Vehicles and
   // Spacecraft are also legal commanders even though they aren't creatures.
   return COMMANDER_PERMITTED_SUBTYPES.some((subtype) => frontType.includes(subtype));
+}
+
+// Pauper Commander (PDH): any uncommon creature, legendary or not. No
+// COMMANDER_PERMITTED_SUBTYPES escape hatch and no "can be your commander"
+// text rule -- PDH's own rule is literally "any uncommon creature."
+function canBePauperCommander(card) {
+  const frontType = getCardType(card).split("//")[0];
+  return card?.rarity === "uncommon" && frontType.includes("creature");
 }

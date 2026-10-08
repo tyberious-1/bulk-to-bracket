@@ -55,6 +55,12 @@ function resetCommanderScan() {
   const collection = getOwnedCollection();
   if (!collection) return;
 
+  // EDHREC's rankings are full-Commander data (any rarity) with no PDH
+  // equivalent -- under pauper format they're not just stale, they're the
+  // wrong card pool entirely, so skip them the same way main.js skips the
+  // EDHREC fetch for pauper builds.
+  if (isPauperFormat()) return;
+
   const cached = readPersistedCommanderRankings();
   if (cached) ownedCommanders = findOwnedRankedCommanders(collection, cached);
 }
@@ -111,8 +117,13 @@ function matchesColorFilter(commander) {
 
 // Checked rows sort by match, and anything unchecked sinks below them -- an
 // unchecked row is an unknown percentage, not a zero.
+//
+// Under pauper format there is no ranked (EDHREC) list at all -- the
+// collection scan's format-aware canBeActiveCommander filter is the only
+// source, so it stands in as the primary list rather than a long tail.
 function getSortedCommanders() {
-  const rows = ownedCommanders.filter(matchesColorFilter);
+  const source = isPauperFormat() ? unrankedCommanders : ownedCommanders;
+  const rows = source.filter(matchesColorFilter);
   if (commanderSortMode !== "match") return rows;
 
   return rows.sort((a, b) => {
@@ -132,7 +143,13 @@ function getSortedCommanders() {
 // Only offered under a colour filter: unranked commanders are the long tail of
 // the collection, and the unfiltered list is already every commander EDHREC
 // ranks.
+//
+// Under pauper format, getSortedCommanders() already draws from
+// unrankedCommanders directly (there's no ranked list to tail onto), so this
+// returns nothing to avoid rendering the same rows twice under a second
+// "Not ranked by EDHREC" heading.
 function getFilteredUnrankedCommanders() {
+  if (isPauperFormat()) return [];
   if (!commanderColorFilter.size) return [];
   return unrankedCommanders.filter(matchesColorFilter);
 }
@@ -194,8 +211,20 @@ function renderCommandersTab() {
     return;
   }
 
-  if (!ownedCommanders.length) {
-    panel.innerHTML = `
+  const pauper = isPauperFormat();
+  const scanned = pauper ? unrankedScanDone : ownedCommanders.length > 0;
+
+  if (!scanned) {
+    panel.innerHTML = pauper
+      ? `
+      <div class="empty-state">
+        <p>Find the uncommon creatures in your collection that are eligible to
+        lead a Pauper Commander deck. EDHREC has no Pauper Commander data, so
+        this reads your collection's own card data instead.</p>
+        <button id="findUnrankedBtn" type="button">Find my commanders</button>
+      </div>
+    `
+      : `
       <div class="empty-state">
         <p>Rank the commanders in your collection against EDHREC's most-played
         lists. This reads 32 pages once and caches them for a week.</p>
@@ -209,7 +238,7 @@ function renderCommandersTab() {
   const unrankedRows = getFilteredUnrankedCommanders();
   const checkedCount = [...rows, ...unrankedRows].filter(getCommanderMatchResult).length;
   const filtered = commanderColorFilter.size > 0;
-  const canScanUnranked = filtered && !unrankedScanDone;
+  const canScanUnranked = pauper ? false : filtered && !unrankedScanDone;
 
   panel.innerHTML = `
     <div class="color-filter">
@@ -245,7 +274,7 @@ function renderCommandersTab() {
 
     <div class="commanders-toolbar">
       <div class="commanders-count">
-        ${filtered
+        ${filtered && !pauper
           ? `${rows.length} of ${ownedCommanders.length} commanders shown${unrankedRows.length ? ` &middot; ${unrankedRows.length} unranked` : ""}`
           : `${rows.length} commanders owned`} &middot; ${checkedCount} checked
       </div>
@@ -360,9 +389,16 @@ async function scanUnrankedCommanders() {
     unrankedCommanders = findOwnedUnrankedCommanders(collection, cardData, ownedCommanders);
     unrankedScanDone = true;
 
-    updateProgress(100, "Collection scanned", `${unrankedCommanders.length} unranked commanders`);
+    const pauper = isPauperFormat();
+    updateProgress(
+      100,
+      "Collection scanned",
+      pauper ? `${unrankedCommanders.length} eligible commanders` : `${unrankedCommanders.length} unranked commanders`
+    );
     if (!unrankedCommanders.length) {
-      showToast("Every commander you own is already ranked by EDHREC.");
+      showToast(pauper
+        ? "No uncommon creatures eligible to be a Pauper Commander were found in this collection."
+        : "Every commander you own is already ranked by EDHREC.");
     }
   } catch (error) {
     console.error(error);

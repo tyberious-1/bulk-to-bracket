@@ -46,9 +46,9 @@ runSuite("type-plan", {
       assertTrue(typeof plan.typeBuckets[bucket].target === "number", bucket + " should have a target");
     }
   },
-  "buildRoleTargetPlan: Creature keeps its floor of 8": function () {
+  "buildRoleTargetPlan: Creature keeps its floor of 15": function () {
     const plan = buildRoleTargetPlan(null, { wantsCreatures: false }, 37, { ramp: 10, draw: 10, removal: 8, wipe: 3 }, [], 99, {});
-    assertTrue(plan.typeBuckets.Creature.min >= 8, "expected Creature min >= 8, got " + plan.typeBuckets.Creature.min);
+    assertTrue(plan.typeBuckets.Creature.min >= 15, "expected Creature min >= 15, got " + plan.typeBuckets.Creature.min);
   },
   "buildRoleTargetPlan: landCount and nonlandCount still sum to deckSize": function () {
     const plan = buildRoleTargetPlan(null, { wantsCreatures: true }, 37, { ramp: 10, draw: 10, removal: 8, wipe: 3 }, [], 99, {});
