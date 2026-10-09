@@ -234,7 +234,15 @@ function pickBestCardForBucket(pool, usedNames, excludedKeys, bucket, curvePlan 
   return bestIgnoringCurve;
 }
 
-function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys) {
+// Phase 2 fills most of a full build's remaining nonland slots, but unlike
+// Phase 0's pickBestForRole and Phase 1's pickBestCardForBucket, it never
+// consulted the curve plan at all -- a card's role/type deficit terms (worth
+// up to ~65 points) made a band's cap irrelevant here however full that band
+// already was. curvePlan is optional (callers that don't care about the
+// curve, like this file's own unit tests, can omit it) and, same as the
+// other two pickers, being over a band's cap never excludes a card outright
+// -- bestIgnoringCurve stays available if nothing in-budget fits.
+function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys, curvePlan = null) {
   const typeCounts = countByType(deck);
   const roleCounts = getRoleCounts(deck);
   const roleBuckets = plan?.roleBuckets || {};
@@ -242,6 +250,8 @@ function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys) {
 
   let best = null;
   let bestScore = -Infinity;
+  let bestIgnoringCurve = null;
+  let bestIgnoringCurveScore = -Infinity;
 
   for (const card of pool) {
     const key = normalizeCardName(card.name);
@@ -274,11 +284,18 @@ function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys) {
 
     if (bucket === "Creature") adjustedScore += 4;
 
+    if (adjustedScore > bestIgnoringCurveScore) {
+      bestIgnoringCurve = card;
+      bestIgnoringCurveScore = adjustedScore;
+    }
+
+    if (!curveHasRoom(curvePlan, card.cmc)) continue;
+
     if (adjustedScore > bestScore) {
       best = card;
       bestScore = adjustedScore;
     }
   }
 
-  return best;
+  return best || bestIgnoringCurve;
 }

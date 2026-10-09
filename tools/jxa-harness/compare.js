@@ -89,11 +89,18 @@ function summarize(label, finalDeck, commanderColors) {
   }
   const handRates = simulateOpeningHands(finalDeck, commanderColors, 2000);
 
+  const cmcCounts = {};
+  for (const card of nonlands) {
+    const band = Math.round(Number(card.cmc) || 0);
+    cmcCounts[band] = (cmcCounts[band] || 0) + 1;
+  }
+
   jxaPrint("--- " + label + " ---");
   jxaPrint("Lands: " + lands.length);
   jxaPrint("Sources: " + JSON.stringify(sourceCounts));
   jxaPrint("Types: " + JSON.stringify(typeCounts));
   jxaPrint("Roles: " + JSON.stringify(roleCounts));
+  jxaPrint("CMC: " + JSON.stringify(cmcCounts));
   jxaPrint("Opening-hand on-color rate (2000 trials): " + JSON.stringify(handRates));
 }
 

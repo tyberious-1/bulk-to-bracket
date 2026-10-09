@@ -105,7 +105,77 @@ function buildPauperFixture() {
   }
 }
 
+// Phase 0 (the role-filling pass) is supposed to respect buildCurvePlan's
+// per-band caps, same as Phases 1-4 do via curveHasRoom -- a card over its
+// band's cap only gets picked when nothing in-budget can fill the role. This
+// fixture starves band 3 (three CMC-3 ramp candidates, cap room for only two)
+// while a CMC-1 ramp candidate with plenty of band room sits far behind them
+// on raw score, so a flat score penalty for being over-cap is never enough
+// to prefer it once the gap exceeds that penalty -- exactly how EDHREC-pool
+// cards (scored via scoreCard/scoreFallbackCard's curve + role + popularity
+// terms, which routinely swing 20+ points) can out-score an in-budget
+// alternative by far more than deck.js's flat -8.
+const TEST_BAND3_DORK_ONE = makeCard("Test Band3 Dork One", "creature — bear", "{t}: add {g}.", 3, ["G"]);
+const TEST_BAND3_DORK_TWO = makeCard("Test Band3 Dork Two", "creature — elk", "{t}: add {g}.", 3, ["G"]);
+const TEST_BAND3_DORK_THREE = makeCard("Test Band3 Dork Three", "creature — wolf", "{t}: add {g}.", 3, ["G"]);
+const TEST_BAND1_ROCK = makeCard("Test Band1 Rock", "artifact", "{t}: add {g}.", 1, []);
+
+function buildCurveCapFixture() {
+  const commanderCard = makeCard(TEST_COMMANDER_NAME, "legendary creature — treefolk", "", 4, ["G"]);
+  const ramp = [TEST_BAND3_DORK_ONE, TEST_BAND3_DORK_TWO, TEST_BAND3_DORK_THREE, TEST_BAND1_ROCK];
+
+  const allOwnedCardData = new Map();
+  allOwnedCardData.set(normalizeCardName(commanderCard.name), commanderCard);
+  for (const card of ramp) allOwnedCardData.set(normalizeCardName(card.name), card);
+
+  // No collection entries -- every candidate rides in via the EDHREC-style
+  // scoredNonlands pool below (with an explicit score, bypassing the
+  // generic-fallback-tier scoring and its redundancy penalty) so the only
+  // thing deciding between candidates is the curve cap itself.
+  const collectionData = { entries: [] };
+  const commanderThemes = [];
+  const strategyProfile = getCommanderStrategyProfile(TEST_COMMANDER_NAME, commanderThemes, ["G"]);
+  const modePrefs = getModePreferences("minimal", strategyProfile);
+  const roleTargets = { ramp: 3, draw: 0, removal: 0, wipe: 0 };
+
+  const scoredNonlands = ramp.map((card) => ({
+    name: card.name,
+    score: card.cmc === 3 ? 20 : 10,
+    type: card.type,
+    cmc: card.cmc,
+    colors: card.colors
+  }));
+
+  return buildDeckFromScoredPool(
+    scoredNonlands,
+    ["G"],
+    collectionData,
+    allOwnedCardData,
+    commanderThemes,
+    TEST_COMMANDER_NAME,
+    modePrefs,
+    null,
+    roleTargets,
+    [],
+    { deckSize: 47, themeCardNames: new Map() }
+  );
+}
+
 runSuite("deck", {
+  "buildDeckFromScoredPool: role-filling phase respects the curve plan's per-band cap": function () {
+    const finalDeck = buildCurveCapFixture();
+    const band3Count = finalDeck.filter((c) => c.cmc === 3).length;
+    const names = finalDeck.map((c) => c.name);
+
+    assertTrue(
+      band3Count <= 2,
+      "expected at most 2 CMC-3 cards (the band's cap), got " + band3Count + ": " + JSON.stringify(names)
+    );
+    assertTrue(
+      names.includes(TEST_BAND1_ROCK.name),
+      "expected the in-budget CMC-1 alternative to be drafted once band 3 was full, got " + JSON.stringify(names)
+    );
+  },
   "buildDeckFromScoredPool: minimal build includes only the support package, no filler": function () {
     const finalDeck = buildFixture(true);
     const nonlands = finalDeck.filter((c) => c.role !== "land");

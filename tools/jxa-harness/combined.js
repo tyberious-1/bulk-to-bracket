@@ -1657,7 +1657,16 @@ const ROLE_TEXT_PATTERNS = {
   ]
 };
 
-const SUPPORT_ROLES = ["ramp", "draw", "removal", "wipe"];
+// getRoleContributions treats this list as an unordered set (every role a
+// card qualifies for), but detectRole's first-match-wins scan treats it as a
+// priority order, and that order matters: a removal spell that also creates
+// a Treasure (Deadly Derision), has Convoke (Vote Out), or has basic
+// landcycling (Fiery Fall) is still fundamentally a removal spell -- the
+// mana/land rider is the reason you'd run a worse removal spell over a
+// better one, not the card's primary job. Wipe/removal outrank ramp/draw so
+// those 36 owned cards file under the role a player actually drafted them
+// for.
+const SUPPORT_ROLES = ["wipe", "removal", "ramp", "draw"];
 
 // A sweeper pattern can be narrowed by the words that follow it, and the
 // widened wipe list above matches on the prefix alone. "Deals 4 damage to each
@@ -1719,6 +1728,83 @@ function searchesLibraryForLand(text, pattern) {
   }
 }
 
+// "Add {" alone also matches a mana ability that's restricted to one narrow
+// purpose -- Karfell Harbinger's "{T}: Add {U}. Spend this mana only to
+// foretell a card from your hand or cast an instant or sorcery spell." can't
+// pay for a creature, an artifact, or the commander, so it isn't ramp despite
+// the literal match. True when at least one "add {" occurrence isn't followed
+// by that restriction clause.
+const RESTRICTED_MANA_CLAUSE = "spend this mana only";
+
+function addManaIsGeneral(text, pattern) {
+  let from = 0;
+
+  for (;;) {
+    const at = text.indexOf(pattern, from);
+    if (at === -1) return false;
+
+    const periodAt = text.indexOf(".", at);
+    const afterPeriod = periodAt === -1 ? text.length : periodAt + 1;
+    const nextPeriodAt = text.indexOf(".", afterPeriod);
+    const followingSentence = text.slice(afterPeriod, nextPeriodAt === -1 ? text.length : nextPeriodAt + 1);
+
+    if (!followingSentence.includes(RESTRICTED_MANA_CLAUSE)) return true;
+
+    from = at + pattern.length;
+  }
+}
+
+// "Less to cast" also matches a one-time, self-only discount -- Chill of the
+// Grave's "This spell costs {1} less to cast if you control a Zombie" is a
+// removal/draw spell with an incidental discount on itself, not a static
+// reducer like "Spells you cast cost {1} less" that actually accelerates the
+// rest of the game plan. True when at least one occurrence's own sentence
+// isn't phrased as a self-only discount.
+function costReductionIsGeneral(text, pattern) {
+  let from = 0;
+
+  for (;;) {
+    const at = text.indexOf(pattern, from);
+    if (at === -1) return false;
+
+    const sentenceStart = text.lastIndexOf(".", at);
+    const sentence = text.slice(sentenceStart === -1 ? 0 : sentenceStart + 1, at + pattern.length);
+
+    if (!sentence.includes("this spell costs") && !sentence.includes("this ability costs")) return true;
+
+    from = at + pattern.length;
+  }
+}
+
+// Whether the owned collection has any legal, mana-producing snow permanent
+// -- the only thing that can pay a {S} cost. {S} means "one mana from a snow
+// source," not a specific color, so a Snow-Covered Forest satisfies it for
+// any card that needs it even though its own ability only ever reads
+// "{T}: Add {G}." -- the literal {S} symbol never appears on the source
+// itself, only the snow supertype does. That's why this checks the type line
+// rather than oracle text.
+function collectionHasSnowManaSource(collection, commanderColors) {
+  for (const card of collection.values()) {
+    if (!card) continue;
+    const type = getCardType(card);
+    if (!type.includes("snow")) continue;
+    if (!type.includes("land") && !getCardText(card).includes("add {")) continue;
+    if (!legalForCommander(card.colors, commanderColors, card)) continue;
+    return true;
+  }
+  return false;
+}
+
+// True when a card's payoff is gated behind {S}, a cost the deck can never
+// pay without an owned snow mana source -- Pilfering Hawk's "{S}, {T}: Draw a
+// card, then discard a card" is a dead ability in a build with no snow lands,
+// yet EDHREC's page for a snow-matters commander (Narfi, Betrayed King's flat
+// bonus to snow permanents) recommends every snow card regardless of whether
+// the collection can actually turn its snow cost on.
+function requiresUnavailableSnowMana(card, hasSnowSource) {
+  return !hasSnowSource && getCardText(card).includes("{s}");
+}
+
 // A -X/-X effect below this magnitude is a combat trick -- it shrinks a
 // blocker, it doesn't kill one -- while at or above it, it's lethal to nearly
 // anything played in Commander. The threshold is a judgment call, not a rules
@@ -1761,6 +1847,31 @@ function isActiveBuildTribal(strategyProfile, modePrefs) {
     : strategyProfile.wantsTribal;
 }
 
+// "Whenever you draw" also matches the "draw your second/third card each
+// turn" payoff template (Jolrael, Prince Imrahil the Fair, Atlantean
+// Cavalry, ...) -- a +1/+1 counter, a token, a pump, never a card. These
+// cards draw nothing themselves; they only do anything if some other card in
+// the deck is already drawing extra, so they're not a draw source. True when
+// at least one "whenever you draw" occurrence isn't phrased as that payoff
+// template; a card with a genuine draw-doubler trigger elsewhere still
+// counts via that one.
+const DRAW_MATTERS_PAYOFF = /\b(?:second|third|fourth|fifth)\s+card\s+each\s+turn\b/;
+
+function wheneverYouDrawIsRealDraw(text, pattern) {
+  let from = 0;
+
+  for (;;) {
+    const at = text.indexOf(pattern, from);
+    if (at === -1) return false;
+
+    const periodAt = text.indexOf(".", at);
+    const sentence = text.slice(at, periodAt === -1 ? text.length : periodAt + 1);
+    if (!DRAW_MATTERS_PAYOFF.test(sentence)) return true;
+
+    from = at + pattern.length;
+  }
+}
+
 function cardMatchesRole(card, role, isTribalDeck = false) {
   if (!isTribalDeck && isFlexibleTribalPayoff(card)) return false;
 
@@ -1770,8 +1881,17 @@ function cardMatchesRole(card, role, isTribalDeck = false) {
     if (role === "ramp" && pattern === "search your library for") {
       return searchesLibraryForLand(text, pattern);
     }
+    if (role === "ramp" && pattern === "add {") {
+      return addManaIsGeneral(text, pattern);
+    }
+    if (role === "ramp" && pattern === "less to cast") {
+      return costReductionIsGeneral(text, pattern);
+    }
     if (role === "removal" && pattern === "gets -") {
       return hasLethalStatDrop(text);
+    }
+    if (role === "draw" && pattern === "whenever you draw") {
+      return wheneverYouDrawIsRealDraw(text, pattern);
     }
     if (!text.includes(pattern)) return false;
     if (role === "wipe" && wipeMatchIsNarrowed(text, pattern)) return false;
@@ -4769,7 +4889,15 @@ function pickBestCardForBucket(pool, usedNames, excludedKeys, bucket, curvePlan 
   return bestIgnoringCurve;
 }
 
-function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys) {
+// Phase 2 fills most of a full build's remaining nonland slots, but unlike
+// Phase 0's pickBestForRole and Phase 1's pickBestCardForBucket, it never
+// consulted the curve plan at all -- a card's role/type deficit terms (worth
+// up to ~65 points) made a band's cap irrelevant here however full that band
+// already was. curvePlan is optional (callers that don't care about the
+// curve, like this file's own unit tests, can omit it) and, same as the
+// other two pickers, being over a band's cap never excludes a card outright
+// -- bestIgnoringCurve stays available if nothing in-budget fits.
+function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys, curvePlan = null) {
   const typeCounts = countByType(deck);
   const roleCounts = getRoleCounts(deck);
   const roleBuckets = plan?.roleBuckets || {};
@@ -4777,6 +4905,8 @@ function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys) {
 
   let best = null;
   let bestScore = -Infinity;
+  let bestIgnoringCurve = null;
+  let bestIgnoringCurveScore = -Infinity;
 
   for (const card of pool) {
     const key = normalizeCardName(card.name);
@@ -4809,13 +4939,20 @@ function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys) {
 
     if (bucket === "Creature") adjustedScore += 4;
 
+    if (adjustedScore > bestIgnoringCurveScore) {
+      bestIgnoringCurve = card;
+      bestIgnoringCurveScore = adjustedScore;
+    }
+
+    if (!curveHasRoom(curvePlan, card.cmc)) continue;
+
     if (adjustedScore > bestScore) {
       best = card;
       bestScore = adjustedScore;
     }
   }
 
-  return best;
+  return best || bestIgnoringCurve;
 }
 // The deck assembler.
 //
@@ -5150,9 +5287,19 @@ function buildDeckFromScoredPool(
     return counts;
   }
 
+  // A support hole is still worse than a bump in the curve, so being over a
+  // band's cap never excludes a card outright -- bestIgnoringCurve stays
+  // available if nothing in-budget can fill the role. But preferring an
+  // over-cap card by score alone (a flat penalty) let EDHREC-pool scores,
+  // which can swing 20+ points on role/popularity/theme terms, blow straight
+  // through a band's cap during this phase even though it fills the bulk of
+  // the deck's slots -- the same prefer-in-budget-else-fallback split Phase 1's
+  // pickBestCardForBucket already uses, applied here too.
   function pickBestForRole(pool, role, chargeRedundancy) {
     let best = null;
     let bestScore = -Infinity;
+    let bestIgnoringCurve = null;
+    let bestIgnoringCurveScore = -Infinity;
     const typeCounts = countByType(deck);
 
     for (const card of pool) {
@@ -5164,13 +5311,17 @@ function buildDeckFromScoredPool(
 
       let adjusted = Number(card.score || 0);
       if (chargeRedundancy) adjusted -= getRedundancyPenalty(card.redundancyKeys, redundancyCounts);
-      // Out-of-band is discouraged here rather than forbidden: a support hole is
-      // worse for the deck than a bump in the curve.
-      if (!curveHasRoom(curvePlan, card.cmc)) adjusted -= 8;
 
       const bucket = getDeckTypeBucket(card.type || card.type_line || "");
       const typeRule = typePlan?.buckets?.[bucket];
       if (typeRule && (typeCounts[bucket] || 0) > Number(typeRule.target || 0)) adjusted -= 6;
+
+      if (adjusted > bestIgnoringCurveScore) {
+        bestIgnoringCurve = card;
+        bestIgnoringCurveScore = adjusted;
+      }
+
+      if (!curveHasRoom(curvePlan, card.cmc)) continue;
 
       if (adjusted > bestScore) {
         best = card;
@@ -5178,7 +5329,7 @@ function buildDeckFromScoredPool(
       }
     }
 
-    return best;
+    return best || bestIgnoringCurve;
   }
 
   while (deck.length < targetNonlandCount) {
@@ -5244,7 +5395,7 @@ function buildDeckFromScoredPool(
     const flexibleTiers = fallbackTiers.map((tier) => [...scoredNonlands, ...tier]);
     while (deck.length < targetNonlandCount) {
       const best = pickFromTiers(flexibleTiers, (tier) =>
-        chooseBestFlexibleCard(tier, deck, plan, usedNames, commanderKeys));
+        chooseBestFlexibleCard(tier, deck, plan, usedNames, commanderKeys, curvePlan));
       if (!best) break;
 
       addCard(best, scoredNonlands.includes(best) ? "edhrec" : getFallbackSource(best));

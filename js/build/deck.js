@@ -331,9 +331,19 @@ function buildDeckFromScoredPool(
     return counts;
   }
 
+  // A support hole is still worse than a bump in the curve, so being over a
+  // band's cap never excludes a card outright -- bestIgnoringCurve stays
+  // available if nothing in-budget can fill the role. But preferring an
+  // over-cap card by score alone (a flat penalty) let EDHREC-pool scores,
+  // which can swing 20+ points on role/popularity/theme terms, blow straight
+  // through a band's cap during this phase even though it fills the bulk of
+  // the deck's slots -- the same prefer-in-budget-else-fallback split Phase 1's
+  // pickBestCardForBucket already uses, applied here too.
   function pickBestForRole(pool, role, chargeRedundancy) {
     let best = null;
     let bestScore = -Infinity;
+    let bestIgnoringCurve = null;
+    let bestIgnoringCurveScore = -Infinity;
     const typeCounts = countByType(deck);
 
     for (const card of pool) {
@@ -345,13 +355,17 @@ function buildDeckFromScoredPool(
 
       let adjusted = Number(card.score || 0);
       if (chargeRedundancy) adjusted -= getRedundancyPenalty(card.redundancyKeys, redundancyCounts);
-      // Out-of-band is discouraged here rather than forbidden: a support hole is
-      // worse for the deck than a bump in the curve.
-      if (!curveHasRoom(curvePlan, card.cmc)) adjusted -= 8;
 
       const bucket = getDeckTypeBucket(card.type || card.type_line || "");
       const typeRule = typePlan?.buckets?.[bucket];
       if (typeRule && (typeCounts[bucket] || 0) > Number(typeRule.target || 0)) adjusted -= 6;
+
+      if (adjusted > bestIgnoringCurveScore) {
+        bestIgnoringCurve = card;
+        bestIgnoringCurveScore = adjusted;
+      }
+
+      if (!curveHasRoom(curvePlan, card.cmc)) continue;
 
       if (adjusted > bestScore) {
         best = card;
@@ -359,7 +373,7 @@ function buildDeckFromScoredPool(
       }
     }
 
-    return best;
+    return best || bestIgnoringCurve;
   }
 
   while (deck.length < targetNonlandCount) {
@@ -425,7 +439,7 @@ function buildDeckFromScoredPool(
     const flexibleTiers = fallbackTiers.map((tier) => [...scoredNonlands, ...tier]);
     while (deck.length < targetNonlandCount) {
       const best = pickFromTiers(flexibleTiers, (tier) =>
-        chooseBestFlexibleCard(tier, deck, plan, usedNames, commanderKeys));
+        chooseBestFlexibleCard(tier, deck, plan, usedNames, commanderKeys, curvePlan));
       if (!best) break;
 
       addCard(best, scoredNonlands.includes(best) ? "edhrec" : getFallbackSource(best));

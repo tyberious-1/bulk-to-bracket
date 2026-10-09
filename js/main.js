@@ -369,6 +369,14 @@ async function performBuildFromContext() {
   }
 
   const totalToScore = ownedCandidates.length;
+  // A user who explicitly focuses a Snow theme is choosing to build toward
+  // snow mana on purpose -- EDHREC has no working theme-focus wiring for
+  // "snow" yet (no tag detector, no alias table entry) and the land builder
+  // never seeks out snow lands on its own, so refusing every {S} card here
+  // would make picking Snow as a theme permanently self-defeating. Treat an
+  // explicit snow focus as if a source were already owned.
+  const isSnowFocused = modePrefs.focusedThemeSignal.includes("snow");
+  const hasSnowSource = isSnowFocused || collectionHasSnowManaSource(allOwnedCardData, commanders.colors);
 
   for (const edhrecCard of ownedCandidates) {
     processed += 1;
@@ -376,6 +384,11 @@ async function performBuildFromContext() {
     const card = ownedCardData.get(normalizedName);
 
     if (!card || getCardType(card).includes("land") || !legalForCommander(card.colors, commanders.colors, card)) {
+      maybeUpdateScoringProgress(processed, totalToScore);
+      continue;
+    }
+
+    if (requiresUnavailableSnowMana(card, hasSnowSource)) {
       maybeUpdateScoringProgress(processed, totalToScore);
       continue;
     }
