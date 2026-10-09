@@ -31,7 +31,7 @@ async function resolveCommanders(primaryName, partnerName) {
 
   const partner = await getCommander(partnerName);
   if (!partner) throw new Error(`Second commander "${partnerName}" was not found on Scryfall.`);
-  if (!canBeActiveCommander(partner)) {
+  if (!canBeActiveCommander(partner) && !isBackgroundCard(partner)) {
     throw new Error(`"${partner.name}" does not appear to be a legal commander.`);
   }
   if (!isLegalCommanderPair(primary, partner)) {
