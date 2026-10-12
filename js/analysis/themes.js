@@ -474,6 +474,7 @@ function getModePreferences(mode, strategyProfile) {
     focusedTribalTypes,
     themeFocusAliases,
     minimalBuild: modeParts.includes("minimal"),
+    curveFirst: modeParts.includes("curveFirst"),
     synergyBias:
       themeFocus ? 1.45 : 1,
     creatureBias:

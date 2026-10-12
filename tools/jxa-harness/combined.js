@@ -1076,6 +1076,7 @@ function getModePreferences(mode, strategyProfile) {
     focusedTribalTypes,
     themeFocusAliases,
     minimalBuild: modeParts.includes("minimal"),
+    curveFirst: modeParts.includes("curveFirst"),
     synergyBias:
       themeFocus ? 1.45 : 1,
     creatureBias:
@@ -2308,6 +2309,11 @@ function scoreCard(card, edhrecCard, commanderThemes, strategyProfile, commander
   else if (role === "removal") roleBonus = 4;
   else if (role === "wipe") roleBonus = 3;
 
+  // Curve First mode: cheap removal leaves mana free to develop the board or
+  // hold up a second response in the same turn, so it outranks removal that
+  // costs the whole turn -- see applyCurveFirstRoleTargets's linked spec.
+  if (modePrefs.curveFirst && role === "removal" && card.cmc <= 2) roleBonus += 4;
+
   let curveBonus = 0;
   if (card.cmc <= 2) curveBonus = 3;
   else if (card.cmc <= 4) curveBonus = 4;
@@ -2354,6 +2360,8 @@ function scoreFallbackCard(card, commanderThemes, strategyProfile, commanderColo
   else if (role === "draw") score += 4;
   else if (role === "removal") score += 4;
   else if (role === "wipe") score += 3;
+
+  if (modePrefs.curveFirst && role === "removal" && card.cmc <= 2) score += 4;
 
   if (card.cmc <= 2) score += 3;
   else if (card.cmc <= 4) score += 4;
@@ -3678,6 +3686,28 @@ function normalizeRoleTargets(edhrecRoleTargets) {
     draw: Math.round(Number(edhrecRoleTargets?.draw) || 10),
     removal: Math.round(Number(edhrecRoleTargets?.removal) || 8),
     wipe: Math.round(Number(edhrecRoleTargets?.wipe) || 3)
+  };
+}
+
+// Curve First mode (a personal toggle, not a public format -- see
+// docs/superpowers/specs/2026-10-12-curve-first-build-mode-theorycraft.md):
+// caps ramp and wipes, and redirects that reclaimed deck space into draw
+// (to offset the natural -1 card/turn attrition) and removal (cheap,
+// targeted interaction over board resets). A cap, not a floor -- a
+// commander whose own targets are already lower is left alone.
+function applyCurveFirstRoleTargets(targets, modePrefs) {
+  if (!modePrefs?.curveFirst) return targets;
+
+  const RAMP_CAP = 4;
+  const WIPE_CAP = 1;
+  const DRAW_BOOST = 4;
+  const REMOVAL_BOOST = 4;
+
+  return {
+    ramp: Math.min(targets.ramp, RAMP_CAP),
+    draw: targets.draw + DRAW_BOOST,
+    removal: targets.removal + REMOVAL_BOOST,
+    wipe: Math.min(targets.wipe, WIPE_CAP)
   };
 }
 
@@ -5053,6 +5083,44 @@ function isThemeFallback(card) {
   return Boolean(card && card.themeMatch);
 }
 
+// Theme-match cards almost never carry a ramp/draw/removal/wipe role tag, so
+// Phase 0 (the role-filling loop below) never looks at them no matter their
+// CMC. Left alone, Phase 0 spends the entire cheap end of the curve on
+// generic role cards before Phase 1/2 ever reach the theme tier -- by then
+// the low bands are full and a commander's actual strategy doesn't show up
+// until CMC 4+. This claims a few of the cheapest bands for the theme tier
+// first, so a real build still starts on time.
+//
+// `pool` must already be sorted best-score-first (themeFallbackPool is, by
+// the time this runs) -- this takes the first match per band rather than
+// re-sorting.
+const THEME_SEED_BAND_LIMITS = { 1: 1, 2: 2, 3: 2 };
+
+function pickCheapThemeSeeds(pool, curvePlan, usedNames, commanderKeys) {
+  const picks = [];
+  const claimedKeys = new Set();
+
+  for (const [bandKey, limit] of Object.entries(THEME_SEED_BAND_LIMITS)) {
+    const band = Number(bandKey);
+    let claimed = 0;
+
+    for (const card of pool) {
+      if (claimed >= limit) break;
+
+      const key = normalizeCardName(card.name);
+      if (usedNames.has(key) || commanderKeys.has(key) || claimedKeys.has(key)) continue;
+      if (getCmcBand(card.cmc) !== band) continue;
+      if (!curveHasRoom(curvePlan, card.cmc)) continue;
+
+      picks.push(card);
+      claimedKeys.add(key);
+      claimed += 1;
+    }
+  }
+
+  return picks;
+}
+
 function getFallbackSource(card) {
   return isThemeFallback(card) ? "fallback-theme" : "fallback-generic";
 }
@@ -5159,7 +5227,7 @@ function buildDeckFromScoredPool(
     (Array.isArray(edhrecCards) ? edhrecCards : []).map((entry) => [normalizeCardName(entry.name), entry])
   );
 
-  const roleTargets = normalizeRoleTargets(edhrecRoleTargets);
+  const roleTargets = applyCurveFirstRoleTargets(normalizeRoleTargets(edhrecRoleTargets), modePrefs);
 
   const themeFallbackPool = [];
   const genericFallbackPool = [];
@@ -5265,6 +5333,13 @@ function buildDeckFromScoredPool(
     recordCurvePick(curvePlan, card.cmc);
     adjustRedundancy(card, 1);
     return true;
+  }
+
+  // Phase -1: seed a few cheap theme-payoff cards before Phase 0 can spend
+  // the whole low end of the curve on generic support cards (see
+  // pickCheapThemeSeeds above).
+  for (const card of pickCheapThemeSeeds(themeFallbackPool, curvePlan, usedNames, commanderKeys)) {
+    addCard(card, getFallbackSource(card));
   }
 
   // Phase 0: fill the support package (ramp, draw, removal, wipe) first.

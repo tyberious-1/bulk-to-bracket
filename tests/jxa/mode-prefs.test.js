@@ -18,5 +18,21 @@ runSuite("mode-prefs", {
     const prefs = getModePreferences("theme:elves|minimal", { wantsCreatures: false });
     assertEqual(prefs.minimalBuild, true);
     assertEqual(prefs.themeFocus, "elves");
+  },
+
+  "getModePreferences: curveFirst is false for an empty mode": function () {
+    const prefs = getModePreferences("", { wantsCreatures: false });
+    assertEqual(prefs.curveFirst, false);
+  },
+
+  "getModePreferences: curveFirst is true when mode is exactly \"curveFirst\"": function () {
+    const prefs = getModePreferences("curveFirst", { wantsCreatures: false });
+    assertEqual(prefs.curveFirst, true);
+  },
+
+  "getModePreferences: curveFirst combines with minimalBuild via the pipe-joined mode string": function () {
+    const prefs = getModePreferences("minimal|curveFirst", { wantsCreatures: false });
+    assertEqual(prefs.minimalBuild, true);
+    assertEqual(prefs.curveFirst, true);
   }
 });

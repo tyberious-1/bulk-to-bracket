@@ -222,7 +222,16 @@ const SUPPORT_ROLES = ["wipe", "removal", "ramp", "draw"];
 
 // A sweeper pattern can be narrowed by the words that follow it, and the
 // widened wipe list above matches on the prefix alone. "Deals 4 damage to each
-// creature with flying" is an anti-flier card, not a board wipe.
+// creature with flying" is an anti-flier card, not a board wipe. Same idea
+// covers three more shapes found the same way (full collection scan against
+// every owned "wipe" hit, 2026-10-12): combat-only scope ("deals 2 damage to
+// each creature blocking it" -- Trailblazer's Torch; "each creature defending
+// player controls" -- Swathcutter Giant, Gouged Zealot), single-player scope
+// ("each creature that player controls" -- Radiating Lightning, Incinerator
+// of the Guilty, which only clears the one player hit in combat, not the
+// table), and a damage-after-the-fact condition ("destroy all other creatures
+// that were dealt damage this turn" -- Death-Rattle Oni, which only finishes
+// creatures some other effect already hit).
 //
 // This is not a rare edge. Green has almost no real sweepers, so the false
 // positives were the *only* wipes it had: all six cards this collection offered
@@ -234,7 +243,8 @@ const SUPPORT_ROLES = ["wipe", "removal", "ramp", "draw"];
 //
 // One-sided sweepers stay sweepers on purpose: "each creature your opponents
 // control" clears three boards at a four-player table, which is the job.
-const WIPE_EVASION_QUALIFIER = /\b(?:with|without)\s+(?:flying|reach|defender|shadow|horsemanship|protection)\b/;
+const WIPE_SCOPE_NARROWER =
+  /\b(?:with|without)\s+(?:flying|reach|defender|shadow|horsemanship|protection)\b|\b(?:that|target|defending)\s+player\s+controls\b|\bblocking (?:it|them)\b|\bdealt damage this turn\b/;
 
 // True when every occurrence of the pattern is narrowed to a slice of the board
 // rather than the whole of it. Bounded to the sentence the match sits in, so a
@@ -248,7 +258,78 @@ function wipeMatchIsNarrowed(text, pattern) {
     if (at === -1) return true;
 
     const sentence = text.slice(at + pattern.length).split(".")[0];
-    if (!WIPE_EVASION_QUALIFIER.test(sentence)) return false;
+    if (!WIPE_SCOPE_NARROWER.test(sentence)) return false;
+
+    from = at + pattern.length;
+  }
+}
+
+// A sweeper's magnitude matters as much as its scope, and the wipe list
+// above matches on the pattern alone regardless of how much damage it deals.
+// Full collection scan (2026-10-12) found Cosmotronic Wave, Hazardous Blast,
+// Iroh's Demonstration, Smash to Dust, Underworld Fires, Village Pillagers,
+// Fulminous Forte and Gangrenous Zombies all dealing 1-2 damage "to each
+// creature" -- enough to matter against 1-2 toughness tokens, not enough to
+// be a sweeper against a real Commander board. 3+ clears most of a board;
+// below that it's a glorified anthem-of-annoyance, not a wrath effect.
+// Variable amounts ("X damage", "that much damage" off a counter count) get
+// the benefit of the doubt since they're written to scale with board state,
+// the same reasoning Chain Reaction and Ashling the Pilgrim already lean on.
+const MASS_DAMAGE_LETHAL_MINIMUM = 3;
+const MASS_DAMAGE_PATTERN = /(\d+|x|that much)\s+damage to each creature\b/g;
+
+function hasLethalMassDamage(text) {
+  for (const match of text.matchAll(MASS_DAMAGE_PATTERN)) {
+    const sentence = text.slice(match.index + match[0].length).split(".")[0];
+    if (WIPE_SCOPE_NARROWER.test(sentence)) continue;
+
+    const amount = match[1];
+    if (amount === "x" || amount === "that much") return true;
+    if (Number(amount) >= MASS_DAMAGE_LETHAL_MINIMUM) return true;
+  }
+
+  return false;
+}
+
+// Same magnitude problem as hasLethalMassDamage, for the "-X/-X to the board"
+// shape instead of the damage shape. Nausea and Shrivel (-1/-1) and Choking
+// Miasma/Cloudkill/Flaying Tendrils/Glistening Deluge/Malicious
+// Malfunction/Pestilent Haze/Ruinous Waterbending/Sandman's Quicksand (-2/-2)
+// were all counting as board wipes while killing nothing with 2+ toughness --
+// most of a Commander board. Reuses removal's LETHAL_STAT_DROP_MINIMUM so a
+// stat-drop is judged by the same bar whether it's hitting one creature or
+// all of them. Variable X (Cloudkill, scaling off a commander's mana value)
+// gets the same benefit of the doubt as variable damage above.
+const MASS_STAT_DROP_PATTERN = /all creatures get -(\d+|x)\/-\1\b/;
+
+function hasLethalMassStatDrop(text) {
+  const match = text.match(MASS_STAT_DROP_PATTERN);
+  if (!match) return false;
+  if (match[1] === "x") return true;
+  return Number(match[1]) >= LETHAL_STAT_DROP_MINIMUM;
+}
+
+// "Each opponent/player sacrifices" is only a wipe if what's sacrificed is a
+// creature, and still narrowed by scope the same way as any other sweeper --
+// Clip Wings ("each opponent sacrifices a creature of their choice with
+// flying") is the same anti-flier shape as the original board-wipe bug, just
+// phrased as an edict instead of damage. The pattern alone also doesn't check
+// what's sacrificed: Baleful Beholder sacrifices an enchantment, Lorehold
+// Charm a nontoken artifact, Rishadan Cutpurse/Footpad and Earth-Cult
+// Elemental a permanent of the sacrificer's choice (and in Earth-Cult
+// Elemental's case, only on some d20 rolls) -- none of them touch a single
+// creature, yet all matched. True when at least one occurrence's own
+// sentence names a creature and isn't scope-narrowed.
+function massSacrificeHitsCreatures(text, pattern) {
+  let from = 0;
+
+  for (;;) {
+    const at = text.indexOf(pattern, from);
+    if (at === -1) return false;
+
+    const periodAt = text.indexOf(".", at);
+    const sentence = text.slice(at, periodAt === -1 ? text.length : periodAt + 1);
+    if (sentence.includes("creature") && !WIPE_SCOPE_NARROWER.test(sentence)) return true;
 
     from = at + pattern.length;
   }
@@ -444,6 +525,15 @@ function cardMatchesRole(card, role, isTribalDeck = false) {
     }
     if (role === "draw" && pattern === "whenever you draw") {
       return wheneverYouDrawIsRealDraw(text, pattern);
+    }
+    if (role === "wipe" && pattern === "damage to each creature") {
+      return hasLethalMassDamage(text);
+    }
+    if (role === "wipe" && pattern === "all creatures get -") {
+      return hasLethalMassStatDrop(text);
+    }
+    if (role === "wipe" && (pattern === "each player sacrifices" || pattern === "each opponent sacrifices")) {
+      return massSacrificeHitsCreatures(text, pattern);
     }
     if (!text.includes(pattern)) return false;
     if (role === "wipe" && wipeMatchIsNarrowed(text, pattern)) return false;
@@ -860,6 +950,11 @@ function scoreCard(card, edhrecCard, commanderThemes, strategyProfile, commander
   else if (role === "removal") roleBonus = 4;
   else if (role === "wipe") roleBonus = 3;
 
+  // Curve First mode: cheap removal leaves mana free to develop the board or
+  // hold up a second response in the same turn, so it outranks removal that
+  // costs the whole turn -- see applyCurveFirstRoleTargets's linked spec.
+  if (modePrefs.curveFirst && role === "removal" && card.cmc <= 2) roleBonus += 4;
+
   let curveBonus = 0;
   if (card.cmc <= 2) curveBonus = 3;
   else if (card.cmc <= 4) curveBonus = 4;
@@ -906,6 +1001,8 @@ function scoreFallbackCard(card, commanderThemes, strategyProfile, commanderColo
   else if (role === "draw") score += 4;
   else if (role === "removal") score += 4;
   else if (role === "wipe") score += 3;
+
+  if (modePrefs.curveFirst && role === "removal" && card.cmc <= 2) score += 4;
 
   if (card.cmc <= 2) score += 3;
   else if (card.cmc <= 4) score += 4;

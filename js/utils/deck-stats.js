@@ -53,6 +53,28 @@ function normalizeRoleTargets(edhrecRoleTargets) {
   };
 }
 
+// Curve First mode (a personal toggle, not a public format -- see
+// docs/superpowers/specs/2026-10-12-curve-first-build-mode-theorycraft.md):
+// caps ramp and wipes, and redirects that reclaimed deck space into draw
+// (to offset the natural -1 card/turn attrition) and removal (cheap,
+// targeted interaction over board resets). A cap, not a floor -- a
+// commander whose own targets are already lower is left alone.
+function applyCurveFirstRoleTargets(targets, modePrefs) {
+  if (!modePrefs?.curveFirst) return targets;
+
+  const RAMP_CAP = 4;
+  const WIPE_CAP = 1;
+  const DRAW_BOOST = 4;
+  const REMOVAL_BOOST = 4;
+
+  return {
+    ramp: Math.min(targets.ramp, RAMP_CAP),
+    draw: targets.draw + DRAW_BOOST,
+    removal: targets.removal + REMOVAL_BOOST,
+    wipe: Math.min(targets.wipe, WIPE_CAP)
+  };
+}
+
 // Two readings of the same deck.
 //
 // `primary` is the role the builder assigned each card, one apiece, so the four

@@ -82,5 +82,35 @@ runSuite("scoring", {
     const minimalScore = scoreFallbackCard(card, commanderThemes, strategyProfile, commanderColors, minimalModePrefs);
 
     assertClose(normalScore - minimalScore, 4, 0.001, "expected exactly the +4 keyword-tag bonus to be missing under minimalBuild");
+  },
+
+  "scoreFallbackCard: curveFirst adds a cheap-removal bonus for 2-CMC-or-less removal": function () {
+    const cheapRemoval = { type: "Instant", text: "Destroy target creature.", cmc: 1 };
+    const strategyProfile = { wantsCreatures: false, wantsTokens: false, wantsSacrifice: false, wantsGoWide: false, wantsTribal: false, tribalTypes: [] };
+    const commanderColors = ["W"];
+    const commanderThemes = [];
+
+    const normalModePrefs = getModePreferences("", strategyProfile);
+    const curveFirstModePrefs = getModePreferences("curveFirst", strategyProfile);
+
+    const normalScore = scoreFallbackCard(cheapRemoval, commanderThemes, strategyProfile, commanderColors, normalModePrefs);
+    const curveFirstScore = scoreFallbackCard(cheapRemoval, commanderThemes, strategyProfile, commanderColors, curveFirstModePrefs);
+
+    assertClose(curveFirstScore - normalScore, 4, 0.001, "expected exactly the +4 cheap-removal bonus under curveFirst");
+  },
+
+  "scoreFallbackCard: curveFirst does not bonus removal costing more than 2": function () {
+    const expensiveRemoval = { type: "Sorcery", text: "Destroy target creature.", cmc: 5 };
+    const strategyProfile = { wantsCreatures: false, wantsTokens: false, wantsSacrifice: false, wantsGoWide: false, wantsTribal: false, tribalTypes: [] };
+    const commanderColors = ["W"];
+    const commanderThemes = [];
+
+    const normalModePrefs = getModePreferences("", strategyProfile);
+    const curveFirstModePrefs = getModePreferences("curveFirst", strategyProfile);
+
+    const normalScore = scoreFallbackCard(expensiveRemoval, commanderThemes, strategyProfile, commanderColors, normalModePrefs);
+    const curveFirstScore = scoreFallbackCard(expensiveRemoval, commanderThemes, strategyProfile, commanderColors, curveFirstModePrefs);
+
+    assertClose(curveFirstScore - normalScore, 0, 0.001, "expensive removal should score the same under curveFirst");
   }
 });

@@ -28,6 +28,22 @@ const TEST_FILLER_CARDS = [
 
 const TEST_RARE_BOMB_CARD = makeCard("Test Rare Bomb", "creature — dragon", "destroy target creature. draw a card.", 5, ["G"], "rare");
 
+// pickCheapThemeSeeds fixtures: theme-match candidates carry no support role,
+// so they're invisible to Phase 0 (js/build/deck.js's role-filling loop) no
+// matter their CMC -- only this helper, called before Phase 0 runs, ever
+// gives them a shot at the cheap bands Phase 0 would otherwise claim whole
+// for generic ramp/draw/removal. Candidates are plain { name, score, cmc }
+// shapes, same as the themeFallbackPool entries the real pipeline passes in
+// (already sorted best-score-first, which pickCheapThemeSeeds relies on
+// rather than re-sorting itself).
+const TEST_SEED_THEME_CMC1_A = makeCard("Test Seed Theme Alpha", "creature — bear", "", 1, ["G"]);
+const TEST_SEED_THEME_CMC1_B = makeCard("Test Seed Theme Beta", "creature — elk", "", 1, ["G"]);
+const TEST_SEED_THEME_CMC5 = makeCard("Test Seed Theme Delta", "creature — ox", "", 5, ["G"]);
+
+function makeSeedCandidate(card, score) {
+  return { name: card.name, score, type: card.type, cmc: card.cmc, colors: card.colors };
+}
+
 function buildFixture(minimalBuild) {
   const commanderCard = makeCard(TEST_COMMANDER_NAME, "legendary creature — treefolk", "", 4, ["G"]);
   const ownedCards = [TEST_RAMP_CARD, TEST_DRAW_CARD, TEST_REMOVAL_CARD, TEST_WIPE_CARD, ...TEST_FILLER_CARDS];
@@ -161,6 +177,107 @@ function buildCurveCapFixture() {
   );
 }
 
+// Reproduces the bug this fixture pins down: a commander whose EDHREC pool
+// happens to recommend a perfectly good generic ramp card at CMC 1, and
+// whose owned collection separately has one on-theme creature that also
+// costs CMC 1 but carries no ramp/draw/removal/wipe role. deckSize 47 gives
+// the same ~9-card nonland budget buildCurveCapFixture uses, so band 1's cap
+// is exactly 1 slot (see js/build/type-plan.js's DEFAULT_CURVE_SHARES). A
+// minimal build (Phase 0 only, per the "Minimal Build stops here" comment in
+// deck.js) isolates the question precisely: without a theme-seeding pre-pass,
+// Phase 0's edhrec-pool check finds the ramp card immediately, claims band
+// 1's only slot, satisfies the role target, and the loop ends -- the theme
+// card never gets added at all, since Phase 0 never looks at cards without
+// a role tag and minimal mode never reaches Phase 1/2 where it otherwise
+// could. With the pre-pass, the theme card claims band 1 first; the ramp
+// card still gets added afterward (an unmet role is a hard constraint, so it
+// goes in over-cap) and both cards coexist at CMC 1.
+const TEST_CHEAP_RAMP = makeCard("Test Cheap Ramp Dork", "creature — squirrel", "{t}: add {g}.", 1, ["G"]);
+const TEST_CHEAP_THEME_CREATURE = makeCard("Test Cheap Theme Creature", "creature — bear", "", 1, ["G"]);
+
+function buildThemeSeedFixture() {
+  const commanderCard = makeCard(TEST_COMMANDER_NAME, "legendary creature — treefolk", "", 4, ["G"]);
+
+  const allOwnedCardData = new Map();
+  allOwnedCardData.set(normalizeCardName(commanderCard.name), commanderCard);
+  allOwnedCardData.set(normalizeCardName(TEST_CHEAP_RAMP.name), TEST_CHEAP_RAMP);
+  allOwnedCardData.set(normalizeCardName(TEST_CHEAP_THEME_CREATURE.name), TEST_CHEAP_THEME_CREATURE);
+
+  const collectionData = {
+    entries: [
+      {
+        normalizedName: normalizeCardName(TEST_CHEAP_THEME_CREATURE.name),
+        rawName: TEST_CHEAP_THEME_CREATURE.name,
+        quantity: 1
+      }
+    ]
+  };
+
+  const commanderThemes = [];
+  const strategyProfile = getCommanderStrategyProfile(TEST_COMMANDER_NAME, commanderThemes, ["G"]);
+  const modePrefs = getModePreferences("minimal", strategyProfile);
+  const roleTargets = { ramp: 1, draw: 0, removal: 0, wipe: 0 };
+
+  const scoredNonlands = [{
+    name: TEST_CHEAP_RAMP.name,
+    score: 20,
+    type: TEST_CHEAP_RAMP.type,
+    cmc: TEST_CHEAP_RAMP.cmc,
+    colors: TEST_CHEAP_RAMP.colors
+  }];
+
+  const themeCardNames = new Map([
+    [normalizeCardName(TEST_CHEAP_THEME_CREATURE.name), { rank: 1, hits: 1 }]
+  ]);
+
+  return buildDeckFromScoredPool(
+    scoredNonlands,
+    ["G"],
+    collectionData,
+    allOwnedCardData,
+    commanderThemes,
+    TEST_COMMANDER_NAME,
+    modePrefs,
+    null,
+    roleTargets,
+    [],
+    { deckSize: 47, themeCardNames }
+  );
+}
+
+runSuite("deck:pickCheapThemeSeeds", {
+  "claims only up to the configured per-band limit, highest score first": function () {
+    const pool = [
+      makeSeedCandidate(TEST_SEED_THEME_CMC1_A, 10),
+      makeSeedCandidate(TEST_SEED_THEME_CMC1_B, 5)
+    ];
+    const curvePlan = { caps: { 1: 5 }, counts: {} };
+
+    const picks = pickCheapThemeSeeds(pool, curvePlan, new Set(), new Set());
+
+    assertEqual(picks.map((c) => c.name), [TEST_SEED_THEME_CMC1_A.name]);
+  },
+
+  "skips bands the pool has no candidate for": function () {
+    const pool = [makeSeedCandidate(TEST_SEED_THEME_CMC5, 10)];
+    const curvePlan = { caps: { 1: 5, 2: 5, 3: 5 }, counts: {} };
+
+    const picks = pickCheapThemeSeeds(pool, curvePlan, new Set(), new Set());
+
+    assertEqual(picks, []);
+  },
+
+  "never reclaims a card already used or that is a commander": function () {
+    const pool = [makeSeedCandidate(TEST_SEED_THEME_CMC1_A, 10)];
+    const curvePlan = { caps: { 1: 5 }, counts: {} };
+    const usedNames = new Set([normalizeCardName(TEST_SEED_THEME_CMC1_A.name)]);
+
+    const picks = pickCheapThemeSeeds(pool, curvePlan, usedNames, new Set());
+
+    assertEqual(picks, []);
+  }
+});
+
 runSuite("deck", {
   "buildDeckFromScoredPool: role-filling phase respects the curve plan's per-band cap": function () {
     const finalDeck = buildCurveCapFixture();
@@ -174,6 +291,20 @@ runSuite("deck", {
     assertTrue(
       names.includes(TEST_BAND1_ROCK.name),
       "expected the in-budget CMC-1 alternative to be drafted once band 3 was full, got " + JSON.stringify(names)
+    );
+  },
+
+  "buildDeckFromScoredPool: a cheap theme payoff is seeded ahead of Phase 0's role fill": function () {
+    const finalDeck = buildThemeSeedFixture();
+    const names = finalDeck.filter((c) => c.role !== "land").map((c) => c.name);
+
+    assertTrue(
+      names.includes(TEST_CHEAP_THEME_CREATURE.name),
+      "expected the cheap theme-match card to be seeded before Phase 0 claimed the whole band, got " + JSON.stringify(names)
+    );
+    assertTrue(
+      names.includes(TEST_CHEAP_RAMP.name),
+      "expected the ramp role to still be satisfied alongside the seeded theme card, got " + JSON.stringify(names)
     );
   },
   "buildDeckFromScoredPool: minimal build includes only the support package, no filler": function () {

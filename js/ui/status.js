@@ -123,12 +123,15 @@ function getCurrentBuildMode() {
   const currentThemeFocus = getCurrentThemeFocus();
   if (currentThemeFocus) parts.push(`theme:${currentThemeFocus}`);
   if (getMinimalBuildEnabled()) parts.push("minimal");
+  if (getCurveFirstEnabled()) parts.push("curveFirst");
   return parts.join("|");
 }
 
 function updateBuildModeToggle() {
   const toggle = document.getElementById("minimalBuildToggle");
   if (toggle) toggle.classList.toggle("active", getMinimalBuildEnabled());
+  const curveFirstToggle = document.getElementById("curveFirstToggle");
+  if (curveFirstToggle) curveFirstToggle.classList.toggle("active", getCurveFirstEnabled());
 }
 
 function updateProgress(percent, statusText, subStatus = "") {

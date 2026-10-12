@@ -97,6 +97,44 @@ function isThemeFallback(card) {
   return Boolean(card && card.themeMatch);
 }
 
+// Theme-match cards almost never carry a ramp/draw/removal/wipe role tag, so
+// Phase 0 (the role-filling loop below) never looks at them no matter their
+// CMC. Left alone, Phase 0 spends the entire cheap end of the curve on
+// generic role cards before Phase 1/2 ever reach the theme tier -- by then
+// the low bands are full and a commander's actual strategy doesn't show up
+// until CMC 4+. This claims a few of the cheapest bands for the theme tier
+// first, so a real build still starts on time.
+//
+// `pool` must already be sorted best-score-first (themeFallbackPool is, by
+// the time this runs) -- this takes the first match per band rather than
+// re-sorting.
+const THEME_SEED_BAND_LIMITS = { 1: 1, 2: 2, 3: 2 };
+
+function pickCheapThemeSeeds(pool, curvePlan, usedNames, commanderKeys) {
+  const picks = [];
+  const claimedKeys = new Set();
+
+  for (const [bandKey, limit] of Object.entries(THEME_SEED_BAND_LIMITS)) {
+    const band = Number(bandKey);
+    let claimed = 0;
+
+    for (const card of pool) {
+      if (claimed >= limit) break;
+
+      const key = normalizeCardName(card.name);
+      if (usedNames.has(key) || commanderKeys.has(key) || claimedKeys.has(key)) continue;
+      if (getCmcBand(card.cmc) !== band) continue;
+      if (!curveHasRoom(curvePlan, card.cmc)) continue;
+
+      picks.push(card);
+      claimedKeys.add(key);
+      claimed += 1;
+    }
+  }
+
+  return picks;
+}
+
 function getFallbackSource(card) {
   return isThemeFallback(card) ? "fallback-theme" : "fallback-generic";
 }
@@ -203,7 +241,7 @@ function buildDeckFromScoredPool(
     (Array.isArray(edhrecCards) ? edhrecCards : []).map((entry) => [normalizeCardName(entry.name), entry])
   );
 
-  const roleTargets = normalizeRoleTargets(edhrecRoleTargets);
+  const roleTargets = applyCurveFirstRoleTargets(normalizeRoleTargets(edhrecRoleTargets), modePrefs);
 
   const themeFallbackPool = [];
   const genericFallbackPool = [];
@@ -309,6 +347,13 @@ function buildDeckFromScoredPool(
     recordCurvePick(curvePlan, card.cmc);
     adjustRedundancy(card, 1);
     return true;
+  }
+
+  // Phase -1: seed a few cheap theme-payoff cards before Phase 0 can spend
+  // the whole low end of the curve on generic support cards (see
+  // pickCheapThemeSeeds above).
+  for (const card of pickCheapThemeSeeds(themeFallbackPool, curvePlan, usedNames, commanderKeys)) {
+    addCard(card, getFallbackSource(card));
   }
 
   // Phase 0: fill the support package (ramp, draw, removal, wipe) first.

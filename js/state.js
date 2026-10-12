@@ -28,6 +28,19 @@ function setMinimalBuildEnabled(enabled) {
   minimalBuildEnabled = Boolean(enabled);
 }
 
+// Curve First mode: a personal preference toggle (not a public format) that
+// caps ramp and board wipes and boosts draw/removal targets. See
+// docs/superpowers/specs/2026-10-12-curve-first-build-mode-theorycraft.md.
+let curveFirstEnabled = false;
+
+function getCurveFirstEnabled() {
+  return curveFirstEnabled;
+}
+
+function setCurveFirstEnabled(enabled) {
+  curveFirstEnabled = Boolean(enabled);
+}
+
 // Set by the Theme/Tribal tab before handing a commander to the build flow,
 // so the very first generateDeck() run already focuses that theme instead of
 // requiring a manual click on a priority button after the fact. Consumed

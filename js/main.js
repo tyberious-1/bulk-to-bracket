@@ -260,6 +260,12 @@ async function toggleMinimalBuild() {
   await runRegeneration();
 }
 
+async function toggleCurveFirst() {
+  if (!currentRunContext) return;
+  setCurveFirstEnabled(!getCurveFirstEnabled());
+  await runRegeneration();
+}
+
 async function performBuildFromContext() {
   const {
     commanders,
@@ -590,6 +596,12 @@ if (priorityButtonsWrap) {
 if (minimalBuildToggle) {
   minimalBuildToggle.addEventListener("click", () => {
     toggleMinimalBuild();
+  });
+}
+
+if (curveFirstToggle) {
+  curveFirstToggle.addEventListener("click", () => {
+    toggleCurveFirst();
   });
 }
 
