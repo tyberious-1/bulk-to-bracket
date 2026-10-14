@@ -36,3 +36,25 @@ runSuite("mode-prefs", {
     assertEqual(prefs.curveFirst, true);
   }
 });
+
+runSuite("mode-prefs: multi-theme plans", {
+  "getModePreferences: a plan focus carries every theme's signal and aliases": function () {
+    const prefs = getModePreferences("theme:auras~voltron", { wantsCreatures: false });
+    assertEqual(prefs.focusedThemeSignals.join(","), "auras,voltron");
+    assertTrue(prefs.themeFocusAliases.includes("voltron"));
+    assertTrue(focusHasSignal(prefs, "voltron"));
+    assertTrue(focusHasSignal(prefs, "auras"));
+  },
+
+  "getModePreferences: a plan focus keeps every tribe": function () {
+    const prefs = getModePreferences("theme:merfolk~elves", { wantsCreatures: false });
+    assertTrue(prefs.focusedTribalTypes.includes("merfolk"));
+    assertTrue(prefs.focusedTribalTypes.includes("elf"));
+  },
+
+  "getModePreferences: a single theme behaves as before": function () {
+    const prefs = getModePreferences("theme:elves", { wantsCreatures: false });
+    assertEqual(prefs.focusedThemeSignal, "elves");
+    assertEqual(prefs.focusedThemeSignals.join(","), "elves");
+  }
+});

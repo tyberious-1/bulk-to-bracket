@@ -24,7 +24,7 @@ function buildRoleTargetPlan(edhrecTypeAverages, strategyProfile, targetLandCoun
   const requestedLandCount = Math.round(targetLandCount);
   const targetNonlandCount = deckSize - requestedLandCount;
 
-  const wantsVoltron = themeSignals.has("voltron") || modePrefs?.focusedThemeSignal === "voltron";
+  const wantsVoltron = themeSignals.has("voltron") || focusHasSignal(modePrefs, "voltron");
 
   // Archetype creature counts per Draftsim's "How Many Creatures in a
   // Commander Deck" guide: Typal 30+, Aggro/go-wide 30+, Voltron 20-30,
@@ -44,8 +44,8 @@ function buildRoleTargetPlan(edhrecTypeAverages, strategyProfile, targetLandCoun
       : 18,
     Instant: strategyProfile.wantsCantrips ? 10 : 7,
     Sorcery: strategyProfile.wantsCantrips ? 11 : 8,
-    Artifact: themeSignals?.has?.("artifacts") || modePrefs?.focusedThemeSignal === "artifacts" || wantsVoltron ? 11 : 7,
-    Enchantment: themeSignals?.has?.("enchantments") || modePrefs?.focusedThemeSignal === "enchantments" || wantsVoltron ? 10 : 5,
+    Artifact: themeSignals?.has?.("artifacts") || focusHasSignal(modePrefs, "artifacts") || wantsVoltron ? 11 : 7,
+    Enchantment: themeSignals?.has?.("enchantments") || focusHasSignal(modePrefs, "enchantments") || wantsVoltron ? 10 : 5,
     Planeswalker: 1
   };
 
@@ -167,6 +167,107 @@ function adjustCurveShares(shares, roleTargets, strategyProfile) {
   return adjusted;
 }
 
+// Chance of having made the land drop on turn `turn` (i.e. at least `turn`
+// lands among the cards seen by then), on the play with no mulligan and no
+// ramp: a 7-card hand plus one draw per turn after the first. Hypergeometric.
+function landDropHitChance(turn, landCount, deckSize = 99) {
+  const seen = Math.min(deckSize, 7 + turn - 1);
+  const choose = (n, k) => {
+    if (k < 0 || k > n) return 0;
+    let result = 1;
+    for (let i = 1; i <= k; i++) result = (result * (n - k + i)) / i;
+    return result;
+  };
+  const total = choose(deckSize, seen);
+  let chance = 0;
+  for (let lands = turn; lands <= Math.min(seen, landCount); lands++) {
+    chance += (choose(landCount, lands) * choose(deckSize - landCount, seen - lands)) / total;
+  }
+  return chance;
+}
+
+// Curve First's band shares, derived from how often the deck can actually
+// make each turn's land drop instead of the fixed DEFAULT_CURVE_SHARES. A
+// band-N card is only cast on curve when the turn-N drop was made, so the top
+// bands get weight in proportion to that chance (about 58% on turn 4 but 28%
+// on turn 6 at 38 lands), and bands 6-7 keep a small floor so a real top end
+// survives. The 1-drop share is nudged up from the default rather than
+// derived (cheap cards are weak per slot, so the raw odds would overweight
+// them); the freed-up share goes to bands 2 and 3 in their default ratio.
+function buildLandDropCurveShares(landCount, deckSize = 99) {
+  const ONE_DROP_SHARE = 0.11;
+  const TOP_END_FLOOR = 0.03;
+
+  const chance = {};
+  let chanceTotal = 0;
+  for (let band = 1; band <= 7; band++) {
+    chance[band] = landDropHitChance(band, landCount, deckSize);
+    chanceTotal += chance[band];
+  }
+
+  const shares = { 1: ONE_DROP_SHARE };
+  let highTotal = 0;
+  for (let band = 4; band <= 7; band++) {
+    const share = chance[band] / chanceTotal;
+    shares[band] = band >= 6 ? Math.max(TOP_END_FLOOR, share) : share;
+    highTotal += shares[band];
+  }
+
+  const middleShare = Math.max(0, 1 - ONE_DROP_SHARE - highTotal);
+  const middleDefault = DEFAULT_CURVE_SHARES[2] + DEFAULT_CURVE_SHARES[3];
+  shares[2] = middleShare * (DEFAULT_CURVE_SHARES[2] / middleDefault);
+  shares[3] = middleShare * (DEFAULT_CURVE_SHARES[3] / middleDefault);
+  return shares;
+}
+
+// Card types a commander's "<types> spells you cast cost {N} less" text can
+// name, as they appear in a lowercased type line.
+const COST_REDUCTION_TYPES = ["instant", "sorcery", "creature", "artifact", "enchantment", "planeswalker"];
+
+// Reads a typed cost reducer off a commander's rules text (Kaza, Roil Chaser:
+// "The next instant or sorcery spell you cast this turn costs {X} less to
+// cast"). Returns { types, amount } or null. Only typed reducers count: an
+// untyped "spells you cast cost {1} less" shifts every card the same way, so
+// it would move the whole curve instead of reshaping it. A numeric {N} is
+// taken as written; a variable {X} depends on the board and the commander
+// being alive, so it is counted conservatively as 1. Capped at 2 either way.
+function getCommanderCostReduction(commanderTexts) {
+  const typeList = COST_REDUCTION_TYPES.join("|");
+  const pattern = new RegExp(
+    `\\b((?:${typeList})(?:(?: or |, | and )(?:${typeList}))*) spells? you cast(?: this turn)? costs? \\{(\\w+)\\} less`
+  );
+
+  let best = null;
+  for (const text of commanderTexts || []) {
+    const match = String(text || "").toLowerCase().match(pattern);
+    if (!match) continue;
+    const amount = Math.min(2, /^\d+$/.test(match[2]) ? Number(match[2]) : 1);
+    const types = COST_REDUCTION_TYPES.filter((type) => match[1].includes(type));
+    if (!best || amount > best.amount) best = { types, amount };
+  }
+  return best;
+}
+
+// Mana value the curve plan should file this card under once the commander's
+// reducer is counted. Only generic mana can be discounted, so the colored
+// pips are a floor (a UU counterspell never gets cheaper than 2).
+function getEffectiveCurveCmc(card, sourceCard, reduction) {
+  const cmc = Number(card.cmc) || 0;
+  if (!reduction || cmc <= 1) return cmc;
+  const typeLine = String(card.type || card.type_line || "").toLowerCase();
+  if (!reduction.types.some((type) => typeLine.includes(type))) return cmc;
+
+  const pips = parsePips((sourceCard || card).manaCost);
+  const coloredFloor = Object.values(pips).reduce((sum, value) => sum + Math.ceil(value), 0);
+  return Math.max(cmc - reduction.amount, Math.min(cmc, coloredFloor));
+}
+
+// The mana value the curve plan buckets by: the effective one when a
+// commander reducer set it, otherwise the printed one.
+function curveCmcOf(card) {
+  return card.curveCmc ?? card.cmc;
+}
+
 function buildCurvePlan(nonlandCount, shares = DEFAULT_CURVE_SHARES) {
   const caps = {};
   for (const band of Object.keys(shares)) {
@@ -203,6 +304,51 @@ function getCardsNeededForTypeMinimums(deck, typeBuckets) {
   return needed;
 }
 
+// One entry per card a bucket is still short of its *target* (not just its
+// minimum), the neediest bucket first, so asking for them in order
+// interleaves the buckets instead of draining one. Creature is included: it
+// used to be left out on the theory that the theme tier oversupplies it, but
+// that tier never reaches the target from above here (this only fills a
+// shortfall), and leaving it out let Phase 2 spend creature slots on whatever
+// scored best -- creatures ran under EDHREC's count on nearly every build
+// while Kardur, Doomscourge ran 27 spells against 20.
+function getCardsNeededForTypeTargets(deck, typeBuckets) {
+  const counts = countByType(deck);
+  const deficits = {};
+  for (const [bucket, rule] of Object.entries(typeBuckets || {})) {
+    const deficit = Math.max(0, (rule?.target || 0) - (counts[bucket] || 0));
+    if (deficit > 0) deficits[bucket] = deficit;
+  }
+
+  const needed = [];
+  for (;;) {
+    let neediest = null;
+    for (const bucket of Object.keys(deficits)) {
+      if (deficits[bucket] > 0 && (neediest === null || deficits[bucket] > deficits[neediest])) neediest = bucket;
+    }
+    if (neediest === null) return needed;
+    needed.push(neediest);
+    deficits[neediest] -= 1;
+  }
+}
+
+// A card Phase 1b adds only to fill a type bucket's shortfall has to be
+// roughly as good as the cards the deck already holds from the same source,
+// or the fill just pads the bucket with filler (a Mysterious Limousine at 14
+// beside EDHREC picks averaging 22). Compared per source -- "edhrec",
+// "fb-theme", "fb-generic" -- because the three are scored on different
+// scales (theme fallback carries a theme-fit bonus, so a generic card never
+// reaches a theme card's number). A source with nothing in the deck yet has
+// no baseline, so its first card always clears.
+const TYPE_TARGET_FLOOR_RATIO = 0.6;
+
+function clearsTypeTargetFloor(card, source, deck, ratio = TYPE_TARGET_FLOOR_RATIO) {
+  const peers = (deck || []).filter((entry) => entry.source === source);
+  if (!peers.length) return true;
+  const average = peers.reduce((sum, entry) => sum + (Number(entry.score) || 0), 0) / peers.length;
+  return (Number(card.score) || 0) >= ratio * average;
+}
+
 function getRoleCounts(deck) {
   return {
     ramp: deck.filter((card) => card.role === "ramp").length,
@@ -215,17 +361,18 @@ function getRoleCounts(deck) {
 
 // excludedKeys holds every commander's normalized name (a deck may have two),
 // so a commander is never also drafted into its own deck.
-function pickBestCardForBucket(pool, usedNames, excludedKeys, bucket, curvePlan = null) {
+function pickBestCardForBucket(pool, usedNames, excludedKeys, bucket, curvePlan = null, accept = null) {
   let bestIgnoringCurve = null;
 
   for (const card of pool) {
     const key = normalizeCardName(card.name);
     if (usedNames.has(key) || excludedKeys.has(key)) continue;
     if (getDeckTypeBucket(card.type || card.type_line || "") !== bucket) continue;
+    if (accept && !accept(card)) continue;
 
     // The pool is score-sorted, so the first card whose band still has room is
     // the best card we can take without distorting the curve.
-    if (curveHasRoom(curvePlan, card.cmc)) return card;
+    if (curveHasRoom(curvePlan, curveCmcOf(card))) return card;
     if (!bestIgnoringCurve) bestIgnoringCurve = card;
   }
 
@@ -274,12 +421,17 @@ function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys, curve
       if (roleCount >= (roleRule.max || 999)) adjustedScore -= 28;
     }
 
-    // Type deficit is a minor tiebreaker -- soft diversity, not a gate.
+    // Type deficit is a minor tiebreaker -- soft diversity, not a gate. Overflow
+    // costs the same per card as a deficit earns: with only the bonus, a
+    // bucket already past its target kept winning slots on raw score (Kardur,
+    // Doomscourge ran 27 instants and sorceries against EDHREC's 20).
     const bucket = getDeckTypeBucket(card.type || card.type_line || "");
     const typeRule = typeBuckets[bucket];
     if (typeRule) {
-      const typeDeficit = Math.max(0, Number(typeRule.target || 0) - (typeCounts[bucket] || 0));
-      adjustedScore += typeDeficit * 8;
+      const typeCount = typeCounts[bucket] || 0;
+      const typeTarget = Number(typeRule.target || 0);
+      adjustedScore += Math.max(0, typeTarget - typeCount) * 8;
+      adjustedScore -= Math.max(0, typeCount - typeTarget) * 8;
     }
 
     if (bucket === "Creature") adjustedScore += 4;
@@ -289,7 +441,7 @@ function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys, curve
       bestIgnoringCurveScore = adjustedScore;
     }
 
-    if (!curveHasRoom(curvePlan, card.cmc)) continue;
+    if (!curveHasRoom(curvePlan, curveCmcOf(card))) continue;
 
     if (adjustedScore > bestScore) {
       best = card;

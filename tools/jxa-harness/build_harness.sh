@@ -24,6 +24,8 @@ scripts=(
   js/build/type-plan.js
   js/build/deck.js
   js/analysis/commander-match.js
+  js/analysis/plans.js
+  js/analysis/discovery.js
 )
 
 cat tools/jxa-harness/prelude.js "${scripts[@]}" > "$out"

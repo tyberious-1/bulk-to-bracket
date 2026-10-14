@@ -49,7 +49,7 @@ function buildCardData(collection) {
     if (!card) continue;
 
     const colorId = getCardColorIdentity(card);
-    const type = getCardType(card);
+    const type = getFrontFaceTypeLine(getCardType(card));
 
     // Extract base type and subtype
     const typeParts = type.split("—");
@@ -71,9 +71,9 @@ function buildCardData(collection) {
     typeEntry.count += entry.quantity;
     typeEntry.cards.push({ name: entry.rawName, quantity: entry.quantity });
 
-    // Support roles
-    const role = detectRole(card);
-    if (role !== "land" && role !== "synergy") {
+    // Support roles: every job a card does, so a removal spell that also draws
+    // is counted in both lists. detectRole alone files it under one.
+    for (const role of getRoleContributions(card)) {
       const roleKey = `${role}|${colorId}`;
       if (!bySupportRole.has(roleKey)) {
         bySupportRole.set(roleKey, {
@@ -162,28 +162,8 @@ function buildTypeSummary(byTypeSubtype) {
   }
 
   for (const entry of byTypeSubtype.values()) {
-    const fullType = entry.type.split('—')[0].trim();
-    const isLegendary = fullType.toLowerCase().startsWith('legendary');
-    const primaryType = fullType.replace(/^legendary\s+/i, '').toLowerCase().trim();
-
-    let typeKey = null;
-    if (primaryType.includes('creature')) {
-      typeKey = 'creature';
-    } else if (primaryType === 'enchantment') {
-      typeKey = 'enchantment';
-    } else if (primaryType.includes('artifact')) {
-      typeKey = 'artifact';
-    } else if (primaryType === 'instant') {
-      typeKey = 'instant';
-    } else if (primaryType === 'sorcery') {
-      typeKey = 'sorcery';
-    } else if (primaryType === 'planeswalker') {
-      typeKey = 'planeswalker';
-    } else if (primaryType === 'land') {
-      typeKey = 'land';
-    } else if (primaryType === 'battle') {
-      typeKey = 'battle';
-    }
+    const isLegendary = isLegendaryTypeLine(entry.type);
+    const typeKey = classifyPrimaryType(entry.type);
 
     if (!typeKey || !summary[typeKey]) continue;
 
@@ -294,20 +274,9 @@ function buildTypeDetailPanel(typeKey, byTypeSubtype, summary) {
   const artifactCreatureEntries = [];
 
   for (const entry of byTypeSubtype.values()) {
-    const fullType = entry.type.split('—')[0].trim();
-    const isLegendary = fullType.toLowerCase().startsWith('legendary');
-    const primaryType = fullType.replace(/^legendary\s+/i, '').toLowerCase().trim();
-    const isArtifactCreature = primaryType.includes('artifact') && primaryType.includes('creature');
-
-    let entryTypeKey = null;
-    if (primaryType.includes('creature')) entryTypeKey = 'creature';
-    else if (primaryType === 'enchantment') entryTypeKey = 'enchantment';
-    else if (primaryType.includes('artifact')) entryTypeKey = 'artifact';
-    else if (primaryType === 'instant') entryTypeKey = 'instant';
-    else if (primaryType === 'sorcery') entryTypeKey = 'sorcery';
-    else if (primaryType === 'planeswalker') entryTypeKey = 'planeswalker';
-    else if (primaryType === 'land') entryTypeKey = 'land';
-    else if (primaryType === 'battle') entryTypeKey = 'battle';
+    const isLegendary = isLegendaryTypeLine(entry.type);
+    const isArtifactCreature = isArtifactCreatureTypeLine(entry.type);
+    const entryTypeKey = classifyPrimaryType(entry.type);
 
     if (entryTypeKey === typeKey) {
       if (isArtifactCreature && typeKey === 'creature') {
@@ -320,16 +289,17 @@ function buildTypeDetailPanel(typeKey, byTypeSubtype, summary) {
     }
   }
 
+  // A card with several types (Human Warrior) is listed under each, so the rows
+  // can add up to more than the section total.
   const groupBySubtype = (entries) => {
     const grouped = new Map();
     for (const entry of entries) {
-      const creatureType = entry.type.includes('—') ? entry.type.split('—')[1].trim() : 'Base';
-      const primarySubtype = capitalizeWord(creatureType.split(/\s+/)[0] || 'Base');
-
-      if (!grouped.has(primarySubtype)) {
-        grouped.set(primarySubtype, []);
+      const subtypes = getTypeLineSubtypes(entry.type);
+      for (const subtype of subtypes.length ? subtypes : ['base']) {
+        const name = capitalizeWord(subtype);
+        if (!grouped.has(name)) grouped.set(name, []);
+        grouped.get(name).push(entry);
       }
-      grouped.get(primarySubtype).push(entry);
     }
     return grouped;
   };
@@ -360,6 +330,9 @@ function buildTypeDetailPanel(typeKey, byTypeSubtype, summary) {
   html += '</div>';
 
   html += '<div class="detail-content">';
+  if (typeKey === 'creature') {
+    html += '<p class="detail-note">A creature with several types (Human Warrior) is listed under each one, so the rows add up to more than the total.</p>';
+  }
 
   if (legendarySorted.length > 0) {
     html += '<div class="legendary-section">';
@@ -460,13 +433,12 @@ function buildTypeDetailPanel(typeKey, byTypeSubtype, summary) {
   if (typeKey === 'creature' && artifactCreatureEntries.length > 0) {
     const artifactBySubtype = new Map();
     for (const entry of artifactCreatureEntries) {
-      const creatureType = entry.type.includes('—') ? entry.type.split('—')[1].trim() : 'Base';
-      const primarySubtype = capitalizeWord(creatureType.split(/\s+/)[0] || 'Base');
-
-      if (!artifactBySubtype.has(primarySubtype)) {
-        artifactBySubtype.set(primarySubtype, []);
+      const subtypes = getTypeLineSubtypes(entry.type);
+      for (const subtype of subtypes.length ? subtypes : ['base']) {
+        const name = capitalizeWord(subtype);
+        if (!artifactBySubtype.has(name)) artifactBySubtype.set(name, []);
+        artifactBySubtype.get(name).push(entry);
       }
-      artifactBySubtype.get(primarySubtype).push(entry);
     }
 
     const artifactSorted = Array.from(artifactBySubtype.entries())

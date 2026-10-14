@@ -15,7 +15,7 @@
     <div class="tabs" role="tablist">
       <button class="tab-btn active" type="button" data-tab="build">Build a Deck</button>
       <button class="tab-btn" type="button" data-tab="commanders">Your Commanders</button>
-      <button class="tab-btn" type="button" data-tab="theme">Theme / Tribal</button>
+      <button class="tab-btn" type="button" data-tab="theme">Theme / Typal</button>
       <button class="tab-btn" type="button" data-tab="analytics">Collection Analytics</button>
     </div>
 
@@ -56,6 +56,15 @@
 
         <label for="csvFile">Upload ManaBox CSV</label>
         <input id="csvFile" type="file" accept=".csv" />
+        <div id="binderOptions" class="binder-options hidden"></div>
+
+        <label for="funPicksInput">Fun picks (optional)</label>
+        <textarea
+          id="funPicksInput"
+          rows="3"
+          placeholder="Up to 5 cards you just like, one per line, e.g. Fleet Swallower"
+        ></textarea>
+        <div id="funPicksNote" class="fun-picks-note"></div>
 
         <button id="generateBtn" type="button">Generate Deck</button>
       </div>
@@ -64,7 +73,13 @@
         <h2>How it works</h2>
         <p>Choose a legal Pauper Commander (any uncommon creature, legendary or not) and upload a ManaBox CSV of cards you own, and the app will build a 99-card, commons-only Commander deck from your collection.</p>
         <p>Pauper Commander has no EDHREC-equivalent synergy data source here — PDHREC (pdhrec.com) has no CORS-enabled API this static app can call directly, so every pick comes from Scryfall data and your own collection, matched locally.</p>
-        <p>Typal/tribal commanders still get the most synergy out of this tool, since creature types are easy to detect reliably from card text alone. Minimal Build is also available here, same as the full app — commander, mana base, and support package only.</p>
+        <p>Typal commanders still get the most synergy out of this tool, since creature types are easy to detect reliably from card text alone. Minimal Build is also available here, same as the full app — commander, mana base, and support package only.</p>
+      </div>
+
+      <div id="planOptionsPanel" class="panel hidden">
+        <h2>Plan Options</h2>
+        <p class="build-mode-copy">Pick the plan to build around. Coverage counts what your collection can actually fill; EDHREC themes are suggestions, not the only options.</p>
+        <div id="planOptions"></div>
       </div>
 
       <div id="postBuildControls" class="panel hidden">
@@ -145,7 +160,7 @@
 
     <div class="tab-panel hidden" data-tab="theme">
       <div class="panel">
-        <h2>Pick a Theme or Tribal Type</h2>
+        <h2>Pick a Theme or Typal Type</h2>
         <div id="themePanel"></div>
       </div>
     </div>
@@ -179,6 +194,8 @@
   <script src="js/build/type-plan.js"></script>
   <script src="js/build/deck.js"></script>
   <script src="js/analysis/commander-match.js"></script>
+  <script src="js/analysis/plans.js"></script>
+  <script src="js/analysis/discovery.js"></script>
   <script src="js/dom.js"></script>
   <script src="js/state.js"></script>
   <script src="js/ui/status.js"></script>
@@ -187,6 +204,7 @@
   <script src="js/ui/commander.js"></script>
   <script src="js/ui/hover-preview.js"></script>
   <script src="js/ui/report.js"></script>
+  <script src="js/ui/plans.js"></script>
   <script src="js/ui/commanders-tab.js"></script>
   <script src="js/ui/theme-tab.js"></script>
   <script src="js/ui/collection-analytics.js"></script>

@@ -456,21 +456,44 @@ function getCommanderStrategyProfile(commanderName, commanderThemes, commanderCo
   return profile;
 }
 
+// A plan focuses several themes at once ("auras~voltron"): the focus string
+// joins them with PLAN_THEME_SEPARATOR, and each theme still feeds the same
+// alias/tribal machinery a single focus uses.
+const PLAN_THEME_SEPARATOR = "~";
+
+function splitFocusThemes(themeFocus) {
+  return String(themeFocus || "").split(PLAN_THEME_SEPARATOR).map((t) => t.trim()).filter(Boolean);
+}
+
+// True when any focused theme normalizes to one of `signals`. Reads
+// focusedThemeSignals, falling back to the single focusedThemeSignal for
+// callers that build a modePrefs by hand.
+function focusHasSignal(modePrefs, ...signals) {
+  const focused = modePrefs?.focusedThemeSignals || (modePrefs?.focusedThemeSignal ? [modePrefs.focusedThemeSignal] : []);
+  return signals.some((signal) => focused.includes(signal));
+}
+
 function getModePreferences(mode, strategyProfile) {
   const modeParts = String(mode || "").split("|").map((part) => part.trim()).filter(Boolean);
   const themePart = modeParts.find((part) => part.startsWith("theme:"));
 
   const themeFocus = themePart ? themePart.slice(6) : "";
-  const focusedThemeSignal = normalizeThemeName(themeFocus);
-  const tribalFocus = getCommanderTribalThemes(themeFocus ? [themeFocus] : []).length > 0;
-  const focusedTribalTypes = getCommanderTribalThemes(themeFocus ? [themeFocus] : []).map((theme) => theme.replace(" tribal", ""));
-  const themeFocusAliases = themeFocus ? getThemeAliases(themeFocus).map((alias) => normalizeThemeName(alias)) : [];
-  const creatureFocusedTheme = ["tokens", "blink", "reanimator", "elves", "zombies", "goblins", "humans", "angels", "dragons", "bears"].includes(focusedThemeSignal);
+  const focusThemes = splitFocusThemes(themeFocus);
+  const focusedThemeSignals = focusThemes.map((theme) => normalizeThemeName(theme));
+  const focusedThemeSignal = focusedThemeSignals[0] || "";
+  const focusedTribalThemes = getCommanderTribalThemes(focusThemes);
+  const tribalFocus = focusedTribalThemes.length > 0;
+  const focusedTribalTypes = focusedTribalThemes.map((theme) => theme.replace(" tribal", ""));
+  const themeFocusAliases = Array.from(new Set(
+    focusThemes.flatMap((theme) => getThemeAliases(theme)).map((alias) => normalizeThemeName(alias))
+  ));
+  const creatureFocusedTheme = focusedThemeSignals.some((signal) => ["tokens", "blink", "reanimator", "elves", "zombies", "goblins", "humans", "angels", "dragons", "bears"].includes(signal));
 
   return {
     mode,
     themeFocus,
     focusedThemeSignal,
+    focusedThemeSignals,
     focusedTribalTypes,
     themeFocusAliases,
     minimalBuild: modeParts.includes("minimal"),

@@ -182,7 +182,20 @@ const ROLE_TEXT_PATTERNS = {
     "damage to target creature",
     "target opponent sacrifices", "target player sacrifices",
     "return target creature to its owner's hand",
-    "gets -"
+    "gets -",
+    // Casual decks answer a threat with whatever the colors have, and the player
+    // counts those as removal (interview, 2026-10-13): pacifism-style auras and
+    // "disable" effects, theft, tucking, and bounce that isn't worded
+    // "target creature". Counterspells and bounce were already counted above.
+    "enchanted creature can't attack or block",
+    "enchanted creature doesn't untap",
+    "enchanted creature loses all abilities",
+    "target creature loses all abilities",
+    "gain control of target creature",
+    "gain control of target permanent",
+    "you control enchanted creature",
+    "put target creature on",
+    "return target nonland permanent"
   ],
   // Sweepers are written a dozen ways and this list used to know three of them,
   // one of which ("each creature gets") matches no card ever printed -- the
@@ -520,6 +533,11 @@ function cardMatchesRole(card, role, isTribalDeck = false) {
     if (role === "ramp" && pattern === "less to cast") {
       return costReductionIsGeneral(text, pattern);
     }
+    // Threaten effects (Act of Treason) borrow the creature for a turn; that
+    // is a combat trick, not an answer.
+    if (role === "removal" && (pattern === "gain control of target creature" || pattern === "gain control of target permanent")) {
+      return text.includes(pattern) && !text.includes("until end of turn");
+    }
     if (role === "removal" && pattern === "gets -") {
       return hasLethalStatDrop(text);
     }
@@ -783,13 +801,16 @@ const DETECTABLE_CARD_TAGS = new Set([
 // focus and crabs were outscoring the equipment/auras the focus asked for.
 function strategyBonusAllowed(modePrefs, signals) {
   if (!modePrefs.themeFocus) return true;
-  return signals.includes(modePrefs.focusedThemeSignal);
+  return focusHasSignal(modePrefs, ...signals);
 }
 
 function tribalBonusAllowed(modePrefs, tribe) {
   if (!modePrefs.themeFocus) return true;
   return (modePrefs.focusedTribalTypes || []).includes(tribe);
 }
+
+// Base lift for a chosen plan's signature card; doubles at 100% inclusion.
+const PLAN_SIGNATURE_BONUS = 20;
 
 function getThemeFocusAdjustment(card, tags, modePrefs) {
   if (!modePrefs.themeFocus) return 0;
@@ -799,13 +820,21 @@ function getThemeFocusAdjustment(card, tags, modePrefs) {
   const matchedFocusedTag = normalizedTags.some((tag) => focusAliases.has(tag));
   let adjustment = matchedFocusedTag ? 18 : -5;
 
-  if (modePrefs.focusedThemeSignal === "artifacts" && getCardType(card).includes("artifact")) adjustment += 8;
-  if (modePrefs.focusedThemeSignal === "enchantments" && getCardType(card).includes("enchantment")) adjustment += 8;
-  if (["spellslinger", "cantrips"].includes(modePrefs.focusedThemeSignal) && (getCardType(card).includes("instant") || getCardType(card).includes("sorcery"))) adjustment += 9;
-  if (["tokens", "gowide"].includes(modePrefs.focusedThemeSignal) && (isTokenMaker(card) || isCreatureCard(card))) adjustment += 9;
-  if (["sacrifice", "aristocrats"].includes(modePrefs.focusedThemeSignal) && isSacrificeCard(card)) adjustment += 8;
-  if (["counters", "countersmatter"].includes(modePrefs.focusedThemeSignal) && normalizedTags.includes("counters")) adjustment += 8;
-  if (["graveyard", "reanimator"].includes(modePrefs.focusedThemeSignal) && (normalizedTags.includes("graveyard") || normalizedTags.includes("reanimator"))) adjustment += 9;
+  if (focusHasSignal(modePrefs, "artifacts") && getCardType(card).includes("artifact")) adjustment += 8;
+  if (focusHasSignal(modePrefs, "enchantments") && getCardType(card).includes("enchantment")) adjustment += 8;
+  if (focusHasSignal(modePrefs, "spellslinger", "cantrips") && (getCardType(card).includes("instant") || getCardType(card).includes("sorcery"))) adjustment += 9;
+  if (focusHasSignal(modePrefs, "tokens", "gowide") && (isTokenMaker(card) || isCreatureCard(card))) adjustment += 9;
+  if (focusHasSignal(modePrefs, "sacrifice", "aristocrats") && isSacrificeCard(card)) adjustment += 8;
+  if (focusHasSignal(modePrefs, "counters", "countersmatter") && normalizedTags.includes("counters")) adjustment += 8;
+  if (focusHasSignal(modePrefs, "graveyard", "reanimator") && (normalizedTags.includes("graveyard") || normalizedTags.includes("reanimator"))) adjustment += 9;
+
+  // A chosen plan knows its signature cards by name (EDHREC's theme pages), which
+  // is sharper than the tag guesses above: a plan card the collection owns gets a
+  // lift that grows with how often decks of the plan play it. Measured on 27
+  // plans before this, a plan build held about the same signature cards as the
+  // default build, because only tag matches steered it.
+  const signatureRate = modePrefs.planSignature?.get(normalizeCardName(card.name));
+  if (signatureRate !== undefined) adjustment += PLAN_SIGNATURE_BONUS + PLAN_SIGNATURE_BONUS * signatureRate;
 
   // No per-tribe addition here: scoreCard/scoreFallbackCard's own tribal loop
   // already adds 10-12 * tribalBias for a focused-tribe match (tribalBonusAllowed
