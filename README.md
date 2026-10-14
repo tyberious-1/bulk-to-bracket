@@ -37,7 +37,8 @@ The build process:
 2. Creates target buckets per card type
 3. Fills those buckets with **owned EDHREC synergy matches first**
 4. Backfills missing slots from the rest of your collection using **theme-fit scoring**
-5. Allows **±2 variance** when the collection cannot fully support the exact average
+5. Tops every card type up to its target, theme-matching cards first and the rest of your collection second, so a type your themes don't cover (say, instants and sorceries for a creature-heavy theme) still reaches EDHREC's average. Weak filler is skipped and support roles (ramp, draw, removal, wipes) keep their own targets
+6. Allows **±2 variance** when the collection cannot fully support the exact average
 
 This prevents issues like overloading instants or underfilling creatures.
 
@@ -50,7 +51,7 @@ Three ways to get there, all on their own tab:
 
 * **Build a Deck** — type a commander’s name and choose from autocomplete.
 * **Your Commanders** — every commander your uploaded collection owns, ranked by how many decks EDHREC has for it, with a one-click **Build** to load it.
-* **Theme / Tribal** — pick a theme (Aristocrats, Voltron, Storm, Vehicles, Earthbending, …) or a tribal type (Elves, Zombies, Allies, …) first, then choose from the owned commanders EDHREC ranks highly for it. Picking a commander here carries the theme along, so the very first deck it builds is already focused on it.
+* **Theme / Typal** — pick a theme (Aristocrats, Voltron, Storm, Vehicles, Earthbending, …) or a creature type (Elves, Zombies, Allies, …) first, then choose from the owned commanders EDHREC ranks highly for it. Picking a commander here carries the theme along, so the very first deck it builds is already focused on it.
 
 ### 2) Upload ManaBox CSV
 

@@ -191,6 +191,7 @@ function displayBuildBreakdown(deck) {
   // on-theme cards, not that the builder chose to wander.
   const themeFallbackCount = deck.filter((c) => c.source === "fallback-theme").length;
   const genericFallbackCount = deck.filter((c) => c.source === "fallback-generic").length;
+  const funPickCount = deck.filter((c) => c.source === "fun-pick").length;
   const nonbasicCount = deck.filter((c) => c.source === "nonbasic-land").length;
   const basicCount = deck.filter((c) => c.source === "basic-land").length;
 
@@ -201,6 +202,7 @@ function displayBuildBreakdown(deck) {
         <div class="build-breakdown-item"><span>EDHREC Matches</span><strong>${edhrecCount}</strong></div>
         <div class="build-breakdown-item"><span>On-Theme Fallbacks</span><strong>${themeFallbackCount}</strong></div>
         <div class="build-breakdown-item"><span>Generic Fallbacks</span><strong>${genericFallbackCount}</strong></div>
+        ${funPickCount ? `<div class="build-breakdown-item"><span>Fun Picks</span><strong>${funPickCount}</strong></div>` : ""}
         <div class="build-breakdown-item"><span>Nonbasic Lands</span><strong>${nonbasicCount}</strong></div>
         <div class="build-breakdown-item"><span>Basic Lands</span><strong>${basicCount}</strong></div>
       </div>

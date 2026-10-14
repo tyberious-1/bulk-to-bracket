@@ -1,4 +1,24 @@
 runSuite("scoring", {
+  "detectRole: a pacifism-style aura counts as removal": function () {
+    const card = { type: "Enchantment — Aura", text: "Enchant creature. Enchanted creature can't attack or block." };
+    assertEqual(detectRole(card, false), "removal");
+  },
+  "detectRole: a freeze aura counts as removal": function () {
+    const card = { type: "Enchantment — Aura", text: "Enchant creature. When this Aura enters, tap enchanted creature. Enchanted creature doesn't untap during its controller's untap step." };
+    assertEqual(detectRole(card, false), "removal");
+  },
+  "detectRole: theft counts as removal, a threaten effect does not": function () {
+    const steal = { type: "Enchantment — Aura", text: "Enchant creature. You control enchanted creature." };
+    const mind = { type: "Sorcery", text: "Gain control of target creature." };
+    const threaten = { type: "Sorcery", text: "Gain control of target creature until end of turn. Untap that creature. It gains haste until end of turn." };
+    assertEqual(detectRole(mind, false), "removal");
+    assertEqual(detectRole(threaten, false), "synergy");
+    assertEqual(detectRole(steal, false), "removal");
+  },
+  "detectRole: bounce and tucking count as removal": function () {
+    assertEqual(detectRole({ type: "Instant", text: "Return target nonland permanent to its owner's hand." }, false), "removal");
+    assertEqual(detectRole({ type: "Instant", text: "Put target creature on the bottom of its owner's library." }, false), "removal");
+  },
   "isFlexibleTribalPayoff: detects Herald's Horn's chosen-type templating": function () {
     const card = {
       type: "Artifact",
@@ -112,5 +132,15 @@ runSuite("scoring", {
     const curveFirstScore = scoreFallbackCard(expensiveRemoval, commanderThemes, strategyProfile, commanderColors, curveFirstModePrefs);
 
     assertClose(curveFirstScore - normalScore, 0, 0.001, "expensive removal should score the same under curveFirst");
+  },
+
+  "getThemeFocusAdjustment: a chosen plan's signature card gets a lift scaled by inclusion": function () {
+    const card = { name: "Plan Card", type: "creature", text: "", oracle_text: "", cmc: 2, colors: [] };
+    const base = { themeFocus: "auras", themeFocusAliases: [], focusedThemeSignals: ["auras"] };
+    const without = getThemeFocusAdjustment(card, [], base);
+    const low = getThemeFocusAdjustment(card, [], { ...base, planSignature: new Map([["plan card", 0.2]]) });
+    const high = getThemeFocusAdjustment(card, [], { ...base, planSignature: new Map([["plan card", 0.8]]) });
+    assertTrue(low > without);
+    assertTrue(high > low);
   }
 });

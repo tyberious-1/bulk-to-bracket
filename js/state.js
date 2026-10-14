@@ -41,7 +41,7 @@ function setCurveFirstEnabled(enabled) {
   curveFirstEnabled = Boolean(enabled);
 }
 
-// Set by the Theme/Tribal tab before handing a commander to the build flow,
+// Set by the Theme/Typal tab before handing a commander to the build flow,
 // so the very first generateDeck() run already focuses that theme instead of
 // requiring a manual click on a priority button after the fact. Consumed
 // once (takePendingThemeFocus clears it) so a later plain rebuild -- typing a

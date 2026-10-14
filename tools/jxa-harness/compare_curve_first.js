@@ -130,20 +130,24 @@ async function buildForCommander(name, mode) {
     edhrecData?.typeAverages || null,
     edhrecData?.roleTargets || null,
     edhrecCards,
-    { themeCardNames, deckSize: 99 }
+    { themeCardNames, deckSize: 99, commanderTexts: [commanderCard.text] }
   );
 }
 
 async function main() {
-  const name = "Ivy, Gleeful Spellthief";
-
+  for (const name of ["Kaza, Roil Chaser", "Zodiark, Umbral God"]) {
   for (const mode of ["", "curveFirst"]) {
     const finalDeck = await buildForCommander(name, mode);
     const nonlands = finalDeck.filter((c) => c.role !== "land");
     const counts = getSupportPackageCounts(finalDeck);
 
-    jxaPrint(`=== mode="${mode || "(default)"}" ===`);
+    jxaPrint(`=== ${name} mode="${mode || "(default)"}" ===`);
+    jxaPrint("Land count: " + (finalDeck.length - nonlands.length));
     jxaPrint("Nonland count: " + nonlands.length);
+    const hist = {};
+    for (const c of nonlands) { const k = Math.min(7, Math.round(c.cmc || 0)); hist[k] = (hist[k] || 0) + 1; }
+    jxaPrint("CMC histogram (nonland): " + Object.keys(hist).sort((a, b) => a - b).map((k) => k + ":" + hist[k]).join(" "));
+    jxaPrint("1-drops: " + nonlands.filter((c) => Math.round(c.cmc || 0) === 1).map((c) => c.name + "[" + c.role + "]").join(", "));
     jxaPrint("Average mana value: " + averageManaValue(finalDeck));
     jxaPrint(
       "Role primary counts -- ramp: " + counts.ramp.primary +
@@ -152,6 +156,7 @@ async function main() {
       ", wipe: " + counts.wipe.primary
     );
     jxaPrint("");
+  }
   }
 }
 

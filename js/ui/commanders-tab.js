@@ -51,6 +51,7 @@ function resetCommanderScan() {
   unrankedScanDone = false;
   commanderMatches = new Map();
   resetAnalyticsCache();
+  if (typeof resetThemeTabSupport === "function") resetThemeTabSupport();
 
   const collection = getOwnedCollection();
   if (!collection) return;

@@ -58,6 +58,14 @@ runSuite("manabase", {
     const highRamp = estimateLandCount(pool, ["G"], { ramp: 16 });
     assertTrue(highRamp <= lowRamp, "expected high-ramp (" + highRamp + ") <= low-ramp (" + lowRamp + ")");
   },
+  "estimateLandCount: curveFirst ignores the low-ramp land bonus": function () {
+    const pool = [{ score: 10, manaCost: "{2}{G}" }];
+    const normal = estimateLandCount(pool, ["G"], { ramp: 4 }, {});
+    const curveFirst = estimateLandCount(pool, ["G"], { ramp: 4 }, { curveFirst: true });
+    const defaultRamp = estimateLandCount(pool, ["G"], { ramp: 10 }, { curveFirst: true });
+    assertTrue(curveFirst < normal, "expected curveFirst (" + curveFirst + ") < normal low-ramp (" + normal + ")");
+    assertEqual(curveFirst, defaultRamp);
+  },
   "estimateLandCount: always clamps to [35, 42]": function () {
     const extreme = [{ score: 1, manaCost: "{W}{W}{W}{W}{W}{W}" }];
     const count = estimateLandCount(extreme, ["W"], { ramp: 0 });

@@ -1,4 +1,4 @@
-// The Theme/Tribal tab: pick a theme or tribal type, then pick an owned
+// The Theme/Typal tab: pick a theme or creature type, then pick an owned
 // commander EDHREC ranks highly for it, then jump into the Build tab with
 // that theme already focused.
 //
@@ -53,6 +53,81 @@ let themeTabSelected = null;
 let themeTabResults = null;
 let themeTabBusy = false;
 let themeTabError = "";
+// What the collection supports best (analysis/discovery.js), computed on request
+// because it needs card data for the whole collection.
+let themeTabSupport = null;
+let themeTabSupportBusy = false;
+
+function resetThemeTabSupport() {
+  themeTabSupport = null;
+  themeTabSupportBusy = false;
+}
+
+function themeTabTribeFor(entry) {
+  const alias = TRIBAL_PLURAL_ALIASES[entry.tag] || THEME_TAB_EXTRA_TRIBAL_PLURALS[entry.tag];
+  return alias ? alias.replace(" tribal", "") : null;
+}
+
+function renderThemeTabSupport() {
+  const container = document.getElementById("themeTabSupport");
+  if (!container) return;
+
+  if (themeTabSupportBusy) {
+    container.innerHTML = '<p class="theme-tab-status">Reading your collection...</p>';
+    return;
+  }
+
+  if (!themeTabSupport) {
+    container.innerHTML = `
+      <p class="theme-tab-status">Not sure where to start? See which themes and tribes your collection supports best, then pick one to find a commander for it.</p>
+      <button id="themeTabSupportBtn" type="button">What does my collection support?</button>
+    `;
+    return;
+  }
+
+  // Tribes and mechanics apart: a tribe is a concrete deck, a mechanic is often
+  // just what most cards do.
+  const group = (kind, title) => {
+    const rows = themeTabSupport.filter((row) => row.entry.kind === kind).slice(0, 6);
+    if (!rows.length) return "";
+    return `
+      <div class="priority-section-label">${title}</div>
+      <div class="theme-tab-catalog">
+        ${rows.map((row) => `
+          <button
+            class="theme-tab-pick"
+            type="button"
+            data-theme-kind="${escapeHtml(row.entry.kind)}"
+            data-theme-tag="${escapeHtml(row.entry.tag)}"
+          >${escapeHtml(row.entry.label)} <span class="plan-tag">${row.count} cards</span></button>
+        `).join("")}
+      </div>`;
+  };
+
+  const html = group("tribal", "Creature types your collection supports") + group("theme", "Themes your collection supports");
+  container.innerHTML = html || '<p class="theme-tab-status">No theme or tribe stands out in this collection yet.</p>';
+}
+
+async function findThemeTabSupport() {
+  const collection = getOwnedCollection();
+  if (!collection || themeTabSupportBusy) return;
+
+  themeTabSupportBusy = true;
+  renderThemeTabSupport();
+  try {
+    const cardData = await fetchCardDataBatchWithProgress(collection.uniqueRawNames, (done, total) => {
+      updateProgress(5 + Math.floor((done / Math.max(total, 1)) * 90), "Reading your collection...", `${done} / ${total}`);
+    });
+    updateProgress(100, "Collection read", "");
+    themeTabSupport = rankCollectionSupport(cardData.values(), getThemeTabCatalog(), themeTabTribeFor);
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || "Unable to read the collection.");
+  } finally {
+    themeTabSupportBusy = false;
+    renderThemeTabSupport();
+  }
+}
 
 function buildThemeTabCatalog() {
   const entries = [];
@@ -194,11 +269,12 @@ function renderThemeTab() {
   }
 
   panel.innerHTML = `
+    <div id="themeTabSupport" class="theme-tab-support"></div>
     <input
       id="themeTabSearch"
       type="text"
       class="theme-tab-search"
-      placeholder="Search themes and tribal types..."
+      placeholder="Search themes and creature types..."
       autocomplete="off"
       value="${escapeHtml(themeTabQuery)}"
     >
@@ -206,6 +282,7 @@ function renderThemeTab() {
     <div id="themeTabResults" class="theme-tab-results"></div>
   `;
 
+  renderThemeTabSupport();
   renderThemeTabCatalogList();
   renderThemeTabResultsList();
 }
@@ -314,6 +391,11 @@ function bindThemeTab() {
   });
 
   panel.addEventListener("click", (event) => {
+    if (event.target.id === "themeTabSupportBtn") {
+      findThemeTabSupport();
+      return;
+    }
+
     const pick = event.target.closest(".theme-tab-pick");
     if (pick) {
       const entry = findThemeTabCatalogEntry(pick.dataset.themeKind, pick.dataset.themeTag);

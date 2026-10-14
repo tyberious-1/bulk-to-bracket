@@ -200,7 +200,7 @@ function generateWarnings(deck, commanderThemes, bracketInfo) {
   const fallbackGenericRatio = fallbackGenericCards / Math.max(nonlandCount, 1);
 
   if (getCommanderTribalThemes(commanderThemes).length && creatures < 22) {
-    warnings.push("Low creature count for a tribal deck.");
+    warnings.push("Low creature count for a typal deck.");
   }
   if (commanderHasTheme(commanderThemes, "gowide") && creatures < 20) {
     warnings.push("Go-wide strategy may be light on creatures or token bodies.");

@@ -110,6 +110,46 @@ function isThemeFallback(card) {
 // re-sorting.
 const THEME_SEED_BAND_LIMITS = { 1: 1, 2: 2, 3: 2 };
 
+// Fun slots: cards the player names because they like them (a favourite that
+// "looks interesting"), kept out of every synergy and score floor. Commander is
+// casual, so a few flavour picks can matter more than the last point of synergy
+// (spec: 2026-10-13-plan-first-prototyping.md, requirement 6).
+const FUN_PICK_MAX = 5;
+
+// The named cards that can actually go in this deck: owned, nonland, legal in
+// the commander's colors, not the commander, no repeats, capped at FUN_PICK_MAX.
+// Returns candidate objects shaped like the fallback pool's.
+function pickFunCards(names, allOwnedCardData, collectionData, commanderColors, commanderKeys, isTribalDeck = false) {
+  const picks = [];
+  const seen = new Set();
+  for (const raw of names || []) {
+    if (picks.length >= FUN_PICK_MAX) break;
+    const name = String(raw || "").trim();
+    if (!name) continue;
+    const key = normalizeCardName(name);
+    if (seen.has(key) || commanderKeys.has(key)) continue;
+    seen.add(key);
+
+    const card = allOwnedCardData.get(key) || allOwnedCardData.get(normalizeCardName(getPrimaryCardName(name)));
+    if (!card || !hasOwnedCard(collectionData, card.name)) continue;
+    if (getCardType(card).includes("land")) continue;
+    if (!legalForCommander(card.colors, commanderColors, card)) continue;
+
+    picks.push({
+      name: card.name,
+      role: detectRole(card, isTribalDeck),
+      manaCost: card.manaCost,
+      score: 0,
+      type: getCardType(card),
+      cmc: card.cmc,
+      curveCmc: card.cmc,
+      colors: card.colors,
+      fun: true
+    });
+  }
+  return picks;
+}
+
 function pickCheapThemeSeeds(pool, curvePlan, usedNames, commanderKeys) {
   const picks = [];
   const claimedKeys = new Set();
@@ -123,8 +163,8 @@ function pickCheapThemeSeeds(pool, curvePlan, usedNames, commanderKeys) {
 
       const key = normalizeCardName(card.name);
       if (usedNames.has(key) || commanderKeys.has(key) || claimedKeys.has(key)) continue;
-      if (getCmcBand(card.cmc) !== band) continue;
-      if (!curveHasRoom(curvePlan, card.cmc)) continue;
+      if (getCmcBand(curveCmcOf(card)) !== band) continue;
+      if (!curveHasRoom(curvePlan, curveCmcOf(card))) continue;
 
       picks.push(card);
       claimedKeys.add(key);
@@ -142,7 +182,7 @@ function getFallbackSource(card) {
 // Same contract as pickBestCardForBucket, but the ranking has to be re-decided
 // on every call: the penalty depends on what the deck already holds, so a
 // pre-sorted pool cannot answer it.
-function pickBestFallbackCard(pool, usedNames, commanderKeys, bucket, curvePlan, redundancyCounts) {
+function pickBestFallbackCard(pool, usedNames, commanderKeys, bucket, curvePlan, redundancyCounts, accept = null) {
   let best = null;
   let bestScore = -Infinity;
   let bestIgnoringCurve = null;
@@ -152,10 +192,11 @@ function pickBestFallbackCard(pool, usedNames, commanderKeys, bucket, curvePlan,
     const key = normalizeCardName(card.name);
     if (usedNames.has(key) || commanderKeys.has(key)) continue;
     if (getDeckTypeBucket(card.type || card.type_line || "") !== bucket) continue;
+    if (accept && !accept(card)) continue;
 
     const adjusted = Number(card.score || 0) - getRedundancyPenalty(card.redundancyKeys, redundancyCounts);
 
-    if (curveHasRoom(curvePlan, card.cmc)) {
+    if (curveHasRoom(curvePlan, curveCmcOf(card))) {
       if (adjusted > bestScore) {
         best = card;
         bestScore = adjusted;
@@ -243,6 +284,17 @@ function buildDeckFromScoredPool(
 
   const roleTargets = applyCurveFirstRoleTargets(normalizeRoleTargets(edhrecRoleTargets), modePrefs);
 
+  // Curve First only: a commander that discounts a card type (Kaza, Roil
+  // Chaser's instants and sorceries) makes those cards cheaper than printed
+  // for curve purposes, so the band caps file them under the effective cost.
+  const costReduction = modePrefs.curveFirst ? getCommanderCostReduction(options.commanderTexts) : null;
+  if (costReduction) {
+    for (const entry of scoredNonlands) {
+      const source = allOwnedCardData.get(normalizeCardName(entry.name));
+      entry.curveCmc = getEffectiveCurveCmc(entry, source, costReduction);
+    }
+  }
+
   const themeFallbackPool = [];
   const genericFallbackPool = [];
   const collectionEntries = getCollectionEntries(collectionData);
@@ -277,6 +329,7 @@ function buildDeckFromScoredPool(
         + getThemeFitBonus(themeMatch),
       type: getCardType(card),
       cmc: card.cmc,
+      curveCmc: getEffectiveCurveCmc({ cmc: card.cmc, type: getCardType(card) }, card, costReduction),
       colors: card.colors,
       modeFitTier: fit.tier,
       themeMatch,
@@ -298,14 +351,19 @@ function buildDeckFromScoredPool(
 
   const recommendedLandCount = recommendLandCount(commanderColors);
   const combinedPool = [...themeFallbackPool, ...genericFallbackPool];
-  const pipEstimate = estimateLandCount(combinedPool, commanderColors, roleTargets) || recommendedLandCount;
+  const pipEstimate = estimateLandCount(combinedPool, commanderColors, roleTargets, modePrefs) || recommendedLandCount;
   const targetLandCount = resolveLandCount(pipEstimate, edhrecTypeAverages);
   const targetNonlandCount = deckSize - targetLandCount;
 
   const plan = buildRoleTargetPlan(edhrecTypeAverages, strategyProfile, targetLandCount, roleTargets, commanderThemes, deckSize, modePrefs);
   const typePlan = { landCount: plan.landCount, nonlandCount: plan.nonlandCount, buckets: plan.typeBuckets };
 
-  const curvePlan = buildCurvePlan(targetNonlandCount, adjustCurveShares(DEFAULT_CURVE_SHARES, roleTargets, strategyProfile));
+  // Curve First derives its shares from the land-drop odds instead (its ramp
+  // cap is already baked into that shape, so only the strategy nudge applies).
+  const curveShares = modePrefs.curveFirst
+    ? adjustCurveShares(buildLandDropCurveShares(targetLandCount, deckSize), {}, strategyProfile)
+    : adjustCurveShares(DEFAULT_CURVE_SHARES, roleTargets, strategyProfile);
+  const curvePlan = buildCurvePlan(targetNonlandCount, curveShares);
 
   // Traits of everything already drafted, EDHREC picks included -- a Rogue
   // taken from the EDHREC pool makes the next Rogue no less of a repeat.
@@ -344,9 +402,17 @@ function buildDeckFromScoredPool(
 
     deck.push({ ...card, source, roles });
     usedNames.add(key);
-    recordCurvePick(curvePlan, card.cmc);
+    recordCurvePick(curvePlan, curveCmcOf(card));
     adjustRedundancy(card, 1);
     return true;
+  }
+
+  // Phase -2: the player's fun picks go in first and are never evicted. Minimal
+  // Build skips them along with everything else past the support package.
+  if (!modePrefs.minimalBuild) {
+    for (const card of pickFunCards(options.funPicks, allOwnedCardData, collectionData, commanderColors, commanderKeys, isTribalDeck)) {
+      addCard(card, "fun-pick");
+    }
   }
 
   // Phase -1: seed a few cheap theme-payoff cards before Phase 0 can spend
@@ -410,7 +476,7 @@ function buildDeckFromScoredPool(
         bestIgnoringCurveScore = adjusted;
       }
 
-      if (!curveHasRoom(curvePlan, card.cmc)) continue;
+      if (!curveHasRoom(curvePlan, curveCmcOf(card))) continue;
 
       if (adjusted > bestScore) {
         best = card;
@@ -476,6 +542,47 @@ function buildDeckFromScoredPool(
       }
     }
 
+    // Phase 1b: bring every type bucket up to its target, theme tier
+    // first and generic tier second *per bucket*. Phase 2 below asks the tiers
+    // in order for whatever card scores best overall, so a theme tier that
+    // still holds creatures but no spells keeps winning slots and the generic
+    // tier's spells are never reached -- a Kaza, Roil Chaser build ended on 36
+    // creatures against EDHREC's 24 with ~790 owned instants and sorceries
+    // untouched. Asking per bucket is the "generic only when theme runs dry
+    // for a slot" rule Phase 1 already follows for the minimums.
+    // A bucket stops being filled the first time its best remaining candidate
+    // fails the quality floor (clearsTypeTargetFloor): padding it with filler
+    // is worse than leaving the slot to Phase 2's score-ordered fill.
+    const bucketsPastFloor = new Set();
+    for (const neededBucket of getCardsNeededForTypeTargets(deck, typePlan.buckets)) {
+      if (deck.length >= targetNonlandCount) break;
+      if (bucketsPastFloor.has(neededBucket)) continue;
+
+      // Spells carry role tags (a removal spell, a cantrip), so filling a type
+      // bucket must not spend past a role's own target -- Phase 0 already
+      // filled those, and ignoring them pushed removal from ~10 to 13-17 and
+      // one deck's draw from 15 to 29.
+      const roleCounts = getDeckRoleCounts();
+
+      const roomInRole = (card) => {
+        const rule = plan.roleBuckets[card.role];
+        return !rule || (roleCounts[card.role] || 0) < rule.target;
+      };
+
+      const edhrecPick = pickBestCardForBucket(scoredNonlands, usedNames, commanderKeys, neededBucket, curvePlan, roomInRole);
+      if (edhrecPick && clearsTypeTargetFloor(edhrecPick, "edhrec", deck)) {
+        addCard(edhrecPick, "edhrec");
+        continue;
+      }
+
+      const fallbackPick = pickFromTiers(fallbackTiers, (tier) => {
+        const candidate = pickBestFallbackCard(tier, usedNames, commanderKeys, neededBucket, curvePlan, redundancyCounts, roomInRole);
+        return candidate && clearsTypeTargetFloor(candidate, getFallbackSource(candidate), deck) ? candidate : null;
+      });
+      if (fallbackPick) addCard(fallbackPick, getFallbackSource(fallbackPick));
+      else bucketsPastFloor.add(neededBucket);
+    }
+
     // Phase 2: fill the remaining slots with the best cards, prioritizing whatever type and role is still short.
     //
     // The EDHREC pool rides along with both tiers rather than sitting in one of
@@ -529,7 +636,7 @@ function buildDeckFromScoredPool(
 
         let adjusted = Number(card.score || 0);
         if (chargeRedundancy) adjusted -= getRedundancyPenalty(card.redundancyKeys, redundancyCounts);
-        if (!curveHasRoom(curvePlan, card.cmc)) adjusted -= 8;
+        if (!curveHasRoom(curvePlan, curveCmcOf(card))) adjusted -= 8;
 
         if (adjusted > bestScore) {
           best = card;
@@ -553,7 +660,7 @@ function buildDeckFromScoredPool(
         const roleCounts = getDeckRoleCounts();
         for (let i = 0; i < deck.length; i++) {
           const existing = deck[i];
-          if (isEquipmentCard(existing)) continue;
+          if (isEquipmentCard(existing) || existing.fun) continue;
           const bucket = getDeckTypeBucket(existing.type || existing.type_line || "");
           const rule = typePlan?.buckets?.[bucket];
           if (rule && (counts[bucket] || 0) <= rule.min) continue;
@@ -573,7 +680,7 @@ function buildDeckFromScoredPool(
 
         if (replaceIndex === -1) break;
         usedNames.delete(normalizeCardName(deck[replaceIndex].name));
-        releaseCurvePick(curvePlan, deck[replaceIndex].cmc);
+        releaseCurvePick(curvePlan, curveCmcOf(deck[replaceIndex]));
         adjustRedundancy(deck[replaceIndex], -1);
         deck.splice(replaceIndex, 1);
         addCard(pick, edhrecPick ? "edhrec" : getFallbackSource(pick));
@@ -593,6 +700,7 @@ function buildDeckFromScoredPool(
         const counts = countByType(deck);
         for (let i = 0; i < deck.length; i++) {
           const existing = deck[i];
+          if (existing.fun) continue;
           const bucket = getDeckTypeBucket(existing.type || existing.type_line || "");
           if (bucket === "Creature") continue;
           const rule = typePlan?.buckets?.[bucket];
@@ -605,7 +713,7 @@ function buildDeckFromScoredPool(
 
         if (replaceIndex === -1) break;
         usedNames.delete(normalizeCardName(deck[replaceIndex].name));
-        releaseCurvePick(curvePlan, deck[replaceIndex].cmc);
+        releaseCurvePick(curvePlan, curveCmcOf(deck[replaceIndex]));
         adjustRedundancy(deck[replaceIndex], -1);
         deck.splice(replaceIndex, 1);
         addCard(fallbackCreature, getFallbackSource(fallbackCreature));
@@ -746,6 +854,7 @@ function generateCardReasons(card, commanderThemes, strategyProfile, commanderCo
     if (card.source === "nonbasic-land") reasons.push("mana land");
   }
 
+  if (card.source === "fun-pick") reasons.push("fun pick");
   if (card.source === "edhrec") reasons.push("edhrec match");
   if (card.source === "fallback-theme") reasons.push("theme fallback");
   if (card.source === "fallback-generic") reasons.push("collection fallback");

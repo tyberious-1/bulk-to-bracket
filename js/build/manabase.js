@@ -314,7 +314,7 @@ function parsePips(manaCost) {
 // come from the candidate pool rather than the deck itself, because the
 // nonland slot count (deckSize - landCount) has to exist before picking can
 // start -- see the design doc's "Non-goals" for why this stays single-pass.
-function estimateLandCount(candidatePool, commanderColors, roleTargets) {
+function estimateLandCount(candidatePool, commanderColors, roleTargets, modePrefs = {}) {
   const sorted = [...candidatePool].sort((a, b) => (b.score || 0) - (a.score || 0));
   const sample = sorted.slice(0, Math.min(160, sorted.length));
 
@@ -327,7 +327,11 @@ function estimateLandCount(candidatePool, commanderColors, roleTargets) {
 
   const rampTarget = Number(roleTargets?.ramp) || 10;
   const baseline = recommendLandCount(commanderColors);
-  const raw = baseline + Math.round(pipIntensity * 2) - Math.round((rampTarget - 10) / 3);
+  // Curve First caps ramp low on purpose (applyCurveFirstRoleTargets) and
+  // leans on a cheap curve instead, so a low ramp target there isn't a
+  // signal to make up the missing sources with extra lands.
+  const rampAdjustment = modePrefs?.curveFirst ? 0 : Math.round((rampTarget - 10) / 3);
+  const raw = baseline + Math.round(pipIntensity * 2) - rampAdjustment;
 
   return Math.max(35, Math.min(42, raw));
 }
@@ -487,8 +491,7 @@ function landConditionMatchesStrategy(tag, strategyProfile, modePrefs) {
   if (!NICHE_LAND_CONDITION_WORDS.has(tag)) return true;
   if ((strategyProfile.tribalTypes || []).includes(tag)) return true;
   if ((modePrefs.focusedTribalTypes || []).includes(tag)) return true;
-  const signal = modePrefs.focusedThemeSignal;
-  if (signal === tag || signal === `${tag}s`) return true;
+  if (focusHasSignal(modePrefs, tag, `${tag}s`)) return true;
   const aliases = modePrefs.themeFocusAliases || [];
   return aliases.includes(tag) || aliases.includes(`${tag}s`);
 }

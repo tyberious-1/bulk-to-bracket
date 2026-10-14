@@ -44,9 +44,9 @@ function makeSeedCandidate(card, score) {
   return { name: card.name, score, type: card.type, cmc: card.cmc, colors: card.colors };
 }
 
-function buildFixture(minimalBuild) {
+function buildFixture(minimalBuild, funPicks = [], extraOwned = []) {
   const commanderCard = makeCard(TEST_COMMANDER_NAME, "legendary creature — treefolk", "", 4, ["G"]);
-  const ownedCards = [TEST_RAMP_CARD, TEST_DRAW_CARD, TEST_REMOVAL_CARD, TEST_WIPE_CARD, ...TEST_FILLER_CARDS];
+  const ownedCards = [TEST_RAMP_CARD, TEST_DRAW_CARD, TEST_REMOVAL_CARD, TEST_WIPE_CARD, ...TEST_FILLER_CARDS, ...extraOwned];
 
   const allOwnedCardData = new Map();
   allOwnedCardData.set(normalizeCardName(commanderCard.name), commanderCard);
@@ -57,7 +57,7 @@ function buildFixture(minimalBuild) {
     rawName: card.name,
     quantity: 1
   }));
-  const collectionData = { entries };
+  const collectionData = { entries, byNormalized: new Map(entries.map((e) => [e.normalizedName, e.quantity])) };
 
   const commanderThemes = [];
   const strategyProfile = getCommanderStrategyProfile(TEST_COMMANDER_NAME, commanderThemes, ["G"]);
@@ -75,7 +75,7 @@ function buildFixture(minimalBuild) {
     null,
     roleTargets,
     [],
-    { deckSize: 99, themeCardNames: new Map() }
+    { deckSize: 99, themeCardNames: new Map(), funPicks }
   );
 }
 
@@ -245,6 +245,97 @@ function buildThemeSeedFixture() {
   );
 }
 
+
+// Phase 2 asks the fallback tiers in order and stops at the first one that
+// returns any card, so a theme tier that still holds creatures keeps winning
+// slots even once it has no instants left -- the generic tier's instants are
+// never reached however far under its target the Instant bucket is. This
+// fixture gives the theme tier far more creatures than the deck has slots for,
+// and puts every instant in the generic tier, so the only thing that can seat
+// an instant is a pass that fills each bucket's shortfall tier by tier.
+function buildTypeTargetFixture(instantText, roleTargets) {
+  const commanderCard = makeCard(TEST_COMMANDER_NAME, "legendary creature — treefolk", "", 4, ["G"]);
+  const themeCreatures = [];
+  for (let i = 0; i < 70; i++) {
+    themeCreatures.push(makeCard("Test Theme Creature " + i, "creature — bear", "", 1 + (i % 6), ["G"]));
+  }
+  const genericInstants = [];
+  for (let i = 0; i < 6; i++) {
+    genericInstants.push(makeCard("Test Generic Instant " + i, "instant", instantText || "", 1 + (i % 4), ["G"]));
+  }
+  const ownedCards = [...themeCreatures, ...genericInstants];
+
+  const allOwnedCardData = new Map();
+  allOwnedCardData.set(normalizeCardName(commanderCard.name), commanderCard);
+  for (const card of ownedCards) allOwnedCardData.set(normalizeCardName(card.name), card);
+
+  const collectionData = {
+    entries: ownedCards.map((card) => ({ normalizedName: normalizeCardName(card.name), rawName: card.name, quantity: 1 }))
+  };
+  const themeCardNames = new Map(themeCreatures.map((card) => [normalizeCardName(card.name), { rank: 0, hits: 1 }]));
+
+  const commanderThemes = [];
+  const strategyProfile = getCommanderStrategyProfile(TEST_COMMANDER_NAME, commanderThemes, ["G"]);
+  const modePrefs = getModePreferences("", strategyProfile);
+
+  return buildDeckFromScoredPool(
+    [],
+    ["G"],
+    collectionData,
+    allOwnedCardData,
+    commanderThemes,
+    TEST_COMMANDER_NAME,
+    modePrefs,
+    { Land: 38, Creature: 10, Instant: 5 },
+    roleTargets || { ramp: 0, draw: 0, removal: 0, wipe: 0 },
+    [],
+    { deckSize: 99, themeCardNames }
+  );
+}
+
+
+// Curve First + a typed cost-reducer commander (Kaza, Roil Chaser's "next
+// instant or sorcery spell you cast this turn costs {X} less"): the curve plan
+// should file the sorcery one band lower (mana value 5 -> 4, colored pips as a
+// floor) and leave a same-cost creature alone. The same build in a default
+// mode must not touch either, since the effective-cost layer is Curve First
+// only.
+const TEST_REDUCER_TEXT = "Flying, haste\n{T}: The next instant or sorcery spell you cast this turn costs {X} less to cast, where X is the number of Wizards you control as this ability resolves.";
+const TEST_REDUCED_SORCERY = makeCard("Test Reduced Sorcery", "sorcery", "", 5, ["U", "R"]);
+TEST_REDUCED_SORCERY.manaCost = "{3}{U}{R}";
+const TEST_UNREDUCED_CREATURE = makeCard("Test Unreduced Creature", "creature \u2014 wizard", "", 5, ["U", "R"]);
+TEST_UNREDUCED_CREATURE.manaCost = "{3}{U}{R}";
+
+function buildEffectiveCostFixture(mode) {
+  const commanderCard = makeCard("Test Spellslinger", "legendary creature \u2014 human wizard", TEST_REDUCER_TEXT.toLowerCase(), 2, ["U", "R"]);
+  const owned = [TEST_REDUCED_SORCERY, TEST_UNREDUCED_CREATURE];
+
+  const allOwnedCardData = new Map();
+  allOwnedCardData.set(normalizeCardName(commanderCard.name), commanderCard);
+  for (const card of owned) allOwnedCardData.set(normalizeCardName(card.name), card);
+
+  const commanderThemes = [];
+  const strategyProfile = getCommanderStrategyProfile(commanderCard.name, commanderThemes, ["U", "R"]);
+  const modePrefs = getModePreferences(mode, strategyProfile);
+  const scoredNonlands = owned.map((card) => ({
+    name: card.name, score: 30, type: card.type, cmc: card.cmc, colors: card.colors
+  }));
+
+  return buildDeckFromScoredPool(
+    scoredNonlands,
+    ["U", "R"],
+    { entries: [] },
+    allOwnedCardData,
+    commanderThemes,
+    commanderCard.name,
+    modePrefs,
+    null,
+    { ramp: 0, draw: 0, removal: 0, wipe: 0 },
+    [],
+    { deckSize: 99, themeCardNames: new Map(), commanderTexts: [commanderCard.rawText] }
+  );
+}
+
 runSuite("deck:pickCheapThemeSeeds", {
   "claims only up to the configured per-band limit, highest score first": function () {
     const pool = [
@@ -307,6 +398,33 @@ runSuite("deck", {
       "expected the ramp role to still be satisfied alongside the seeded theme card, got " + JSON.stringify(names)
     );
   },
+  "buildDeckFromScoredPool: a bucket short of its target is filled from the generic tier when the theme tier has none": function () {
+    const finalDeck = buildTypeTargetFixture();
+    const instants = finalDeck.filter((c) => c.role !== "land" && /instant/.test(c.type || ""));
+    assertEqual(instants.length, 6);
+  },
+  "buildDeckFromScoredPool: filling a type bucket never spends past a support role's target": function () {
+    // Every generic instant draws a card and the draw target is 2 (a target
+    // of 0 would be normalized to the default 10), so the role phase seats two
+    // and the Instant shortfall must not be topped up with the other four.
+    const finalDeck = buildTypeTargetFixture("draw a card.", { ramp: 1, draw: 2, removal: 1, wipe: 1 });
+    const instants = finalDeck.filter((c) => c.role !== "land" && /instant/.test(c.type || ""));
+    assertEqual(instants.length, 2);
+  },
+  "buildDeckFromScoredPool: Curve First files a cost-reduced card type one band lower": function () {
+    const deck = buildEffectiveCostFixture("curveFirst");
+    const sorcery = deck.find((c) => c.name === TEST_REDUCED_SORCERY.name);
+    const creature = deck.find((c) => c.name === TEST_UNREDUCED_CREATURE.name);
+    assertTrue(sorcery && creature, "both candidates should make the deck");
+    assertEqual(curveCmcOf(sorcery), 4);
+    assertEqual(curveCmcOf(creature), 5);
+  },
+  "buildDeckFromScoredPool: the effective-cost layer is off outside Curve First": function () {
+    const deck = buildEffectiveCostFixture("");
+    const sorcery = deck.find((c) => c.name === TEST_REDUCED_SORCERY.name);
+    assertTrue(sorcery, "the sorcery should make the deck");
+    assertEqual(curveCmcOf(sorcery), 5);
+  },
   "buildDeckFromScoredPool: minimal build includes only the support package, no filler": function () {
     const finalDeck = buildFixture(true);
     const nonlands = finalDeck.filter((c) => c.role !== "land");
@@ -346,5 +464,32 @@ runSuite("deck", {
     const finalDeck = buildPauperFixture();
     const hasRemoval = finalDeck.some((c) => (c.roles || []).includes("removal"));
     assertTrue(!hasRemoval, "expected no removal card -- the only owned removal candidate is rare, not common");
+  },
+
+  "buildDeckFromScoredPool: fun picks go in the deck, tagged, even when nothing else would pick them": function () {
+    const odd = makeCard("Test Odd Favourite", "creature — squid", "", 7, ["G"]);
+    const finalDeck = buildFixture(false, ["Test Odd Favourite"], [odd]);
+    const entry = finalDeck.find((c) => c.name === "Test Odd Favourite");
+    assertTrue(!!entry, "expected the fun pick in the deck");
+    assertEqual(entry.source, "fun-pick");
+  },
+
+  "buildDeckFromScoredPool: a fun pick outside the commander's colors or the collection is skipped": function () {
+    const offColor = makeCard("Test Red Favourite", "creature — goblin", "", 2, ["R"]);
+    const finalDeck = buildFixture(false, ["Test Red Favourite", "Test Not Owned"], [offColor]);
+    assertEqual(finalDeck.filter((c) => c.source === "fun-pick").length, 0);
+  },
+
+  "buildDeckFromScoredPool: fun picks are capped at FUN_PICK_MAX": function () {
+    const extras = [];
+    for (let i = 0; i < 8; i += 1) extras.push(makeCard("Test Fun " + i, "creature — bear", "", 3, ["G"]));
+    const finalDeck = buildFixture(false, extras.map((c) => c.name), extras);
+    assertEqual(finalDeck.filter((c) => c.source === "fun-pick").length, FUN_PICK_MAX);
+  },
+
+  "buildDeckFromScoredPool: Minimal Build skips fun picks": function () {
+    const odd = makeCard("Test Odd Favourite", "creature — squid", "", 7, ["G"]);
+    const finalDeck = buildFixture(true, ["Test Odd Favourite"], [odd]);
+    assertEqual(finalDeck.filter((c) => c.source === "fun-pick").length, 0);
   }
 });

@@ -59,6 +59,7 @@ async function generateDeck() {
   setMinimalBuildEnabled(false);
   document.getElementById("postBuildControls").classList.add("hidden");
   document.getElementById("buildModeControls").classList.add("hidden");
+  hidePlanOptions();
 
   clearLog();
   clearCommanderCard();
@@ -162,6 +163,18 @@ async function generateDeck() {
     );
     displayThemes(commanderThemes);
     renderPriorityButtons(commanderThemes, allOwnedCardData, edhrecAllTags);
+    const planOptions = addCollectionPlans(
+      buildPlanOptions(
+        edhrecData?.themeCardStats,
+        edhrecData?.coreCards,
+        (name) => hasOwnedCard(collection, name) && !isBasicLand(name)
+      ),
+      commanderThemes,
+      allOwnedCardData,
+      commanders.colors,
+      commanders.primary.name
+    );
+    renderPlanOptions(planOptions);
     logMessage(`Detected themes: ${commanderThemes.join(", ") || "none"}`);
 
     updateProgress(58, "Matching your collection...");
@@ -201,7 +214,8 @@ async function generateDeck() {
       edhrecAllTags,
       typeAverages: edhrecData?.typeAverages || null,
       roleTargets: edhrecData?.roleTargets || null,
-      themeCardLists: edhrecData?.themeCardLists || {}
+      themeCardLists: edhrecData?.themeCardLists || {},
+      planOptions
     };
 
     await performBuildFromContext();
@@ -230,7 +244,7 @@ async function runRegeneration() {
   updateBuildModeToggle();
   setGenerateEnabled(false);
   try {
-    const modeLabel = getCurrentBuildMode() || "default";
+    const modeLabel = formatBuildModeLabel(getCurrentBuildMode()) || "default";
     logMessage(`Regenerating with priority mode: ${modeLabel}.`);
     updateProgress(90, "Regenerating deck...", modeLabel);
     await performBuildFromContext();
@@ -287,6 +301,7 @@ async function performBuildFromContext() {
   );
 
   const modePrefs = getModePreferences(getCurrentBuildMode(), strategyProfile);
+  modePrefs.planSignature = getActivePlanSignature(modePrefs.themeFocus, currentRunContext?.planOptions);
   const isTribalDeck = isActiveBuildTribal(strategyProfile, modePrefs);
 
   updateProgress(78, "Checking legality and scoring cards...");
@@ -381,7 +396,7 @@ async function performBuildFromContext() {
   // never seeks out snow lands on its own, so refusing every {S} card here
   // would make picking Snow as a theme permanently self-defeating. Treat an
   // explicit snow focus as if a source were already owned.
-  const isSnowFocused = modePrefs.focusedThemeSignal.includes("snow");
+  const isSnowFocused = (modePrefs.focusedThemeSignals || []).some((signal) => signal.includes("snow"));
   const hasSnowSource = isSnowFocused || collectionHasSnowManaSource(allOwnedCardData, commanders.colors);
 
   for (const edhrecCard of ownedCandidates) {
@@ -482,8 +497,15 @@ async function performBuildFromContext() {
     typeAverages,
     roleTargets,
     edhrecCards,
-    { commanderNames: commanders.names, deckSize: commanders.deckSize, themeCardNames }
+    {
+      commanderNames: commanders.names,
+      commanderTexts: [commanders.primary?.text, commanders.partner?.text],
+      deckSize: commanders.deckSize,
+      themeCardNames,
+      funPicks: getFunPickNames()
+    }
   );
+  updateFunPicksNote(getFunPickNames(), finalDeck, modePrefs.minimalBuild);
 
   logMessage(`Built final deck with ${finalDeck.length} cards.`);
   logMessage(`Final deck breakdown: ${finalDeck.filter(c => c.role !== "land").length} nonlands, ${finalDeck.filter(c => c.role === "land").length} lands.`);
@@ -539,8 +561,52 @@ csvFileInput.addEventListener("change", async () => {
     }
   }
 
+  renderBinderOptions(getOwnedCollection());
   resetCommanderScan();
   renderCommandersTab();
+});
+
+// A full ManaBox export holds binders, decks and wish lists. Wish lists are never
+// owned; decks are owned but already built, so the player chooses whether their
+// cards count. A single-binder export has neither and shows nothing here.
+function renderBinderOptions(collection) {
+  const wrap = document.getElementById("binderOptions");
+  if (!wrap) return;
+
+  const summary = collection?.binderSummary;
+  if (!summary || (!summary.deck && !summary.list)) {
+    wrap.classList.add("hidden");
+    wrap.innerHTML = "";
+    return;
+  }
+
+  const listNote = summary.list
+    ? ` ${summary.list} wish-list card${summary.list === 1 ? " is" : "s are"} left out, since you don't own them.`
+    : "";
+  const deckNote = collection.includesDecks
+    ? `Cards in your decks are counted.`
+    : `The ${summary.deck} card${summary.deck === 1 ? " in a deck is" : "s in decks are"} excluded.`;
+  wrap.innerHTML = summary.deck
+    ? `
+      <label class="binder-option">
+        <input id="includeDecksToggle" type="checkbox" ${collection.includesDecks ? "checked" : ""} />
+        Count the ${summary.deck} card${summary.deck === 1 ? "" : "s"} that are in my decks
+      </label>
+      <div class="binder-note">${deckNote} Binders are always counted.${listNote}</div>`
+    : `<div class="binder-note">Binders are counted.${listNote}</div>`;
+  wrap.classList.remove("hidden");
+}
+
+document.addEventListener("change", (event) => {
+  if (event.target.id !== "includeDecksToggle") return;
+  const current = getOwnedCollection();
+  if (!current?.sourceRows) return;
+
+  setOwnedCollection(buildCollectionFromRows(current.sourceRows, { includeDecks: event.target.checked }));
+  currentRunContext = null;
+  resetCommanderScan();
+  renderCommandersTab();
+  showToast(event.target.checked ? "Counting cards in decks." : "Leaving out cards in decks.");
 });
 
 // The partner field's eligibility filter reads the current primary pick on
@@ -590,6 +656,30 @@ if (priorityButtonsWrap) {
     if (!button) return;
     if (button.disabled) return;
     regenerateWithMode(button.dataset.mode);
+  });
+}
+
+// Plan options: "Build this plan" rebuilds with the plan's themes as the focus;
+// the form checks a plan of the player's own against the collection.
+const planOptionsWrap = document.getElementById("planOptions");
+if (planOptionsWrap) {
+  planOptionsWrap.addEventListener("click", (event) => {
+    const button = event.target.closest(".plan-btn");
+    if (!button || !currentRunContext) return;
+    regenerateWithMode(`theme:${button.dataset.focus}`);
+  });
+  planOptionsWrap.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!currentRunContext) return;
+    const text = document.getElementById("customPlanInput")?.value || "";
+    const custom = buildCustomPlan(
+      text,
+      currentRunContext.allOwnedCardData,
+      currentRunContext.commanders.colors,
+      currentRunContext.commanders.primary.name
+    );
+    if (!custom) return;
+    renderPlanOptions(currentRunContext.planOptions || [], custom);
   });
 }
 

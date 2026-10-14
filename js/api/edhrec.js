@@ -609,6 +609,9 @@ async function getEDHREC(commanderNames) {
   // no trace in card text and Scryfall has no functional tag for them, but the
   // cards on their pages are what those themes mean.
   const themeCardLists = {};
+  // Same pages, but with each card's deck counts, so plans can tell a theme's
+  // distinctive cards from the commander's general staples (analysis/plans.js).
+  const themeCardStats = {};
 
   const themeSlugs = pickEdhrecThemeSlugs(data);
   for (const themeSlug of themeSlugs) {
@@ -620,6 +623,7 @@ async function getEDHREC(commanderNames) {
       collectEdhrecCards(themeData, perTheme);
       themeCardLists[normalizeThemeName(themeSlug)] =
         Array.from(perTheme.values()).map((entry) => entry.name);
+      themeCardStats[normalizeThemeName(themeSlug)] = Array.from(perTheme.values());
     }
     await sleep(120);
   }
@@ -629,8 +633,13 @@ async function getEDHREC(commanderNames) {
   const typeAverages = extractEdhrecTypeAverages(data);
   const roleTargets = extractEdhrecRoleTargets(data, tags);
 
+  const corePage = new Map();
+  collectEdhrecCards(data, corePage);
+
   return {
     cards: Array.from(deduped.values()),
+    coreCards: Array.from(corePage.values()),
+    themeCardStats,
     tags,
     allTags,
     typeAverages,

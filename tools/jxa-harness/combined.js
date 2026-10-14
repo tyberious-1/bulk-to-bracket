@@ -1671,7 +1671,16 @@ const SUPPORT_ROLES = ["wipe", "removal", "ramp", "draw"];
 
 // A sweeper pattern can be narrowed by the words that follow it, and the
 // widened wipe list above matches on the prefix alone. "Deals 4 damage to each
-// creature with flying" is an anti-flier card, not a board wipe.
+// creature with flying" is an anti-flier card, not a board wipe. Same idea
+// covers three more shapes found the same way (full collection scan against
+// every owned "wipe" hit, 2026-10-12): combat-only scope ("deals 2 damage to
+// each creature blocking it" -- Trailblazer's Torch; "each creature defending
+// player controls" -- Swathcutter Giant, Gouged Zealot), single-player scope
+// ("each creature that player controls" -- Radiating Lightning, Incinerator
+// of the Guilty, which only clears the one player hit in combat, not the
+// table), and a damage-after-the-fact condition ("destroy all other creatures
+// that were dealt damage this turn" -- Death-Rattle Oni, which only finishes
+// creatures some other effect already hit).
 //
 // This is not a rare edge. Green has almost no real sweepers, so the false
 // positives were the *only* wipes it had: all six cards this collection offered
@@ -1683,7 +1692,8 @@ const SUPPORT_ROLES = ["wipe", "removal", "ramp", "draw"];
 //
 // One-sided sweepers stay sweepers on purpose: "each creature your opponents
 // control" clears three boards at a four-player table, which is the job.
-const WIPE_EVASION_QUALIFIER = /\b(?:with|without)\s+(?:flying|reach|defender|shadow|horsemanship|protection)\b/;
+const WIPE_SCOPE_NARROWER =
+  /\b(?:with|without)\s+(?:flying|reach|defender|shadow|horsemanship|protection)\b|\b(?:that|target|defending)\s+player\s+controls\b|\bblocking (?:it|them)\b|\bdealt damage this turn\b/;
 
 // True when every occurrence of the pattern is narrowed to a slice of the board
 // rather than the whole of it. Bounded to the sentence the match sits in, so a
@@ -1697,7 +1707,78 @@ function wipeMatchIsNarrowed(text, pattern) {
     if (at === -1) return true;
 
     const sentence = text.slice(at + pattern.length).split(".")[0];
-    if (!WIPE_EVASION_QUALIFIER.test(sentence)) return false;
+    if (!WIPE_SCOPE_NARROWER.test(sentence)) return false;
+
+    from = at + pattern.length;
+  }
+}
+
+// A sweeper's magnitude matters as much as its scope, and the wipe list
+// above matches on the pattern alone regardless of how much damage it deals.
+// Full collection scan (2026-10-12) found Cosmotronic Wave, Hazardous Blast,
+// Iroh's Demonstration, Smash to Dust, Underworld Fires, Village Pillagers,
+// Fulminous Forte and Gangrenous Zombies all dealing 1-2 damage "to each
+// creature" -- enough to matter against 1-2 toughness tokens, not enough to
+// be a sweeper against a real Commander board. 3+ clears most of a board;
+// below that it's a glorified anthem-of-annoyance, not a wrath effect.
+// Variable amounts ("X damage", "that much damage" off a counter count) get
+// the benefit of the doubt since they're written to scale with board state,
+// the same reasoning Chain Reaction and Ashling the Pilgrim already lean on.
+const MASS_DAMAGE_LETHAL_MINIMUM = 3;
+const MASS_DAMAGE_PATTERN = /(\d+|x|that much)\s+damage to each creature\b/g;
+
+function hasLethalMassDamage(text) {
+  for (const match of text.matchAll(MASS_DAMAGE_PATTERN)) {
+    const sentence = text.slice(match.index + match[0].length).split(".")[0];
+    if (WIPE_SCOPE_NARROWER.test(sentence)) continue;
+
+    const amount = match[1];
+    if (amount === "x" || amount === "that much") return true;
+    if (Number(amount) >= MASS_DAMAGE_LETHAL_MINIMUM) return true;
+  }
+
+  return false;
+}
+
+// Same magnitude problem as hasLethalMassDamage, for the "-X/-X to the board"
+// shape instead of the damage shape. Nausea and Shrivel (-1/-1) and Choking
+// Miasma/Cloudkill/Flaying Tendrils/Glistening Deluge/Malicious
+// Malfunction/Pestilent Haze/Ruinous Waterbending/Sandman's Quicksand (-2/-2)
+// were all counting as board wipes while killing nothing with 2+ toughness --
+// most of a Commander board. Reuses removal's LETHAL_STAT_DROP_MINIMUM so a
+// stat-drop is judged by the same bar whether it's hitting one creature or
+// all of them. Variable X (Cloudkill, scaling off a commander's mana value)
+// gets the same benefit of the doubt as variable damage above.
+const MASS_STAT_DROP_PATTERN = /all creatures get -(\d+|x)\/-\1\b/;
+
+function hasLethalMassStatDrop(text) {
+  const match = text.match(MASS_STAT_DROP_PATTERN);
+  if (!match) return false;
+  if (match[1] === "x") return true;
+  return Number(match[1]) >= LETHAL_STAT_DROP_MINIMUM;
+}
+
+// "Each opponent/player sacrifices" is only a wipe if what's sacrificed is a
+// creature, and still narrowed by scope the same way as any other sweeper --
+// Clip Wings ("each opponent sacrifices a creature of their choice with
+// flying") is the same anti-flier shape as the original board-wipe bug, just
+// phrased as an edict instead of damage. The pattern alone also doesn't check
+// what's sacrificed: Baleful Beholder sacrifices an enchantment, Lorehold
+// Charm a nontoken artifact, Rishadan Cutpurse/Footpad and Earth-Cult
+// Elemental a permanent of the sacrificer's choice (and in Earth-Cult
+// Elemental's case, only on some d20 rolls) -- none of them touch a single
+// creature, yet all matched. True when at least one occurrence's own
+// sentence names a creature and isn't scope-narrowed.
+function massSacrificeHitsCreatures(text, pattern) {
+  let from = 0;
+
+  for (;;) {
+    const at = text.indexOf(pattern, from);
+    if (at === -1) return false;
+
+    const periodAt = text.indexOf(".", at);
+    const sentence = text.slice(at, periodAt === -1 ? text.length : periodAt + 1);
+    if (sentence.includes("creature") && !WIPE_SCOPE_NARROWER.test(sentence)) return true;
 
     from = at + pattern.length;
   }
@@ -1893,6 +1974,15 @@ function cardMatchesRole(card, role, isTribalDeck = false) {
     }
     if (role === "draw" && pattern === "whenever you draw") {
       return wheneverYouDrawIsRealDraw(text, pattern);
+    }
+    if (role === "wipe" && pattern === "damage to each creature") {
+      return hasLethalMassDamage(text);
+    }
+    if (role === "wipe" && pattern === "all creatures get -") {
+      return hasLethalMassStatDrop(text);
+    }
+    if (role === "wipe" && (pattern === "each player sacrifices" || pattern === "each opponent sacrifices")) {
+      return massSacrificeHitsCreatures(text, pattern);
     }
     if (!text.includes(pattern)) return false;
     if (role === "wipe" && wipeMatchIsNarrowed(text, pattern)) return false;
@@ -4288,7 +4378,7 @@ function parsePips(manaCost) {
 // come from the candidate pool rather than the deck itself, because the
 // nonland slot count (deckSize - landCount) has to exist before picking can
 // start -- see the design doc's "Non-goals" for why this stays single-pass.
-function estimateLandCount(candidatePool, commanderColors, roleTargets) {
+function estimateLandCount(candidatePool, commanderColors, roleTargets, modePrefs = {}) {
   const sorted = [...candidatePool].sort((a, b) => (b.score || 0) - (a.score || 0));
   const sample = sorted.slice(0, Math.min(160, sorted.length));
 
@@ -4301,7 +4391,11 @@ function estimateLandCount(candidatePool, commanderColors, roleTargets) {
 
   const rampTarget = Number(roleTargets?.ramp) || 10;
   const baseline = recommendLandCount(commanderColors);
-  const raw = baseline + Math.round(pipIntensity * 2) - Math.round((rampTarget - 10) / 3);
+  // Curve First caps ramp low on purpose (applyCurveFirstRoleTargets) and
+  // leans on a cheap curve instead, so a low ramp target there isn't a
+  // signal to make up the missing sources with extra lands.
+  const rampAdjustment = modePrefs?.curveFirst ? 0 : Math.round((rampTarget - 10) / 3);
+  const raw = baseline + Math.round(pipIntensity * 2) - rampAdjustment;
 
   return Math.max(35, Math.min(42, raw));
 }
@@ -4852,6 +4946,107 @@ function adjustCurveShares(shares, roleTargets, strategyProfile) {
   return adjusted;
 }
 
+// Chance of having made the land drop on turn `turn` (i.e. at least `turn`
+// lands among the cards seen by then), on the play with no mulligan and no
+// ramp: a 7-card hand plus one draw per turn after the first. Hypergeometric.
+function landDropHitChance(turn, landCount, deckSize = 99) {
+  const seen = Math.min(deckSize, 7 + turn - 1);
+  const choose = (n, k) => {
+    if (k < 0 || k > n) return 0;
+    let result = 1;
+    for (let i = 1; i <= k; i++) result = (result * (n - k + i)) / i;
+    return result;
+  };
+  const total = choose(deckSize, seen);
+  let chance = 0;
+  for (let lands = turn; lands <= Math.min(seen, landCount); lands++) {
+    chance += (choose(landCount, lands) * choose(deckSize - landCount, seen - lands)) / total;
+  }
+  return chance;
+}
+
+// Curve First's band shares, derived from how often the deck can actually
+// make each turn's land drop instead of the fixed DEFAULT_CURVE_SHARES. A
+// band-N card is only cast on curve when the turn-N drop was made, so the top
+// bands get weight in proportion to that chance (about 58% on turn 4 but 28%
+// on turn 6 at 38 lands), and bands 6-7 keep a small floor so a real top end
+// survives. The 1-drop share is nudged up from the default rather than
+// derived (cheap cards are weak per slot, so the raw odds would overweight
+// them); the freed-up share goes to bands 2 and 3 in their default ratio.
+function buildLandDropCurveShares(landCount, deckSize = 99) {
+  const ONE_DROP_SHARE = 0.11;
+  const TOP_END_FLOOR = 0.03;
+
+  const chance = {};
+  let chanceTotal = 0;
+  for (let band = 1; band <= 7; band++) {
+    chance[band] = landDropHitChance(band, landCount, deckSize);
+    chanceTotal += chance[band];
+  }
+
+  const shares = { 1: ONE_DROP_SHARE };
+  let highTotal = 0;
+  for (let band = 4; band <= 7; band++) {
+    const share = chance[band] / chanceTotal;
+    shares[band] = band >= 6 ? Math.max(TOP_END_FLOOR, share) : share;
+    highTotal += shares[band];
+  }
+
+  const middleShare = Math.max(0, 1 - ONE_DROP_SHARE - highTotal);
+  const middleDefault = DEFAULT_CURVE_SHARES[2] + DEFAULT_CURVE_SHARES[3];
+  shares[2] = middleShare * (DEFAULT_CURVE_SHARES[2] / middleDefault);
+  shares[3] = middleShare * (DEFAULT_CURVE_SHARES[3] / middleDefault);
+  return shares;
+}
+
+// Card types a commander's "<types> spells you cast cost {N} less" text can
+// name, as they appear in a lowercased type line.
+const COST_REDUCTION_TYPES = ["instant", "sorcery", "creature", "artifact", "enchantment", "planeswalker"];
+
+// Reads a typed cost reducer off a commander's rules text (Kaza, Roil Chaser:
+// "The next instant or sorcery spell you cast this turn costs {X} less to
+// cast"). Returns { types, amount } or null. Only typed reducers count: an
+// untyped "spells you cast cost {1} less" shifts every card the same way, so
+// it would move the whole curve instead of reshaping it. A numeric {N} is
+// taken as written; a variable {X} depends on the board and the commander
+// being alive, so it is counted conservatively as 1. Capped at 2 either way.
+function getCommanderCostReduction(commanderTexts) {
+  const typeList = COST_REDUCTION_TYPES.join("|");
+  const pattern = new RegExp(
+    `\\b((?:${typeList})(?:(?: or |, | and )(?:${typeList}))*) spells? you cast(?: this turn)? costs? \\{(\\w+)\\} less`
+  );
+
+  let best = null;
+  for (const text of commanderTexts || []) {
+    const match = String(text || "").toLowerCase().match(pattern);
+    if (!match) continue;
+    const amount = Math.min(2, /^\d+$/.test(match[2]) ? Number(match[2]) : 1);
+    const types = COST_REDUCTION_TYPES.filter((type) => match[1].includes(type));
+    if (!best || amount > best.amount) best = { types, amount };
+  }
+  return best;
+}
+
+// Mana value the curve plan should file this card under once the commander's
+// reducer is counted. Only generic mana can be discounted, so the colored
+// pips are a floor (a UU counterspell never gets cheaper than 2).
+function getEffectiveCurveCmc(card, sourceCard, reduction) {
+  const cmc = Number(card.cmc) || 0;
+  if (!reduction || cmc <= 1) return cmc;
+  const typeLine = String(card.type || card.type_line || "").toLowerCase();
+  if (!reduction.types.some((type) => typeLine.includes(type))) return cmc;
+
+  const pips = parsePips((sourceCard || card).manaCost);
+  const coloredFloor = Object.values(pips).reduce((sum, value) => sum + Math.ceil(value), 0);
+  return Math.max(cmc - reduction.amount, Math.min(cmc, coloredFloor));
+}
+
+// The mana value the curve plan buckets by: the effective one when a
+// commander reducer set it, otherwise the printed one.
+function curveCmcOf(card) {
+  return card.curveCmc ?? card.cmc;
+}
+
 function buildCurvePlan(nonlandCount, shares = DEFAULT_CURVE_SHARES) {
   const caps = {};
   for (const band of Object.keys(shares)) {
@@ -4888,6 +5083,51 @@ function getCardsNeededForTypeMinimums(deck, typeBuckets) {
   return needed;
 }
 
+// One entry per card a bucket is still short of its *target* (not just its
+// minimum), the neediest bucket first, so asking for them in order
+// interleaves the buckets instead of draining one. Creature is included: it
+// used to be left out on the theory that the theme tier oversupplies it, but
+// that tier never reaches the target from above here (this only fills a
+// shortfall), and leaving it out let Phase 2 spend creature slots on whatever
+// scored best -- creatures ran under EDHREC's count on nearly every build
+// while Kardur, Doomscourge ran 27 spells against 20.
+function getCardsNeededForTypeTargets(deck, typeBuckets) {
+  const counts = countByType(deck);
+  const deficits = {};
+  for (const [bucket, rule] of Object.entries(typeBuckets || {})) {
+    const deficit = Math.max(0, (rule?.target || 0) - (counts[bucket] || 0));
+    if (deficit > 0) deficits[bucket] = deficit;
+  }
+
+  const needed = [];
+  for (;;) {
+    let neediest = null;
+    for (const bucket of Object.keys(deficits)) {
+      if (deficits[bucket] > 0 && (neediest === null || deficits[bucket] > deficits[neediest])) neediest = bucket;
+    }
+    if (neediest === null) return needed;
+    needed.push(neediest);
+    deficits[neediest] -= 1;
+  }
+}
+
+// A card Phase 1b adds only to fill a type bucket's shortfall has to be
+// roughly as good as the cards the deck already holds from the same source,
+// or the fill just pads the bucket with filler (a Mysterious Limousine at 14
+// beside EDHREC picks averaging 22). Compared per source -- "edhrec",
+// "fb-theme", "fb-generic" -- because the three are scored on different
+// scales (theme fallback carries a theme-fit bonus, so a generic card never
+// reaches a theme card's number). A source with nothing in the deck yet has
+// no baseline, so its first card always clears.
+const TYPE_TARGET_FLOOR_RATIO = 0.6;
+
+function clearsTypeTargetFloor(card, source, deck, ratio = TYPE_TARGET_FLOOR_RATIO) {
+  const peers = (deck || []).filter((entry) => entry.source === source);
+  if (!peers.length) return true;
+  const average = peers.reduce((sum, entry) => sum + (Number(entry.score) || 0), 0) / peers.length;
+  return (Number(card.score) || 0) >= ratio * average;
+}
+
 function getRoleCounts(deck) {
   return {
     ramp: deck.filter((card) => card.role === "ramp").length,
@@ -4900,17 +5140,18 @@ function getRoleCounts(deck) {
 
 // excludedKeys holds every commander's normalized name (a deck may have two),
 // so a commander is never also drafted into its own deck.
-function pickBestCardForBucket(pool, usedNames, excludedKeys, bucket, curvePlan = null) {
+function pickBestCardForBucket(pool, usedNames, excludedKeys, bucket, curvePlan = null, accept = null) {
   let bestIgnoringCurve = null;
 
   for (const card of pool) {
     const key = normalizeCardName(card.name);
     if (usedNames.has(key) || excludedKeys.has(key)) continue;
     if (getDeckTypeBucket(card.type || card.type_line || "") !== bucket) continue;
+    if (accept && !accept(card)) continue;
 
     // The pool is score-sorted, so the first card whose band still has room is
     // the best card we can take without distorting the curve.
-    if (curveHasRoom(curvePlan, card.cmc)) return card;
+    if (curveHasRoom(curvePlan, curveCmcOf(card))) return card;
     if (!bestIgnoringCurve) bestIgnoringCurve = card;
   }
 
@@ -4959,12 +5200,17 @@ function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys, curve
       if (roleCount >= (roleRule.max || 999)) adjustedScore -= 28;
     }
 
-    // Type deficit is a minor tiebreaker -- soft diversity, not a gate.
+    // Type deficit is a minor tiebreaker -- soft diversity, not a gate. Overflow
+    // costs the same per card as a deficit earns: with only the bonus, a
+    // bucket already past its target kept winning slots on raw score (Kardur,
+    // Doomscourge ran 27 instants and sorceries against EDHREC's 20).
     const bucket = getDeckTypeBucket(card.type || card.type_line || "");
     const typeRule = typeBuckets[bucket];
     if (typeRule) {
-      const typeDeficit = Math.max(0, Number(typeRule.target || 0) - (typeCounts[bucket] || 0));
-      adjustedScore += typeDeficit * 8;
+      const typeCount = typeCounts[bucket] || 0;
+      const typeTarget = Number(typeRule.target || 0);
+      adjustedScore += Math.max(0, typeTarget - typeCount) * 8;
+      adjustedScore -= Math.max(0, typeCount - typeTarget) * 8;
     }
 
     if (bucket === "Creature") adjustedScore += 4;
@@ -4974,7 +5220,7 @@ function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys, curve
       bestIgnoringCurveScore = adjustedScore;
     }
 
-    if (!curveHasRoom(curvePlan, card.cmc)) continue;
+    if (!curveHasRoom(curvePlan, curveCmcOf(card))) continue;
 
     if (adjustedScore > bestScore) {
       best = card;
@@ -5109,8 +5355,8 @@ function pickCheapThemeSeeds(pool, curvePlan, usedNames, commanderKeys) {
 
       const key = normalizeCardName(card.name);
       if (usedNames.has(key) || commanderKeys.has(key) || claimedKeys.has(key)) continue;
-      if (getCmcBand(card.cmc) !== band) continue;
-      if (!curveHasRoom(curvePlan, card.cmc)) continue;
+      if (getCmcBand(curveCmcOf(card)) !== band) continue;
+      if (!curveHasRoom(curvePlan, curveCmcOf(card))) continue;
 
       picks.push(card);
       claimedKeys.add(key);
@@ -5128,7 +5374,7 @@ function getFallbackSource(card) {
 // Same contract as pickBestCardForBucket, but the ranking has to be re-decided
 // on every call: the penalty depends on what the deck already holds, so a
 // pre-sorted pool cannot answer it.
-function pickBestFallbackCard(pool, usedNames, commanderKeys, bucket, curvePlan, redundancyCounts) {
+function pickBestFallbackCard(pool, usedNames, commanderKeys, bucket, curvePlan, redundancyCounts, accept = null) {
   let best = null;
   let bestScore = -Infinity;
   let bestIgnoringCurve = null;
@@ -5138,10 +5384,11 @@ function pickBestFallbackCard(pool, usedNames, commanderKeys, bucket, curvePlan,
     const key = normalizeCardName(card.name);
     if (usedNames.has(key) || commanderKeys.has(key)) continue;
     if (getDeckTypeBucket(card.type || card.type_line || "") !== bucket) continue;
+    if (accept && !accept(card)) continue;
 
     const adjusted = Number(card.score || 0) - getRedundancyPenalty(card.redundancyKeys, redundancyCounts);
 
-    if (curveHasRoom(curvePlan, card.cmc)) {
+    if (curveHasRoom(curvePlan, curveCmcOf(card))) {
       if (adjusted > bestScore) {
         best = card;
         bestScore = adjusted;
@@ -5229,6 +5476,17 @@ function buildDeckFromScoredPool(
 
   const roleTargets = applyCurveFirstRoleTargets(normalizeRoleTargets(edhrecRoleTargets), modePrefs);
 
+  // Curve First only: a commander that discounts a card type (Kaza, Roil
+  // Chaser's instants and sorceries) makes those cards cheaper than printed
+  // for curve purposes, so the band caps file them under the effective cost.
+  const costReduction = modePrefs.curveFirst ? getCommanderCostReduction(options.commanderTexts) : null;
+  if (costReduction) {
+    for (const entry of scoredNonlands) {
+      const source = allOwnedCardData.get(normalizeCardName(entry.name));
+      entry.curveCmc = getEffectiveCurveCmc(entry, source, costReduction);
+    }
+  }
+
   const themeFallbackPool = [];
   const genericFallbackPool = [];
   const collectionEntries = getCollectionEntries(collectionData);
@@ -5263,6 +5521,7 @@ function buildDeckFromScoredPool(
         + getThemeFitBonus(themeMatch),
       type: getCardType(card),
       cmc: card.cmc,
+      curveCmc: getEffectiveCurveCmc({ cmc: card.cmc, type: getCardType(card) }, card, costReduction),
       colors: card.colors,
       modeFitTier: fit.tier,
       themeMatch,
@@ -5284,14 +5543,19 @@ function buildDeckFromScoredPool(
 
   const recommendedLandCount = recommendLandCount(commanderColors);
   const combinedPool = [...themeFallbackPool, ...genericFallbackPool];
-  const pipEstimate = estimateLandCount(combinedPool, commanderColors, roleTargets) || recommendedLandCount;
+  const pipEstimate = estimateLandCount(combinedPool, commanderColors, roleTargets, modePrefs) || recommendedLandCount;
   const targetLandCount = resolveLandCount(pipEstimate, edhrecTypeAverages);
   const targetNonlandCount = deckSize - targetLandCount;
 
   const plan = buildRoleTargetPlan(edhrecTypeAverages, strategyProfile, targetLandCount, roleTargets, commanderThemes, deckSize, modePrefs);
   const typePlan = { landCount: plan.landCount, nonlandCount: plan.nonlandCount, buckets: plan.typeBuckets };
 
-  const curvePlan = buildCurvePlan(targetNonlandCount, adjustCurveShares(DEFAULT_CURVE_SHARES, roleTargets, strategyProfile));
+  // Curve First derives its shares from the land-drop odds instead (its ramp
+  // cap is already baked into that shape, so only the strategy nudge applies).
+  const curveShares = modePrefs.curveFirst
+    ? adjustCurveShares(buildLandDropCurveShares(targetLandCount, deckSize), {}, strategyProfile)
+    : adjustCurveShares(DEFAULT_CURVE_SHARES, roleTargets, strategyProfile);
+  const curvePlan = buildCurvePlan(targetNonlandCount, curveShares);
 
   // Traits of everything already drafted, EDHREC picks included -- a Rogue
   // taken from the EDHREC pool makes the next Rogue no less of a repeat.
@@ -5330,7 +5594,7 @@ function buildDeckFromScoredPool(
 
     deck.push({ ...card, source, roles });
     usedNames.add(key);
-    recordCurvePick(curvePlan, card.cmc);
+    recordCurvePick(curvePlan, curveCmcOf(card));
     adjustRedundancy(card, 1);
     return true;
   }
@@ -5396,7 +5660,7 @@ function buildDeckFromScoredPool(
         bestIgnoringCurveScore = adjusted;
       }
 
-      if (!curveHasRoom(curvePlan, card.cmc)) continue;
+      if (!curveHasRoom(curvePlan, curveCmcOf(card))) continue;
 
       if (adjusted > bestScore) {
         best = card;
@@ -5462,6 +5726,47 @@ function buildDeckFromScoredPool(
       }
     }
 
+    // Phase 1b: bring every type bucket up to its target, theme tier
+    // first and generic tier second *per bucket*. Phase 2 below asks the tiers
+    // in order for whatever card scores best overall, so a theme tier that
+    // still holds creatures but no spells keeps winning slots and the generic
+    // tier's spells are never reached -- a Kaza, Roil Chaser build ended on 36
+    // creatures against EDHREC's 24 with ~790 owned instants and sorceries
+    // untouched. Asking per bucket is the "generic only when theme runs dry
+    // for a slot" rule Phase 1 already follows for the minimums.
+    // A bucket stops being filled the first time its best remaining candidate
+    // fails the quality floor (clearsTypeTargetFloor): padding it with filler
+    // is worse than leaving the slot to Phase 2's score-ordered fill.
+    const bucketsPastFloor = new Set();
+    for (const neededBucket of getCardsNeededForTypeTargets(deck, typePlan.buckets)) {
+      if (deck.length >= targetNonlandCount) break;
+      if (bucketsPastFloor.has(neededBucket)) continue;
+
+      // Spells carry role tags (a removal spell, a cantrip), so filling a type
+      // bucket must not spend past a role's own target -- Phase 0 already
+      // filled those, and ignoring them pushed removal from ~10 to 13-17 and
+      // one deck's draw from 15 to 29.
+      const roleCounts = getDeckRoleCounts();
+
+      const roomInRole = (card) => {
+        const rule = plan.roleBuckets[card.role];
+        return !rule || (roleCounts[card.role] || 0) < rule.target;
+      };
+
+      const edhrecPick = pickBestCardForBucket(scoredNonlands, usedNames, commanderKeys, neededBucket, curvePlan, roomInRole);
+      if (edhrecPick && clearsTypeTargetFloor(edhrecPick, "edhrec", deck)) {
+        addCard(edhrecPick, "edhrec");
+        continue;
+      }
+
+      const fallbackPick = pickFromTiers(fallbackTiers, (tier) => {
+        const candidate = pickBestFallbackCard(tier, usedNames, commanderKeys, neededBucket, curvePlan, redundancyCounts, roomInRole);
+        return candidate && clearsTypeTargetFloor(candidate, getFallbackSource(candidate), deck) ? candidate : null;
+      });
+      if (fallbackPick) addCard(fallbackPick, getFallbackSource(fallbackPick));
+      else bucketsPastFloor.add(neededBucket);
+    }
+
     // Phase 2: fill the remaining slots with the best cards, prioritizing whatever type and role is still short.
     //
     // The EDHREC pool rides along with both tiers rather than sitting in one of
@@ -5515,7 +5820,7 @@ function buildDeckFromScoredPool(
 
         let adjusted = Number(card.score || 0);
         if (chargeRedundancy) adjusted -= getRedundancyPenalty(card.redundancyKeys, redundancyCounts);
-        if (!curveHasRoom(curvePlan, card.cmc)) adjusted -= 8;
+        if (!curveHasRoom(curvePlan, curveCmcOf(card))) adjusted -= 8;
 
         if (adjusted > bestScore) {
           best = card;
@@ -5559,7 +5864,7 @@ function buildDeckFromScoredPool(
 
         if (replaceIndex === -1) break;
         usedNames.delete(normalizeCardName(deck[replaceIndex].name));
-        releaseCurvePick(curvePlan, deck[replaceIndex].cmc);
+        releaseCurvePick(curvePlan, curveCmcOf(deck[replaceIndex]));
         adjustRedundancy(deck[replaceIndex], -1);
         deck.splice(replaceIndex, 1);
         addCard(pick, edhrecPick ? "edhrec" : getFallbackSource(pick));
@@ -5591,7 +5896,7 @@ function buildDeckFromScoredPool(
 
         if (replaceIndex === -1) break;
         usedNames.delete(normalizeCardName(deck[replaceIndex].name));
-        releaseCurvePick(curvePlan, deck[replaceIndex].cmc);
+        releaseCurvePick(curvePlan, curveCmcOf(deck[replaceIndex]));
         adjustRedundancy(deck[replaceIndex], -1);
         deck.splice(replaceIndex, 1);
         addCard(fallbackCreature, getFallbackSource(fallbackCreature));

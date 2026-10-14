@@ -10,6 +10,7 @@ let toastTimer = null;
 let forceGenerateDisabled = false;
 
 function updatePriorityButtons() {
+  if (typeof updatePlanOptions === "function") updatePlanOptions();
   document.querySelectorAll(".priority-btn").forEach((btn) => {
     const mode = String(btn.dataset.mode || "");
     if (mode.startsWith("theme:")) {
@@ -116,6 +117,16 @@ function renderPriorityButtons(commanderThemes = [], allOwnedCardData = null, ed
       }
     });
   }
+}
+
+// "theme:tokens~artifacts|curveFirst" -> "Tokens + Artifacts, Curve First"
+function formatBuildModeLabel(mode) {
+  return String(mode || "").split("|").filter(Boolean).map((part) => {
+    if (part.startsWith("theme:")) return splitFocusThemes(part.slice(6)).map(formatThemeLabel).join(" + ");
+    if (part === "curveFirst") return "Curve First";
+    if (part === "minimal") return "Minimal Build";
+    return part;
+  }).join(", ");
 }
 
 function getCurrentBuildMode() {
