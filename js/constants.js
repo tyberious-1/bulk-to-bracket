@@ -6,6 +6,10 @@ const SCRYFALL_COLLECTION = "https://api.scryfall.com/cards/collection";
 const EDHREC_BASE = "https://json.edhrec.com/pages/commanders/";
 const EDHREC_TAGS_BASE = "https://json.edhrec.com/pages/tags/";
 const SCRYFALL_CARD_SEARCH = "https://scryfall.com/search?q=!";
+const SCRYFALL_SEARCH_BASE = "https://scryfall.com/search?q=";
+// Scryfall silently drops everything past roughly 1,020 characters of a search query
+// (measured 2026-10-15), which hides the tail of a long card list without an error.
+const SCRYFALL_QUERY_LIMIT = 1000;
 
 const WUBRG_ORDER = ["W", "U", "B", "R", "G", "C"];
 

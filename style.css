@@ -485,6 +485,17 @@ button:disabled {
   color: #f3f4f6;
 }
 
+.build-breakdown-note {
+  margin-top: 12px;
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.build-breakdown-note strong {
+  color: #f3f4f6;
+}
+
 .theme-chips {
   display: flex;
   gap: 8px;
@@ -577,6 +588,29 @@ button:disabled {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.preview-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.preview-link {
+  font-size: 13px;
+  font-weight: 600;
+  color: #93c5fd;
+  text-decoration: none;
+}
+
+.preview-link:hover {
+  text-decoration: underline;
 }
 
 .preview-copy-btn {

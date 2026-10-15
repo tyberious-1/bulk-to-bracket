@@ -92,6 +92,7 @@
         <p class="build-mode-copy">Stop at the commander, mana base, and support package (ramp/draw/removal/wipe) — no theme guessing, no filler, and the list will be well short of a full 99 cards.</p>
         <button id="minimalBuildToggle" type="button" class="mode-toggle-btn">Minimal Build</button>
         <button id="curveFirstToggle" type="button" class="mode-toggle-btn">Curve First</button>
+        <button id="eventEnginesToggle" type="button" class="mode-toggle-btn active" title="Score cards that cause the events a commander runs on. Turn off if a build looks odd.">Event Engines</button>
       </div>
 
       <div class="results-grid">
@@ -140,7 +141,10 @@
           <div id="warningsPanel" class="warnings-panel"></div>
 
           <div class="preview-heading">Grouped Preview
-            <button id="copyPreviewBtn" type="button" class="preview-copy-btn">Copy Preview Text</button>
+            <span class="preview-actions">
+              <span id="scryfallDeckLinks" class="preview-links hidden"></span>
+              <button id="copyPreviewBtn" type="button" class="preview-copy-btn">Copy Preview Text</button>
+            </span>
           </div>
           <div id="exportPreview" class="export-preview"></div>
 
@@ -182,7 +186,9 @@
   <script src="js/analysis/pairing.js"></script>
   <script src="js/collection/csv.js"></script>
   <script src="js/analysis/themes.js"></script>
+  <script src="js/analysis/abilities.js"></script>
   <script src="js/analysis/scoring.js"></script>
+  <script src="js/analysis/engines.js"></script>
   <script src="js/api/http.js"></script>
   <script src="js/api/edhrec.js"></script>
   <script src="js/cache.js"></script>

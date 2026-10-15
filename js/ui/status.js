@@ -125,6 +125,7 @@ function formatBuildModeLabel(mode) {
     if (part.startsWith("theme:")) return splitFocusThemes(part.slice(6)).map(formatThemeLabel).join(" + ");
     if (part === "curveFirst") return "Curve First";
     if (part === "minimal") return "Minimal Build";
+    if (part === "noEvents") return "Event Engines off";
     return part;
   }).join(", ");
 }
@@ -135,6 +136,7 @@ function getCurrentBuildMode() {
   if (currentThemeFocus) parts.push(`theme:${currentThemeFocus}`);
   if (getMinimalBuildEnabled()) parts.push("minimal");
   if (getCurveFirstEnabled()) parts.push("curveFirst");
+  if (!getEventEnginesEnabled()) parts.push("noEvents");
   return parts.join("|");
 }
 
@@ -143,6 +145,8 @@ function updateBuildModeToggle() {
   if (toggle) toggle.classList.toggle("active", getMinimalBuildEnabled());
   const curveFirstToggle = document.getElementById("curveFirstToggle");
   if (curveFirstToggle) curveFirstToggle.classList.toggle("active", getCurveFirstEnabled());
+  const eventEnginesToggle = document.getElementById("eventEnginesToggle");
+  if (eventEnginesToggle) eventEnginesToggle.classList.toggle("active", getEventEnginesEnabled());
 }
 
 function updateProgress(percent, statusText, subStatus = "") {

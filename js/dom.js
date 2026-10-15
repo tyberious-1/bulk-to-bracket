@@ -18,6 +18,7 @@ const deckStats = document.getElementById("deckStats");
 const priorityButtonsWrap = document.getElementById("priorityButtons");
 const minimalBuildToggle = document.getElementById("minimalBuildToggle");
 const curveFirstToggle = document.getElementById("curveFirstToggle");
+const eventEnginesToggle = document.getElementById("eventEnginesToggle");
 
 // Second commander field: hidden until the first pick turns out to have a
 // pairing ability (partner, Background, Doctor's companion, ...).

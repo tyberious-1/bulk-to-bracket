@@ -8,6 +8,45 @@ function scryfallCardUrl(cardName) {
   return `${SCRYFALL_CARD_SEARCH}${encodeURIComponent(`"${cardName}"`)}`;
 }
 
+// Scryfall searches that list the commander(s) and every nonland pick, so the player
+// can scan the card text in one place. Lands are left out on purpose: the picks are what
+// is worth spot-checking. Scryfall cuts a query off near 1,000 characters, so a full deck
+// comes back as a few searches, each covering a share of the cards. Empty array when
+// there is nothing to show.
+function scryfallDeckSearchUrls(deck, commanderNames) {
+  if (!deck?.length) return [];
+  const leaders = (Array.isArray(commanderNames) ? commanderNames : [commanderNames]).filter(Boolean);
+  const terms = [];
+  const seen = new Set();
+  const add = (name) => {
+    const front = getPrimaryCardName(name);
+    const key = normalizeCardName(front);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    terms.push(`!"${front}"`);
+  };
+  leaders.forEach(add);
+  for (const item of mergeDeckCounts(deck)) {
+    if (/\bland\b/.test(item.type)) continue;
+    add(item.name);
+  }
+
+  const separator = " or ";
+  const queries = [];
+  let current = "";
+  for (const term of terms) {
+    const next = current ? current + separator + term : term;
+    if (current && next.length > SCRYFALL_QUERY_LIMIT) {
+      queries.push(current);
+      current = term;
+    } else {
+      current = next;
+    }
+  }
+  if (current) queries.push(current);
+  return queries.map((query) => `${SCRYFALL_SEARCH_BASE}${encodeURIComponent(query)}&unique=cards&order=name`);
+}
+
 // Decklists name a two-faced card by its front face. Scryfall hands us
 // "Front // Back", so trim to the front face here -- the grouped preview above
 // still shows the full name.
@@ -23,9 +62,29 @@ function generateMoxfieldExport(deck, commanderNames) {
   return lines.join("\n");
 }
 
+function updateScryfallDeckLinks(deck, commanderName) {
+  const box = document.getElementById("scryfallDeckLinks");
+  if (!box) return;
+  const urls = scryfallDeckSearchUrls(deck, commanderName);
+  box.innerHTML = "";
+  box.classList.toggle("hidden", !urls.length);
+  urls.forEach((url, index) => {
+    const link = document.createElement("a");
+    link.className = "preview-link";
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = urls.length === 1
+      ? "View picks on Scryfall"
+      : `Scryfall picks, part ${index + 1} of ${urls.length}`;
+    box.appendChild(link);
+  });
+}
+
 function displayExportPreview(deck, commanderName, commanderThemes, strategyProfile, commanderColors) {
   const preview = document.getElementById("exportPreview");
   preview.innerHTML = "";
+  updateScryfallDeckLinks(deck, commanderName);
 
   if (!deck?.length) {
     bindPreviewHoverImages();

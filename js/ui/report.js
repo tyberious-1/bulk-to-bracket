@@ -181,7 +181,7 @@ function displaySupportPackage(deck, edhrecRoleTargets) {
   `;
 }
 
-function displayBuildBreakdown(deck) {
+function displayBuildBreakdown(deck, engineNote, eventNote = null) {
   const el = document.getElementById("buildBreakdown");
 
   const edhrecCount = deck.filter((c) => c.source === "edhrec").length;
@@ -194,6 +194,12 @@ function displayBuildBreakdown(deck) {
   const funPickCount = deck.filter((c) => c.source === "fun-pick").length;
   const nonbasicCount = deck.filter((c) => c.source === "nonbasic-land").length;
   const basicCount = deck.filter((c) => c.source === "basic-land").length;
+  const engineHtml = engineNote && engineNote.items.length
+    ? `<div class="build-breakdown-note"><strong>${escapeHtml(engineNote.label)}:</strong> ${engineNote.items.map((item) => escapeHtml(describeEngineEnablerItem(item))).join(", ")}</div>`
+    : "";
+  const eventHtml = eventNote && eventNote.items.length
+    ? `<div class="build-breakdown-note"><strong>${escapeHtml(eventNote.label)}:</strong> ${eventNote.items.map((item) => escapeHtml(describeEngineEnablerItem(item))).join(", ")}${eventNote.more ? `, +${eventNote.more} more` : ""}</div>`
+    : "";
 
   el.innerHTML = `
     <div class="info-card fade-up">
@@ -206,6 +212,8 @@ function displayBuildBreakdown(deck) {
         <div class="build-breakdown-item"><span>Nonbasic Lands</span><strong>${nonbasicCount}</strong></div>
         <div class="build-breakdown-item"><span>Basic Lands</span><strong>${basicCount}</strong></div>
       </div>
+      ${engineHtml}
+      ${eventHtml}
     </div>
   `;
 }

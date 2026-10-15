@@ -280,6 +280,12 @@ async function toggleCurveFirst() {
   await runRegeneration();
 }
 
+async function toggleEventEngines() {
+  if (!currentRunContext) return;
+  setEventEnginesEnabled(!getEventEnginesEnabled());
+  await runRegeneration();
+}
+
 async function performBuildFromContext() {
   const {
     commanders,
@@ -302,6 +308,7 @@ async function performBuildFromContext() {
 
   const modePrefs = getModePreferences(getCurrentBuildMode(), strategyProfile);
   modePrefs.planSignature = getActivePlanSignature(modePrefs.themeFocus, currentRunContext?.planOptions);
+  modePrefs.engineNeeds = applyEventSwitch(parseCommanderNeeds([commanders.primary?.text, commanders.partner?.text]), modePrefs);
   const isTribalDeck = isActiveBuildTribal(strategyProfile, modePrefs);
 
   updateProgress(78, "Checking legality and scoring cards...");
@@ -479,6 +486,9 @@ async function performBuildFromContext() {
         commanders.colors,
         currentRunContext.themeCardLists
       );
+  if (!modePrefs.minimalBuild) {
+    addEngineCandidates(themeCardNames, modePrefs.engineNeeds, allOwnedCardData, commanders.colors);
+  }
   logMessage(
     modePrefs.minimalBuild
       ? "Minimal Build mode: skipping theme-based collection backfill."
@@ -529,7 +539,12 @@ async function performBuildFromContext() {
   renderDeckStats(sanitizedFinalDeck, commanders.names.join(" + "), bracketInfo);
   displayDeckBracket(bracketInfo);
   displayGameChangers(bracketInfo);
-  displayBuildBreakdown(sanitizedFinalDeck);
+  const engineItems = describeEngineEnablers(sanitizedFinalDeck, allOwnedCardData, modePrefs.engineNeeds);
+  displayBuildBreakdown(
+    sanitizedFinalDeck,
+    engineItems.length ? { label: describeEngineNeeds(modePrefs.engineNeeds), items: engineItems } : null,
+    describeEventProducers(sanitizedFinalDeck, allOwnedCardData, modePrefs.engineNeeds)
+  );
   displaySupportPackage(sanitizedFinalDeck, roleTargets);
   displayMinimalBuildHint(fallbackGenericRatio, modePrefs.minimalBuild);
   displayWarnings(warnings);
@@ -692,6 +707,12 @@ if (minimalBuildToggle) {
 if (curveFirstToggle) {
   curveFirstToggle.addEventListener("click", () => {
     toggleCurveFirst();
+  });
+}
+
+if (eventEnginesToggle) {
+  eventEnginesToggle.addEventListener("click", () => {
+    toggleEventEngines();
   });
 }
 
