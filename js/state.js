@@ -30,8 +30,20 @@ function setMinimalBuildEnabled(enabled) {
 
 // Curve First mode: a personal preference toggle (not a public format) that
 // caps ramp and board wipes and boosts draw/removal targets. See
-// docs/superpowers/specs/2026-10-12-curve-first-build-mode-theorycraft.md.
+// dev/docs/superpowers/specs/2026-10-12-curve-first-build-mode-theorycraft.md.
 let curveFirstEnabled = false;
+
+// Event engines: cards that cause the events a commander's own abilities run on score a little.
+// On by default; the build-mode switch turns it off, and a build then runs without any event.
+let eventEnginesEnabled = true;
+
+function getEventEnginesEnabled() {
+  return eventEnginesEnabled;
+}
+
+function setEventEnginesEnabled(enabled) {
+  eventEnginesEnabled = Boolean(enabled);
+}
 
 function getCurveFirstEnabled() {
   return curveFirstEnabled;

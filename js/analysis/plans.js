@@ -1,8 +1,8 @@
 // Plan options: 1-3 related themes a commander could be built around, each with
 // honest coverage of what the collection can fill.
 //
-// Port of tools/jxa-harness/plan_coverage.py (see
-// docs/superpowers/specs/2026-10-13-plan-first-prototyping.md). Most of an
+// Port of dev/tools/jxa-harness/plan_coverage.py (see
+// dev/docs/superpowers/specs/2026-10-13-plan-first-prototyping.md). Most of an
 // EDHREC theme page is the commander's general staples, so a theme is
 // identified by its *distinctive* cards: ones whose inclusion beats the
 // commander's main page by PLAN_MIN_LIFT. Themes whose distinctive sets overlap

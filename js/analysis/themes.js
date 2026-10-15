@@ -498,6 +498,7 @@ function getModePreferences(mode, strategyProfile) {
     themeFocusAliases,
     minimalBuild: modeParts.includes("minimal"),
     curveFirst: modeParts.includes("curveFirst"),
+    eventEngines: !modeParts.includes("noEvents"),
     synergyBias:
       themeFocus ? 1.45 : 1,
     creatureBias:

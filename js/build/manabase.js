@@ -390,7 +390,7 @@ function computeColorSourceTargets(nonlandDeckCards, commanderColors, landCount)
   // game, but a deck whose 60 nonland spells happen to skew hard toward one
   // of them can otherwise starve the other down to that flat minimum even
   // though it's a primary color, not a splash (see the harness comparison
-  // that caught this -- tools/jxa-harness/compare_report.md). Scale a second
+  // that caught this -- dev/tools/jxa-harness/compare_report.md). Scale a second
   // floor down as more colors compete for the same landCount (so a 5-color
   // splash color still gets much less than a primary one, same as before),
   // but up when there are few colors sharing it, and take the stronger of
@@ -399,7 +399,7 @@ function computeColorSourceTargets(nonlandDeckCards, commanderColors, landCount)
     8,
     Math.round(0.12 * landCount),
     Math.round(landCount / (commanderColors.length + 0.5))
-    // (tuned empirically against tools/jxa-harness/compare.js: +1 recovered
+    // (tuned empirically against dev/tools/jxa-harness/compare.js: +1 recovered
     // about half of Rivaz's regression, +0.5 recovered nearly all of it
     // while leaving Krydle's already-clean result unchanged)
   );
@@ -488,6 +488,7 @@ function recommendLandCount(commanderColors) {
 }
 
 function landConditionMatchesStrategy(tag, strategyProfile, modePrefs) {
+  if (modePrefs.engineNeeds?.payloadType === tag) return true;
   if (!NICHE_LAND_CONDITION_WORDS.has(tag)) return true;
   if ((strategyProfile.tribalTypes || []).includes(tag)) return true;
   if ((modePrefs.focusedTribalTypes || []).includes(tag)) return true;
@@ -612,6 +613,8 @@ function evaluateNonbasicLand(card, commanderColors, strategyProfile, modePrefs,
   // which for an off-meta collection is most of them.
   const inclusionRate = getEdhrecInclusionRate(edhrecCardLookup?.get(normalizedName));
   if (inclusionRate !== null) score += inclusionRate * EDHREC_LAND_INCLUSION_WEIGHT;
+
+  score += getEngineLandBonus(card, modePrefs.engineNeeds);
 
   score *= modePrefs.manaBaseBias;
 

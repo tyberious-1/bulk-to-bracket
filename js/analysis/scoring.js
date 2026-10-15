@@ -538,6 +538,10 @@ function cardMatchesRole(card, role, isTribalDeck = false) {
     if (role === "removal" && (pattern === "gain control of target creature" || pattern === "gain control of target permanent")) {
       return text.includes(pattern) && !text.includes("until end of turn");
     }
+    // Exiling a card from a graveyard (Inherited Fiend, Lantern of the Lost) answers no threat.
+    if (role === "removal" && pattern === "exile target") {
+      return text.replace(/exile (?:up to \w+ )?target [^.,:;\n]*?\bgraveyards?\b/g, "").includes(pattern);
+    }
     if (role === "removal" && pattern === "gets -") {
       return hasLethalStatDrop(text);
     }
@@ -705,7 +709,7 @@ function detectCardTags(card) {
     type.includes("aura") ||
     text.includes("equipped creature") ||
     text.includes("enchanted creature") ||
-    text.includes("attach")
+    hasAttachmentSignal(card)
   ) {
     tags.push("voltron");
   }
@@ -1012,6 +1016,9 @@ function scoreCard(card, edhrecCard, commanderThemes, strategyProfile, commander
   if (themeSignals.has("counters") && tags.includes("counters")) themeBonus += 4;
   if (themeSignals.has("cantrips") && tags.includes("cantrips")) themeBonus += 3;
   themeBonus += getThemeFocusAdjustment(card, tags, modePrefs);
+  // Commander-driven, so it sits outside the theme-focus gate: the engine a
+  // commander needs does not depend on which plan the player picked.
+  themeBonus += getEngineBonus(card, modePrefs.engineNeeds);
   themeBonus += getEdhrecReferenceBonus(edhrecCard, modePrefs);
 
   let penalty = 0;
@@ -1053,6 +1060,7 @@ function scoreFallbackCard(card, commanderThemes, strategyProfile, commanderColo
   }
 
   score += getThemeFocusAdjustment(card, tags, modePrefs);
+  score += getEngineBonus(card, modePrefs.engineNeeds);
 
   if (strategyProfile.wantsCreatures && isCreatureCard(card)) score += 6 * modePrefs.creatureBias;
   if (strategyProfile.wantsTokens && isTokenMaker(card) && strategyBonusAllowed(modePrefs, ["tokens", "gowide"])) score += 8 * modePrefs.synergyBias;

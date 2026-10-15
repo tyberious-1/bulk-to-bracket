@@ -54,7 +54,7 @@ function normalizeRoleTargets(edhrecRoleTargets) {
 }
 
 // Curve First mode (a personal toggle, not a public format -- see
-// docs/superpowers/specs/2026-10-12-curve-first-build-mode-theorycraft.md):
+// dev/docs/superpowers/specs/2026-10-12-curve-first-build-mode-theorycraft.md):
 // caps ramp and wipes, and redirects that reclaimed deck space into draw
 // (to offset the natural -1 card/turn attrition) and removal (cheap,
 // targeted interaction over board resets). A cap, not a floor -- a
