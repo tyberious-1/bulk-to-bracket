@@ -256,70 +256,40 @@ function buildTypeCardsGrid(summary) {
   return html;
 }
 
-function buildTypeDetailPanel(typeKey, byTypeSubtype, summary) {
-  const colorMap = {
-    'W': '#fef3c7',
-    'U': '#a3e4d7',
-    'B': '#7c3aed',
-    'R': '#fb7185',
-    'G': '#86efac',
-    'C': '#9ca3af'
-  };
+// Colorless is its own segment (a Golem is not "multicolor"); M is two or more colors.
+const COLOR_SEGMENTS = [
+  { key: 'W', label: 'White', bg: '#fef3c7', fg: '#1f2937' },
+  { key: 'U', label: 'Blue', bg: '#7dd3fc', fg: '#1f2937' },
+  { key: 'B', label: 'Black', bg: '#6d28d9', fg: '#ffffff' },
+  { key: 'R', label: 'Red', bg: '#fb7185', fg: '#1f2937' },
+  { key: 'G', label: 'Green', bg: '#86efac', fg: '#1f2937' },
+  { key: 'C', label: 'Colorless', bg: '#9ca3af', fg: '#1f2937' },
+  { key: 'M', label: 'Multicolor', bg: '#f59e0b', fg: '#1f2937' }
+];
 
+function renderColorLegend() {
+  let html = '<div class="color-legend">';
+  for (const seg of COLOR_SEGMENTS) {
+    html += '<span class="legend-item"><span class="legend-swatch" style="background: ' + seg.bg + ';"></span>' + seg.label + '</span>';
+  }
+  return html + '</div>';
+}
+
+function renderColorBar(colors, total) {
+  let html = '<div class="color-breakdown">';
+  for (const seg of COLOR_SEGMENTS) {
+    const count = colors[seg.key] || 0;
+    if (!count) continue;
+    const pct = (count / total * 100).toFixed(1);
+    html += '<span class="color-bar" style="width: ' + pct + '%; background: ' + seg.bg + '; color: ' + seg.fg + ';" title="' + seg.label + ': ' + count + (count === 1 ? ' card' : ' cards') + '">' + count + '</span>';
+  }
+  return html + '</div>';
+}
+
+function buildTypeDetailPanel(typeKey, byTypeSubtype, summary) {
   const typeLabel = typeKey.charAt(0).toUpperCase() + typeKey.slice(1);
   const typeData = summary[typeKey];
-
-  const legendaryEntries = [];
-  const otherEntries = [];
-  const artifactCreatureEntries = [];
-
-  for (const entry of byTypeSubtype.values()) {
-    const isLegendary = isLegendaryTypeLine(entry.type);
-    const isArtifactCreature = isArtifactCreatureTypeLine(entry.type);
-    const entryTypeKey = classifyPrimaryType(entry.type);
-
-    if (entryTypeKey === typeKey) {
-      if (isArtifactCreature && typeKey === 'creature') {
-        artifactCreatureEntries.push(entry);
-      } else if (isLegendary) {
-        legendaryEntries.push(entry);
-      } else {
-        otherEntries.push(entry);
-      }
-    }
-  }
-
-  // A card with several types (Human Warrior) is listed under each, so the rows
-  // can add up to more than the section total.
-  const groupBySubtype = (entries) => {
-    const grouped = new Map();
-    for (const entry of entries) {
-      const subtypes = getTypeLineSubtypes(entry.type);
-      for (const subtype of subtypes.length ? subtypes : ['base']) {
-        const name = capitalizeWord(subtype);
-        if (!grouped.has(name)) grouped.set(name, []);
-        grouped.get(name).push(entry);
-      }
-    }
-    return grouped;
-  };
-
-  const legendaryBySubtype = groupBySubtype(legendaryEntries);
-  const otherBySubtype = groupBySubtype(otherEntries);
-
-  const sortSubtypes = (subtypeMap) => {
-    const sorted = Array.from(subtypeMap.entries())
-      .map(([name, entries]) => ({
-        name,
-        entries,
-        count: entries.reduce((sum, e) => sum + e.count, 0)
-      }))
-      .sort((a, b) => b.count - a.count);
-    return sorted;
-  };
-
-  const legendarySorted = sortSubtypes(legendaryBySubtype);
-  const otherSorted = sortSubtypes(otherBySubtype);
+  const rows = aggregateSubtypes(Array.from(byTypeSubtype.values()), typeKey);
 
   let html = '<div class="type-detail-panel open" data-type="' + typeKey + '">';
 
@@ -330,167 +300,20 @@ function buildTypeDetailPanel(typeKey, byTypeSubtype, summary) {
   html += '</div>';
 
   html += '<div class="detail-content">';
-  if (typeKey === 'creature') {
-    html += '<p class="detail-note">A creature with several types (Human Warrior) is listed under each one, so the rows add up to more than the total.</p>';
-  }
+  html += renderColorLegend();
+  html += '<p class="detail-note">A card with several types (Human Warrior) is listed under each one, so the rows add up to more than the total.</p>';
 
-  if (legendarySorted.length > 0) {
-    html += '<div class="legendary-section">';
-    html += '<h3 class="section-title" data-section="legendary-' + typeKey + '"><span class="section-toggle-icon">▼</span> Legendary ' + typeLabel + 's (' + typeData.legendaryCount + ')</h3>';
-
-    html += '<div class="section-content" data-section="legendary-' + typeKey + '">';
-    for (const subtype of legendarySorted) {
-      const distribution = getColorDistribution(subtype.entries);
-      const total = subtype.count;
-
-      html += '<div class="subtype-row">';
-      html += '<span class="subtype-name">' + subtype.name + '</span>';
-      html += '<span class="subtype-count">' + total + '</span>';
-
-      html += '<div class="color-breakdown">';
-
-      // Single-color cards
-      let singleColorTotal = 0;
-      for (const color of ['W', 'U', 'B', 'R', 'G', 'C']) {
-        const count = distribution[color] || 0;
-        singleColorTotal += count;
-      }
-
-      for (const color of ['W', 'U', 'B', 'R', 'G', 'C']) {
-        const count = distribution[color] || 0;
-        if (count > 0) {
-          const percentage = (count / total * 100).toFixed(0);
-          const bgColor = colorMap[color];
-          html += '<span class="color-bar" style="width: ' + percentage + '%; background: ' + bgColor + ';" title="' + color + ': ' + count + '">' + count + '</span>';
-        }
-      }
-
-      // Multi-color cards
-      const multiColorCount = total - singleColorTotal;
-      if (multiColorCount > 0) {
-        const percentage = (multiColorCount / total * 100).toFixed(0);
-        html += '<span class="color-bar" style="width: ' + percentage + '%; background: #9ca3af;" title="Multi-color: ' + multiColorCount + '">' + multiColorCount + '</span>';
-      }
-
-      html += '</div>';
-
-      html += '</div>';
-    }
+  rows.forEach((row, index) => {
+    html += '<div class="subtype-row' + (index >= SUBTYPE_TOP_N ? ' extra' : '') + '">';
+    html += '<span class="subtype-name">' + row.name + '</span>';
+    html += '<span class="subtype-count">' + row.count + '</span>';
+    html += '<span class="subtype-legendary" title="Legendary cards">' + (row.legendary ? '★ ' + row.legendary : '') + '</span>';
+    html += renderColorBar(row.colors, row.count);
     html += '</div>';
+  });
 
-    html += '</div>';
-  }
-
-  if (otherSorted.length > 0) {
-    html += '<div class="other-section">';
-    const otherCount = typeData.totalCount - typeData.legendaryCount;
-    html += '<h3 class="section-title" data-section="other-' + typeKey + '"><span class="section-toggle-icon">▼</span> Other ' + typeLabel + 's (' + otherCount + ')</h3>';
-
-    html += '<div class="section-content" data-section="other-' + typeKey + '">';
-    for (const subtype of otherSorted) {
-      const distribution = getColorDistribution(subtype.entries);
-      const total = subtype.count;
-
-      html += '<div class="subtype-row">';
-      html += '<span class="subtype-name">' + subtype.name + '</span>';
-      html += '<span class="subtype-count">' + total + '</span>';
-
-      html += '<div class="color-breakdown">';
-
-      // Single-color cards
-      let singleColorTotal = 0;
-      for (const color of ['W', 'U', 'B', 'R', 'G', 'C']) {
-        const count = distribution[color] || 0;
-        singleColorTotal += count;
-      }
-
-      for (const color of ['W', 'U', 'B', 'R', 'G', 'C']) {
-        const count = distribution[color] || 0;
-        if (count > 0) {
-          const percentage = (count / total * 100).toFixed(0);
-          const bgColor = colorMap[color];
-          html += '<span class="color-bar" style="width: ' + percentage + '%; background: ' + bgColor + ';" title="' + color + ': ' + count + '">' + count + '</span>';
-        }
-      }
-
-      // Multi-color cards
-      const multiColorCount = total - singleColorTotal;
-      if (multiColorCount > 0) {
-        const percentage = (multiColorCount / total * 100).toFixed(0);
-        html += '<span class="color-bar" style="width: ' + percentage + '%; background: #9ca3af;" title="Multi-color: ' + multiColorCount + '">' + multiColorCount + '</span>';
-      }
-
-      html += '</div>';
-
-      html += '</div>';
-    }
-    html += '</div>';
-
-    html += '</div>';
-  }
-
-  // Artifact creatures section (creatures only)
-  if (typeKey === 'creature' && artifactCreatureEntries.length > 0) {
-    const artifactBySubtype = new Map();
-    for (const entry of artifactCreatureEntries) {
-      const subtypes = getTypeLineSubtypes(entry.type);
-      for (const subtype of subtypes.length ? subtypes : ['base']) {
-        const name = capitalizeWord(subtype);
-        if (!artifactBySubtype.has(name)) artifactBySubtype.set(name, []);
-        artifactBySubtype.get(name).push(entry);
-      }
-    }
-
-    const artifactSorted = Array.from(artifactBySubtype.entries())
-      .map(([name, entries]) => ({
-        name,
-        entries,
-        count: entries.reduce((sum, e) => sum + e.count, 0)
-      }))
-      .sort((a, b) => b.count - a.count);
-
-    const artifactTotal = artifactCreatureEntries.reduce((sum, e) => sum + e.count, 0);
-
-    html += '<div class="artifact-creatures-section">';
-    html += '<h3 class="section-title" data-section="artifact-creatures"><span class="section-toggle-icon">▼</span> Artifact Creatures (' + artifactTotal + ')</h3>';
-
-    html += '<div class="section-content" data-section="artifact-creatures">';
-    for (const subtype of artifactSorted) {
-      const distribution = getColorDistribution(subtype.entries);
-      const total = subtype.count;
-
-      html += '<div class="subtype-row">';
-      html += '<span class="subtype-name">' + subtype.name + '</span>';
-      html += '<span class="subtype-count">' + total + '</span>';
-
-      html += '<div class="color-breakdown">';
-
-      let singleColorTotal = 0;
-      for (const color of ['W', 'U', 'B', 'R', 'G', 'C']) {
-        const count = distribution[color] || 0;
-        singleColorTotal += count;
-      }
-
-      for (const color of ['W', 'U', 'B', 'R', 'G', 'C']) {
-        const count = distribution[color] || 0;
-        if (count > 0) {
-          const percentage = (count / total * 100).toFixed(0);
-          const bgColor = colorMap[color];
-          html += '<span class="color-bar" style="width: ' + percentage + '%; background: ' + bgColor + ';" title="' + color + ': ' + count + '">' + count + '</span>';
-        }
-      }
-
-      const multiColorCount = total - singleColorTotal;
-      if (multiColorCount > 0) {
-        const percentage = (multiColorCount / total * 100).toFixed(0);
-        html += '<span class="color-bar" style="width: ' + percentage + '%; background: #9ca3af;" title="Multi-color: ' + multiColorCount + '">' + multiColorCount + '</span>';
-      }
-
-      html += '</div>';
-      html += '</div>';
-    }
-    html += '</div>';
-    html += '</div>';
+  if (rows.length > SUBTYPE_TOP_N) {
+    html += '<button class="show-all-btn" type="button" data-total="' + rows.length + '">Show all ' + rows.length + '</button>';
   }
 
   html += '</div>';
@@ -695,6 +518,54 @@ function createMultiColorChart(distribution) {
   });
 }
 
+const ROLE_LABELS = { ramp: 'Ramp', draw: 'Card draw', removal: 'Removal', wipe: 'Board wipes' };
+const ROLE_STATUS_TEXT = { missing: 'Missing', thin: 'Thin', ok: 'Enough', deep: 'Plenty' };
+
+function renderCollectionSummary(byTypeSubtype, bySupportRole, monoColorDist) {
+  let html = '<div class="collection-summary">';
+  html += '<h3>What your collection is good for</h3>';
+
+  const tribes = buildTribeSummary(byTypeSubtype);
+  html += '<div class="summary-block"><h4>Strongest tribes</h4>';
+  if (!tribes.length) {
+    html += '<p class="detail-note">No creature type has two or more cards yet.</p>';
+  } else {
+    html += renderColorLegend();
+    tribes.forEach((row, i) => {
+      html += '<div class="subtype-row"><span class="tribe-rank">' + (i + 1) + '</span>';
+      html += '<span class="subtype-name">' + row.name + '</span>';
+      html += '<span class="subtype-count">' + row.count + '</span>';
+      html += '<span class="subtype-legendary" title="Legendary cards">' + (row.legendary ? '★ ' + row.legendary : '') + '</span>';
+      html += renderColorBar(row.colors, row.count) + '</div>';
+    });
+  }
+  html += '</div>';
+
+  html += '<div class="summary-block"><h4>Color depth</h4>';
+  html += '<div class="depth-row">';
+  for (const seg of COLOR_SEGMENTS) {
+    if (seg.key === 'M') continue;
+    html += '<span class="depth-item"><span class="legend-swatch" style="background: ' + seg.bg + ';"></span>' + seg.label + ' <strong>' + (monoColorDist.get(seg.key) || 0) + '</strong></span>';
+  }
+  html += '</div><p class="detail-note">Single-color and colorless cards only. Multicolor cards are in the chart below.</p></div>';
+
+  html += '<div class="summary-block"><h4>Support roles against a typical deck</h4>';
+  for (const row of buildRoleCoverage(bySupportRole)) {
+    html += '<div class="role-row"><span class="role-name">' + ROLE_LABELS[row.role] + '</span>';
+    html += '<span class="role-count">' + row.total + ' of ~' + row.target + '</span>';
+    html += '<span class="status-chip ' + row.status + '">' + ROLE_STATUS_TEXT[row.status] + '</span>';
+    html += '<span class="role-colors" title="Cards you could play in a deck of only that color (that color plus colorless)">';
+    for (const c of ['W', 'U', 'B', 'R', 'G']) {
+      const seg = COLOR_SEGMENTS.find((x) => x.key === c);
+      html += '<span class="role-color"><span class="legend-swatch" style="background: ' + seg.bg + ';"></span>' + row.byColor[c] + '</span>';
+    }
+    html += '</span></div>';
+  }
+  html += '<p class="detail-note">Targets are typical EDHREC averages (ramp 10, draw 10, removal 8, wipes 3). The five numbers are the cards a deck of only that color could play, colorless included.</p></div>';
+
+  return html + '</div>';
+}
+
 function renderAnalyticsPanel() {
   const panel = document.getElementById("analyticsPanel");
   if (!panel) return;
@@ -736,7 +607,7 @@ function renderAnalyticsPanel() {
     roleGroups.get(entry.role).push(entry);
   });
 
-  let html = '';
+  let html = renderCollectionSummary(byTypeSubtype, bySupportRole, monoColorDist);
 
   // Color distribution
   html += '<div class="analytics-section">';
@@ -758,16 +629,15 @@ function renderAnalyticsPanel() {
 
   // Support packages
   const roles = ['ramp', 'draw', 'removal', 'wipe'];
+  const roleTargets = normalizeRoleTargets({});
   roles.forEach(role => {
     const entries = roleGroups.get(role) || [];
-    if (!entries.length) return;
-
     const totalCount = entries.reduce((sum, e) => sum + e.count, 0);
     html += '<div class="analytics-section">';
     html += renderCollapsible(
       `support-${role}`,
-      `${role.charAt(0).toUpperCase() + role.slice(1)} (${totalCount})`,
-      renderSupportPackageSection(role, entries)
+      `${ROLE_LABELS[role]} (${totalCount} of ~${roleTargets[role]})`,
+      entries.length ? renderSupportPackageSection(role, entries) : '<p class="detail-note">No cards found.</p>'
     );
     html += '</div>';
   });
@@ -858,17 +728,12 @@ function bindAnalyticsTab() {
       return;
     }
 
-    // Section title toggle (Legendary/Other)
-    const sectionTitle = event.target.closest(".section-title");
-    if (sectionTitle) {
-      const sectionId = sectionTitle.dataset.section;
-      const content = panel.querySelector(`.section-content[data-section="${sectionId}"]`);
-      const icon = sectionTitle.querySelector(".section-toggle-icon");
-
-      if (content && icon) {
-        content.classList.toggle("collapsed");
-        icon.classList.toggle("collapsed");
-      }
+    // Show all / top subtypes toggle
+    const showAll = event.target.closest(".show-all-btn");
+    if (showAll) {
+      const content = showAll.closest(".detail-content");
+      const open = content.classList.toggle("show-all");
+      showAll.textContent = open ? "Show top " + SUBTYPE_TOP_N : "Show all " + showAll.dataset.total;
       return;
     }
 
