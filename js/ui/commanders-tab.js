@@ -35,6 +35,7 @@ function activateTab(tabName) {
 
   if (tabName === "commanders") renderCommandersTab();
   if (tabName === "theme") renderThemeTab();
+  if (tabName === "bottomup") renderBottomUpTab();
   if (tabName === "analytics") activateAnalyticsTab();
 }
 
@@ -52,6 +53,7 @@ function resetCommanderScan() {
   commanderMatches = new Map();
   resetAnalyticsCache();
   if (typeof resetThemeTabSupport === "function") resetThemeTabSupport();
+  if (typeof resetBottomUpTab === "function") resetBottomUpTab();
 
   const collection = getOwnedCollection();
   if (!collection) return;

@@ -719,6 +719,7 @@ if (eventEnginesToggle) {
 bindPreviewHoverImages();
 bindCommandersTab();
 bindThemeTab();
+bindBottomUpTab();
 hydrateCardCacheFromStorage();
 renderPreviewEmptyState();
 renderCommandersTab();

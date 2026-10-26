@@ -16,6 +16,7 @@
       <button class="tab-btn active" type="button" data-tab="build">Build a Deck</button>
       <button class="tab-btn" type="button" data-tab="commanders">Your Commanders</button>
       <button class="tab-btn" type="button" data-tab="theme">Theme / Typal</button>
+      <button class="tab-btn" type="button" data-tab="bottomup">Bottom-Up Build</button>
       <button class="tab-btn" type="button" data-tab="analytics">Collection Analytics</button>
     </div>
 
@@ -169,6 +170,13 @@
       </div>
     </div>
 
+    <div class="tab-panel hidden" data-tab="bottomup">
+      <div class="panel">
+        <h2>Build From the Bottom Up</h2>
+        <div id="bottomUpPanel"></div>
+      </div>
+    </div>
+
     <div class="tab-panel hidden" data-tab="analytics">
       <div class="panel">
         <h2>Collection Analytics</h2>
@@ -201,6 +209,11 @@
   <script src="js/analysis/commander-match.js"></script>
   <script src="js/analysis/plans.js"></script>
   <script src="js/analysis/discovery.js"></script>
+  <script src="js/analysis/collection-summary.js"></script>
+  <script src="js/analysis/archetypes.js"></script>
+  <script src="js/build/bottom-up-deck.js"></script>
+  <script src="js/analysis/bottom-up.js"></script>
+  <script src="js/analysis/commander-fit.js"></script>
   <script src="js/dom.js"></script>
   <script src="js/state.js"></script>
   <script src="js/ui/status.js"></script>
@@ -212,6 +225,7 @@
   <script src="js/ui/plans.js"></script>
   <script src="js/ui/commanders-tab.js"></script>
   <script src="js/ui/theme-tab.js"></script>
+  <script src="js/ui/bottom-up-tab.js"></script>
   <script src="js/ui/collection-analytics.js"></script>
   <script src="js/ui/export.js"></script>
   <script src="js/main.js"></script>
