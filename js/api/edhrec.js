@@ -707,6 +707,38 @@ function extractEdhrecTagCommanders(data) {
   return entries;
 }
 
+// Share of decks that run each card on a tag's budget page: name -> num_decks / potential_decks.
+// A card listed in several sections keeps its best reading; the commander section lists commanders,
+// not cards, and a card with no potential decks has nothing to say.
+function extractEdhrecBudgetInclusion(data) {
+  const rates = new Map();
+  const cardlists = data?.container?.json_dict?.cardlists;
+  if (!Array.isArray(cardlists)) return rates;
+  for (const section of cardlists) {
+    if (/commander/i.test(String(section?.header || ""))) continue;
+    for (const entry of Array.isArray(section.cardviews) ? section.cardviews : []) {
+      const potential = Number(entry?.potential_decks || 0);
+      if (!entry?.name || potential <= 0) continue;
+      const rate = Number(entry.num_decks || 0) / potential;
+      const key = normalizeCardName(entry.name);
+      if (rate > (rates.get(key) || 0)) rates.set(key, rate);
+    }
+  }
+  return rates;
+}
+
+// The budget page can 403/404 like any tag page; the result is then an empty map and the build
+// falls back to its alphabetical tiebreak.
+async function fetchEdhrecBudgetInclusion(themeSlug) {
+  try {
+    const data = await fetchJsonWithTimeout(`${EDHREC_TAGS_BASE}${themeSlug}/budget.json`, {}, 12000);
+    return edhrecPayloadHasCards(data) ? extractEdhrecBudgetInclusion(data) : new Map();
+  } catch (error) {
+    console.warn(`EDHREC budget page unavailable: ${themeSlug}`, error);
+    return new Map();
+  }
+}
+
 // A theme's tag page can 403/404 (typo, or EDHREC just doesn't track it) --
 // treated the same as a missing color page, an empty result rather than an
 // error the caller has to handle.

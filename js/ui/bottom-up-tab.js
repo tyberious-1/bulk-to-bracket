@@ -17,6 +17,8 @@ let bottomUpError = "";
 let bottomUpResult = null;
 // Archetype groups the player has opened; every group starts collapsed.
 let bottomUpOpenGroups = new Set();
+// EDHREC budget inclusion per tag slug, fetched once; an empty map means no budget page (or Pauper).
+let bottomUpBudgetCache = new Map();
 let bottomUpPicks = { archetype: "midrange", subtypeKey: "", colors: new Set() };
 
 function resetBottomUpTab() {
@@ -26,6 +28,14 @@ function resetBottomUpTab() {
   bottomUpError = "";
   bottomUpResult = null;
   bottomUpOpenGroups = new Set();
+  bottomUpBudgetCache = new Map();
+}
+
+async function loadBottomUpBudgetInclusion(subtype) {
+  const entry = findBottomUpEntry(bottomUpSubtypeKey(subtype));
+  if (!entry || !entry.slug || isPauperFormat()) return new Map();
+  if (!bottomUpBudgetCache.has(entry.slug)) bottomUpBudgetCache.set(entry.slug, await fetchEdhrecBudgetInclusion(entry.slug));
+  return bottomUpBudgetCache.get(entry.slug);
 }
 
 function bottomUpColorsLabel(colors) {
@@ -90,8 +100,9 @@ async function buildBottomUpDeck(archetype, subtype, colors) {
   try {
     await loadBottomUpCardData();
     const owned = bottomUpOwnedCards();
-    const landCount = recommendLandCount(colors);
-    const { deck, report } = buildDeckBottomUp(owned, { archetype, subtype, colors, nonlandSlots: 99 - landCount });
+    const landCount = bottomUpLandCount(archetype, colors);
+    const budgetInclusion = await loadBottomUpBudgetInclusion(subtype);
+    const { deck, report } = buildDeckBottomUp(owned, { archetype, subtype, colors, nonlandSlots: 99 - landCount, budgetInclusion });
     const lands = buildBottomUpManaBase(deck, colors, getOwnedCollection(), bottomUpCardData, landCount);
 
     const ownedKeys = new Set(owned.map((card) => normalizeCardName(card.name)));
@@ -142,9 +153,10 @@ function selectBottomUpCommander(index) {
     const colors = narrowDeckColors(r.original.colors, commanderIdentity(row.cards));
     const names = new Set(row.cards.map((card) => card.name));
     const pool = bottomUpOwnedCards().filter((card) => !names.has(card.name));
-    const landCount = recommendLandCount(colors);
+    const landCount = bottomUpLandCount(r.archetype, colors);
     const deckSize = 99 - (row.cards.length - 1);
-    const { deck, report } = buildDeckBottomUp(pool, { archetype: r.archetype, subtype: r.subtype, colors, nonlandSlots: deckSize - landCount });
+    const budgetInclusion = bottomUpBudgetCache.get(findBottomUpEntry(bottomUpSubtypeKey(r.subtype))?.slug) || new Map();
+    const { deck, report } = buildDeckBottomUp(pool, { archetype: r.archetype, subtype: r.subtype, colors, nonlandSlots: deckSize - landCount, budgetInclusion });
     const lands = buildBottomUpManaBase(deck, colors, getOwnedCollection(), bottomUpCardData, landCount);
     const kept = new Set(deck.map((card) => card.name));
     r.commander = { cards: row.cards, swappedOut: r.original.deck.filter((card) => !kept.has(card.name)).map((card) => card.name) };
@@ -210,6 +222,21 @@ function renderBottomUpPickers() {
     </div>`;
 }
 
+function renderBottomUpReliability(r) {
+  const rel = deckReliability(r.deck, r.lands, r.colors, { subtypeLabel: r.subtype.kind === "tribal" ? r.subtype.label : "" });
+  if (!rel.lines.length) return "";
+  const chip = (rating) => `<span class="status-chip status-${rating === "good" ? "deep" : rating === "OK" ? "ok" : "thin"}">${rating}</span>`;
+  const rows = rel.lines.map((line) => `<li>${escapeHtml(line.label)}: ${Math.round(line.odds * 100)}% ${chip(line.rating)}</li>`).join("");
+  const s = rel.summary;
+  return `
+      <details class="bu-reliability">
+        <summary>Reliability: ${s.good} good, ${s.ok} OK, ${s.weak} weak${s.weak ? ` (weakest: ${escapeHtml(s.weakest.label)})` : ""}</summary>
+        <ul class="bu-list">${rows}</ul>
+        ${rel.notes.length ? `<p class="detail-note">${escapeHtml(rel.notes.join("; "))}.</p>` : ""}
+        <p class="detail-note">Odds on the play with no mulligans, from a ${rel.library}-card library. This measures how consistently the deck does something, not how strong it is. Ramp counts reliable mana only, cantrips and loots count half as card draw, color sources count lands only, and a growing mana source such as Cheering Crowd counts as one.</p>
+      </details>`;
+}
+
 function renderBottomUpResult() {
   const r = bottomUpResult;
   if (!r) return "";
@@ -242,7 +269,8 @@ function renderBottomUpResult() {
     <div class="bu-result">
       <h3>${escapeHtml(ARCHETYPES[r.archetype].label)} ${escapeHtml(r.subtype.label)} <span class="plan-tag">${escapeHtml(bottomUpColorsLabel(r.colors))}</span></h3>
       ${commanderBox}
-      <p class="detail-note">${escapeHtml(d.support)}; ${escapeHtml(d.quality)}; average mana value ${r.report.avgCmc}; ${r.lands.length} lands.${d.roles.length ? ` ${escapeHtml(d.roles.join("; "))}.` : ""}</p>
+      <p class="detail-note">${escapeHtml(d.support)}; ${escapeHtml(d.quality)}; average mana value ${r.report.avgCmc}; ${r.lands.length} lands.${d.roles.length ? ` ${escapeHtml(d.roles.join("; "))}.` : ""}${d.notes.length ? ` ${escapeHtml(d.notes.join("; "))}.` : ""}</p>
+      ${renderBottomUpReliability(r)}
       <button id="buCopyBtn" type="button">Copy decklist</button>
       <div class="priority-section-label">Commanders you own that fit</div>
       <ul class="bu-list">${solo.length ? solo.map(fitRow).join("") : '<li class="detail-note">None of your commanders fit these colors well.</li>'}</ul>
