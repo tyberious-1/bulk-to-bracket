@@ -18,8 +18,13 @@ function buildDeckBottomUp(cards, options) {
   const nonlandSlots = options.nonlandSlots || BOTTOM_UP_NONLAND_SLOTS;
   const slots = scaleSlots(ARCHETYPES[archetype].slots, nonlandSlots);
   const counterSlots = counterFloor(archetype, colors, nonlandSlots);
+  const answerSlots = answerFloor(archetype, nonlandSlots);
   const caps = { ...slots };
   const ctx = { archetype, subtype };
+  // EDHREC budget-page inclusion (name -> share of decks): it only orders cards whose scores are
+  // equal, so a large tier of equal Zombies is not left to the alphabet. It never moves a score.
+  const budgetInclusion = options.budgetInclusion instanceof Map ? options.budgetInclusion : new Map();
+  const inclusionOf = (card) => budgetInclusion.get(normalizeCardName(card.name)) || budgetInclusion.get(normalizeCardName(getPrimaryCardName(card.name))) || 0;
 
   const seen = new Set();
   const pool = [];
@@ -28,9 +33,9 @@ function buildDeckBottomUp(cards, options) {
     seen.add(card.name);
     if (getCardType(card).includes("land")) continue;
     if (!legalForCommander(card.colors || [], colors, card)) continue;
-    pool.push({ card, a: annotateBottomUpCard(card, subtype), score: archetypeScore(card, ctx) });
+    pool.push({ card, a: annotateBottomUpCard(card, subtype), score: archetypeScore(card, ctx), inclusion: inclusionOf(card) });
   }
-  pool.sort((x, y) => y.score - x.score || String(x.card.name).localeCompare(String(y.card.name)));
+  pool.sort((x, y) => (Math.abs(y.score - x.score) > 1e-9 ? y.score - x.score : 0) || y.inclusion - x.inclusion || String(x.card.name).localeCompare(String(y.card.name)));
 
   const picked = new Set();
   const deck = [];
@@ -57,8 +62,17 @@ function buildDeckBottomUp(cards, options) {
         if (row.a.role === "removal" && isCounterKind(row.a.removalKind) && canTake(row)) { take(row); reserved += 1; }
       }
     }
+    if (role === "removal") {
+      let reserved = 0;
+      for (const row of pool) {
+        if (reserved >= answerSlots || roleCounts.removal >= caps.removal) break;
+        if (row.a.role === "removal" && row.a.removalKind === "permanent" && canTake(row)) { take(row); reserved += 1; }
+      }
+    }
     for (const row of pool) {
       if (roleCounts[role] >= caps[role]) break;
+      // Past the cap, an artifact or enchantment answer waits: creature answers come first.
+      if (role === "removal" && row.a.removalKind === "permanent" && deck.filter((r) => r.a.removalKind === "permanent").length >= BOTTOM_UP_ANSWER_CAP) continue;
       if (row.a.role === role && canTake(row)) take(row);
     }
     // Draw digs for the answers a thin pool lacks: it covers part of a missing removal or wipe slot.
@@ -97,12 +111,13 @@ function buildDeckBottomUp(cards, options) {
     curve[bucket] = (curve[bucket] || 0) + 1;
   }
   const support = deck.filter((r) => r.a.standing === "member" || r.a.standing === "payoff");
+  const answerCount = count((r) => r.a.role === "removal" && r.a.removalKind === "permanent");
   const counterCount = count((r) => r.a.role === "removal" && isCounterKind(r.a.removalKind));
   const shortfalls = {};
   for (const role of BOTTOM_UP_ROLE_ORDER) shortfalls[role] = Math.max(0, slots[role] - roleCounts[role]);
 
   return {
-    deck: deck.map((row) => ({ ...row.card, bottomUpRole: row.a.role, standing: row.a.standing })),
+    deck: deck.map((row) => ({ ...row.card, bottomUpRole: row.a.role, bottomUpRampKind: row.a.rampKind, bottomUpDrawKind: row.a.drawKind, bottomUpRebuild: row.a.rebuild, bottomUpProtects: row.a.protects, bottomUpSpares: row.a.spares, standing: row.a.standing })),
     report: {
       nonlandSlots,
       slots,
@@ -115,7 +130,9 @@ function buildDeckBottomUp(cards, options) {
       shortfalls,
       substitutions,
       counters: { floor: counterSlots, count: counterCount, shortfall: Math.max(0, counterSlots - counterCount) },
+      answers: { floor: answerSlots, count: answerCount, shortfall: Math.max(0, answerSlots - answerCount) },
       overflow,
+      budget: { applied: deck.some((r) => r.inclusion > 0), matched: count((r) => r.inclusion > 0) },
       avgCmc: deck.length ? +(deck.reduce((sum, r) => sum + (Number(r.card.cmc) || 0), 0) / deck.length).toFixed(2) : 0,
       curve,
       supportRarity: {

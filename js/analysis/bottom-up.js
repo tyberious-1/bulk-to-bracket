@@ -9,9 +9,10 @@
 
 // Tribes and themes are ranked apart: a theme such as Graveyard matches most of a collection, so it
 // would otherwise always outrank a concrete tribe (the same reason discovery.js groups them).
-const SUGGESTION_TRIBES = 6;
-const SUGGESTION_THEMES = 4;
-const SUGGESTION_ROWS_PER_KIND = 9;
+const SUGGESTION_TRIBES = 10;
+const SUGGESTION_THEMES = 6;
+// Rows kept per archetype, so Control is not left with what Aggro and Midrange did not take.
+const SUGGESTION_ROWS_PER_ARCHETYPE = { tribal: 8, theme: 4 };
 const SUGGESTION_COLORS = ["W", "U", "B", "R", "G"];
 // A second color must bring at least this many more supporting cards to be worth offering.
 const SUGGESTION_PAIR_GAIN = 3;
@@ -67,10 +68,14 @@ function describeBuild(report) {
   for (const [role, missing] of Object.entries(report.shortfalls)) {
     if (missing > 0) roles.push(`${role}: ${report.roleCounts[role]} of ${report.slots[role]}`);
   }
+  if (report.answers && report.answers.shortfall > 0) roles.push(`artifact and enchantment answers: ${report.answers.count} of ${report.answers.floor}`);
   if (report.counters && report.counters.shortfall > 0) roles.push(`counterspells: ${report.counters.count} of ${report.counters.floor}`);
   for (const sub of report.substitutions) roles.push(`draw covers ${sub.extraDraw} of ${sub.shortfall} missing ${sub.role} slots`);
 
-  return { support: `${report.members} members, ${report.payoffs} payoffs, ${report.mentions} mentions`, quality, roles };
+  const notes = [];
+  if (report.budget && report.budget.applied) notes.push(`ties between equal cards broken by EDHREC budget inclusion (${report.budget.matched} cards matched)`);
+
+  return { support: `${report.members} members, ${report.payoffs} payoffs, ${report.mentions} mentions`, quality, roles, notes };
 }
 
 function rankBottomUpSuggestions(cards, catalog, tribeFor) {
@@ -85,7 +90,7 @@ function rankBottomUpSuggestions(cards, catalog, tribeFor) {
 
   const ranked = rankCollectionSupport(nonland, catalog, tribeFor);
   const share = (row) => (row.report.members + row.report.payoffs) / Math.max(row.report.nonlandSlots, 1);
-  const rowsFor = (supportedRows) => {
+  const rowsFor = (supportedRows, perArchetype) => {
     const rows = [];
     for (const supported of supportedRows) {
       const subtype = toBottomUpSubtype(supported.entry, tribeFor);
@@ -97,12 +102,12 @@ function rankBottomUpSuggestions(cards, catalog, tribeFor) {
       }
     }
     rows.sort((a, b) => RATING_RANK[a.rating] - RATING_RANK[b.rating] || share(b) - share(a));
-    return rows.slice(0, SUGGESTION_ROWS_PER_KIND);
+    return ARCHETYPE_ORDER.flatMap((archetype) => rows.filter((row) => row.archetype === archetype).slice(0, perArchetype));
   };
 
   return [
-    ...rowsFor(ranked.filter((r) => r.entry.kind === "tribal").slice(0, SUGGESTION_TRIBES)),
-    ...rowsFor(ranked.filter((r) => r.entry.kind !== "tribal").slice(0, SUGGESTION_THEMES))
+    ...rowsFor(ranked.filter((r) => r.entry.kind === "tribal").slice(0, SUGGESTION_TRIBES), SUGGESTION_ROWS_PER_ARCHETYPE.tribal),
+    ...rowsFor(ranked.filter((r) => r.entry.kind !== "tribal").slice(0, SUGGESTION_THEMES), SUGGESTION_ROWS_PER_ARCHETYPE.theme)
   ];
 }
 
