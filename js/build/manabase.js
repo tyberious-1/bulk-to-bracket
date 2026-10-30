@@ -488,7 +488,7 @@ function recommendLandCount(commanderColors) {
 }
 
 function landConditionMatchesStrategy(tag, strategyProfile, modePrefs) {
-  if (modePrefs.engineNeeds?.payloadType === tag) return true;
+  if (getPayloadTypes(modePrefs.engineNeeds).includes(tag)) return true;
   if (!NICHE_LAND_CONDITION_WORDS.has(tag)) return true;
   if ((strategyProfile.tribalTypes || []).includes(tag)) return true;
   if ((modePrefs.focusedTribalTypes || []).includes(tag)) return true;

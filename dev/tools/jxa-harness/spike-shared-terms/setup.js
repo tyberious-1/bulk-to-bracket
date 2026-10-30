@@ -1,0 +1,11 @@
+const fs=require("fs"),vm=require("vm"),path=require("path");
+const root="/Users/seth_burns/xpwd/p_projects/bulk-to-bracket";
+const store={};const ctx=vm.createContext({console,localStorage:{getItem:k=>k in store?store[k]:null,setItem:(k,v)=>{store[k]=String(v)},removeItem:k=>{delete store[k]}},setTimeout,clearTimeout,fetch:()=>Promise.reject(new Error("no net")),AbortController});
+for(const f of fs.readFileSync(root+"/dev/tools/jxa-harness/build_harness.sh","utf8").match(/js\/[\w\/.-]+\.js/g))vm.runInContext(fs.readFileSync(path.join(root,f),"utf8"),ctx,{filename:f});
+const owned=JSON.parse(fs.readFileSync(root+"/dev/tools/jxa-harness/owned_raw.json","utf8"));
+ctx.__owned=owned;vm.runInContext("this.__cards=__owned.map(convertScryfallCard)",ctx);
+const T=(t,p)=>({kind:"tribal",tag:p||t+"s",label:t,tribe:t}),H=t=>({kind:"theme",tag:t,label:t});
+ctx.__plans=[["vehicles",H("vehicles"),["W","B"]],["wizard",T("wizard"),["U","R"]],["sacrifice",H("sacrifice"),["B","R"]],["infect~deathtouch",H("infect~deathtouch"),["G"]],["vampire",T("vampire"),["B","R"]],["insect",T("insect"),["B","G"]],["knight",T("knight"),["U","W"]]];
+const q=require("./qual.js");
+const all=owned.filter((c,i,a)=>a.findIndex(x=>x.oracle_id===c.oracle_id)===i).map(c=>q.norm(c,"scry"));q.setTypes(all);
+module.exports={vm,ctx,owned,q,all};

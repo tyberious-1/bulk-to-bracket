@@ -75,7 +75,7 @@ function parseCommanderNeeds(commanderTexts) {
     .filter((t) => typeof t === "string" && t.trim())
     .map((t) => t.toLowerCase())
     .join("\n");
-  const needs = { payloadType: null, graveyard: false, returnsFromGraveyard: false, devotionColors: [], events: [] };
+  const needs = { payloadType: null, payloadTypes: [], graveyard: false, returnsFromGraveyard: false, devotionColors: [], events: [] };
   if (!text) return needs;
 
   needs.graveyard = /\bgraveyard\b/.test(text);
@@ -99,6 +99,15 @@ function parseCommanderNeeds(commanderTexts) {
   const token = text.match(/create [^.]*?\b([a-z]+) creature tokens?/);
   if (token) candidates.push(token[1]);
   needs.payloadType = candidates.find((word) => !ENGINE_NON_PAYLOAD_WORDS.has(word)) || null;
+
+  // A commander that names Mounts and/or Vehicles (Miriam, Lagorin, Caradora) is for either or both:
+  // each named type is a payload, Vehicle first as the primary one.
+  needs.payloadTypes = needs.payloadType ? [needs.payloadType] : [];
+  // A return clause that names two types stays unread (it is ambiguous), so only a commander without one is scanned.
+  for (const word of needs.returnsFromGraveyard ? [] : ["vehicle", "mount"]) {
+    if (new RegExp(`\\b${word}s?\\b`).test(text.replace(/\([^)]*\)/g, " ")) && !needs.payloadTypes.includes(word)) needs.payloadTypes.push(word);
+  }
+  if (!needs.payloadType && needs.payloadTypes.length) needs.payloadType = needs.payloadTypes[0];
 
   // Devotion conditions, read from the labels (a quoted ability counts too).
   for (const ab of abilities) {
@@ -176,7 +185,32 @@ function engineDiscardFits(object, type, creaturePayload) {
   return creaturePayload ? /\bcreature\b/.test(o) : /\b(?:artifact|noncreature)\b/.test(o);
 }
 
+// Every payload type a commander names (payloadType alone for needs built without the list).
+function getPayloadTypes(needs) {
+  if (!needs) return [];
+  if (needs.payloadTypes && needs.payloadTypes.length) return needs.payloadTypes;
+  return needs.payloadType ? [needs.payloadType] : [];
+}
+
+function getPayloadNames(needs) {
+  return getPayloadTypes(needs).map((t) => t.charAt(0).toUpperCase() + t.slice(1));
+}
+
+// With two payload types a card is read once per type and the strongest reading of each class kept.
 function getEngineClassDetails(card, needs) {
+  const types = getPayloadTypes(needs);
+  if (types.length < 2) return getEngineClassDetailsForType(card, needs);
+  const merged = new Map();
+  for (const t of types) {
+    for (const d of getEngineClassDetailsForType(card, { ...needs, payloadType: t })) {
+      const prev = merged.get(d.cls);
+      if (!prev || (prev.weak && !d.weak) || (prev.weak === d.weak && d.flaws.length < prev.flaws.length)) merged.set(d.cls, d);
+    }
+  }
+  return Array.from(merged.values());
+}
+
+function getEngineClassDetailsForType(card, needs) {
   if (!card || (!isEngineActive(needs) && !hasEventNeeds(needs))) return [];
   const text = getCardText(card);
   const abilities = getCardAbilities(card);
@@ -229,8 +263,7 @@ function getEngineClassDetails(card, needs) {
         if (ab.trigger.includes("crews") || ab.trigger.includes("becomes-tapped")) add("crewTap", false, []);
         if (ab.effects.some((e) => e.label === "crew-helper")) add("crewHelper", false, []);
       }
-      const power = Number(card.raw && card.raw.power);
-      if (getCardType(card).includes("creature") && Number(card.cmc || 0) <= 2 && power >= 3) add("crewBody", false, []);
+      if (getCardType(card).includes("creature") && Number(card.cmc || 0) <= 2 && getCrewPower(card) >= 3) add("crewBody", false, []);
     }
   }
 
@@ -390,6 +423,55 @@ function getCrewCost(card) {
   return match ? Number(match[1]) : null;
 }
 
+// A Vehicle deck carries about one vehicle per this many creatures (a 19-crew-creature, 15-vehicle
+// list is typical): a vehicle with no one to crew it is a dead card.
+const ENGINE_CREATURES_PER_VEHICLE = 1.25;
+// A Vehicle deck is built with at least this many creatures, however few the average EDHREC list runs.
+const ENGINE_VEHICLE_PLAN_CREATURES = 24;
+// The artifact target a Vehicle deck gets at least (an average list runs about 15 vehicles).
+const ENGINE_VEHICLE_PLAN_ARTIFACTS = 15;
+
+function isNoncreatureVehicle(card) {
+  const type = getCardType(card);
+  return type.includes("vehicle") && !type.split("—")[0].includes("creature");
+}
+
+// When a commander's payload includes Vehicles: lifts the creature bucket to the plan minimum and returns
+// how many vehicles the creature target can crew (0 when there is no vehicle payload). The build then
+// picks vehicles as usual and drops the rest from its pools once it holds that many, so the cap trims
+// the spares, not the best.
+function planPayloadVehicles(creatureBucket, needs, artifactBucket = null) {
+  if (!getPayloadTypes(needs).includes("vehicle")) return 0;
+  creatureBucket.target = Math.max(creatureBucket.target, ENGINE_VEHICLE_PLAN_CREATURES);
+  creatureBucket.min = Math.max(creatureBucket.min, ENGINE_VEHICLE_PLAN_CREATURES - 4);
+  const ceiling = Math.max(1, Math.floor(creatureBucket.target / ENGINE_CREATURES_PER_VEHICLE));
+  // Vehicles are artifacts, so an average list's artifact target would otherwise cut the best vehicles.
+  if (artifactBucket) artifactBucket.target = Math.max(artifactBucket.target, Math.min(ceiling, ENGINE_VEHICLE_PLAN_ARTIFACTS));
+  return ceiling;
+}
+
+// Removes every non-creature vehicle from the score-sorted pools, in place.
+function dropSpareVehicles(pools) {
+  for (const pool of pools) {
+    for (let i = pool.length - 1; i >= 0; i -= 1) {
+      if (isNoncreatureVehicle(pool[i])) pool.splice(i, 1);
+    }
+  }
+}
+
+// What a creature adds toward crewing, which is its power unless its own text says otherwise: "crews
+// Vehicles using its toughness rather than its power" (Giant Ox) or "as though its power were 2
+// greater" (Hotshot Mechanic). A token maker's quoted text is not the creature's own. Unknown power
+// reads NaN, as in a test fixture with no Scryfall record.
+function getCrewPower(card) {
+  const raw = card.raw || card;
+  const power = Number(raw.power);
+  const text = getCardText(card).replace(/"[^"]*"/g, " ").replace(/\([^)]*\)/g, " ");
+  if (/\bcrews vehicles using its toughness rather than its power/.test(text)) return Number(raw.toughness);
+  const boost = text.match(/\bcrews vehicles as though its power were (\d+) greater/);
+  return boost ? power + Number(boost[1]) : power;
+}
+
 // Pips of one color in a card's mana cost: {U}, hybrid {U/R} and {2/U} count,
 // generic and {X} do not.
 function countDevotionPips(card, colorLetter) {
@@ -448,6 +530,7 @@ function getEngineBonus(card, needs) {
     const crew = getCrewCost(card);
     if (crew !== null && crew <= 2) bonus += 4;
     else if (crew !== null && crew <= 3) bonus += 2;
+    else if (crew !== null && crew >= 5) bonus -= Math.min(3, crew - 4);  // a nudge, not a cap: crew is met by several creatures
     if (/when(?:ever)? [^.]*(?:enters|attacks)/.test(getCardText(card))) bonus += 2;
   }
 
@@ -513,8 +596,8 @@ const ENGINE_CLASS_REASONS = {
   crewHelper: () => "crew helper",
   crewBody: () => "crew body",
   devotionPayoff: () => "devotion payoff",
-  payloadRamp: (needs) => `is a ${needs.payloadType.charAt(0).toUpperCase()}${needs.payloadType.slice(1)} that ramps`,
-  payload: (needs) => `is a ${needs.payloadType.charAt(0).toUpperCase()}${needs.payloadType.slice(1)}`
+  payloadRamp: (needs) => `is a ${getPayloadNames(needs).join(" or ")} that ramps`,
+  payload: (needs) => `is a ${getPayloadNames(needs).join(" or ")}`
 };
 
 // Why each nonland deck card is an enabler: its strongest class, and the flaws on that class.
@@ -547,16 +630,18 @@ function listEngineEnablers(deck, allOwnedCardData, needs) {
 const ENGINE_LAND_BONUS = 4;
 
 function getEngineLandBonus(card, needs) {
-  if (!card || !needs || !needs.payloadType) return 0;
+  const types = getPayloadTypes(needs);
+  if (!card || !types.length) return 0;
   if (!getCardType(card).split("—")[0].includes("land")) return 0;
-  return new RegExp(`\\b${engineTypePattern(needs.payloadType)}s?\\b`).test(getCardText(card)) ? ENGINE_LAND_BONUS : 0;
+  const text = getCardText(card);
+  return types.some((t) => new RegExp(`\\b${engineTypePattern(t)}s?\\b`).test(text)) ? ENGINE_LAND_BONUS : 0;
 }
 
 function describeEngineNeeds(needs) {
   if (!isEngineActive(needs)) return "";
   const parts = [];
   if (needs.payloadType) {
-    const name = needs.payloadType.charAt(0).toUpperCase() + needs.payloadType.slice(1);
+    const name = getPayloadNames(needs).join(" and ");
     parts.push(needs.graveyard ? `${name} in the graveyard` : name);
   }
   if (needs.devotionColors && needs.devotionColors.length) parts.push(`devotion to ${needs.devotionColors.join("/")}`);

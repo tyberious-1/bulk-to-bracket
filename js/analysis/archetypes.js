@@ -3,7 +3,7 @@
 //
 // detectRole/getRoleContributions (scoring.js) are shared with the commander-first builder, so
 // their mistakes are corrected here (bottomUpRole) and not in scoring.js, where a change would
-// move all 56 baseline builds.
+// move all 13 baseline builds.
 //
 // Depends on: cards.js (getCardText, getCardType, getCardSubtypes),
 //   scoring.js (detectRole, getRoleContributions, detectCardTags)
@@ -17,17 +17,17 @@ const ARCHETYPES = {
   aggro: {
     label: "Aggro",
     slots: { creature: 28, ramp: 6, draw: 6, removal: 6, wipe: 0 },
-    avgCmc: 2.2, cheapCreatures: 0.8, haste: 1.5, removalQuality: 0.4
+    avgCmc: 2.2, cheapCreatures: 0.8, removalQuality: 0.4, keywordFactor: 1.2
   },
   midrange: {
     label: "Midrange",
     slots: { creature: 24, ramp: 9, draw: 8, removal: 8, wipe: 2 },
-    avgCmc: 2.5, cheapCreatures: 0, haste: 0, removalQuality: 0.5
+    avgCmc: 2.5, cheapCreatures: 0, removalQuality: 0.5, keywordFactor: 1
   },
   control: {
     label: "Control",
     slots: { creature: 14, ramp: 8, draw: 11, removal: 11, wipe: 4 },
-    avgCmc: 2.7, cheapCreatures: 0, haste: 0, removalQuality: 0.8
+    avgCmc: 2.7, cheapCreatures: 0, removalQuality: 0.8, keywordFactor: 0.7
   }
 };
 const ARCHETYPE_ORDER = ["aggro", "midrange", "control"];
@@ -40,7 +40,7 @@ function bottomUpLandCount(archetype, colors) {
   return Math.min(38, Math.max(35, adjusted));
 }
 
-const REMOVAL_QUALITY = { hard: 3, permanent: 3, counter: 2, softcounter: 1.5, bounce: 1, conditional: 1, other: 0 };
+const REMOVAL_QUALITY = { hard: 3, permanent: 3, counter: 2, softcounter: 1.5, narrowcounter: 1.5, bounce: 1, conditional: 1, other: 0 };
 
 // Counterspells reserved inside the removal slots, as [blue with other colors, mono-blue].
 // Control leans on them most; aggro does not run them.
@@ -51,7 +51,7 @@ function counterFloor(archetype, colors, nonlandSlots) {
   const scaled = scaleSlots({ floor: base, removal: ARCHETYPES[archetype].slots.removal }, nonlandSlots || BOTTOM_UP_NONLAND_SLOTS);
   return Math.min(scaled.floor, scaled.removal);
 }
-function isCounterKind(kind) { return kind === "counter" || kind === "softcounter"; }
+function isCounterKind(kind) { return kind === "counter" || kind === "softcounter" || kind === "narrowcounter"; }
 
 // Artifact and enchantment answers (Rhystic Study is a bigger problem than most creatures) are reserved
 // inside the removal slots, and capped so they cannot crowd out answers to creatures.
@@ -67,11 +67,55 @@ function answerFloor(archetype, nonlandSlots) {
 const DRAW_QUALITY = { engine: 3, pure: 2, cantrip: 1, filter: 0 };
 
 const BOTTOM_UP_WEIGHT = {
-  member: 6, payoff: 5, mention: 2, spares: 4,
-  symmetricWipeTribal: -3, symmetricWipeAggro: -4,
+  member: 6, payoff: 5, mention: 2, spares: 4, engine: 2, primaryTag: 1.5, crewPower: 0.25, crewEase: 0.4,
+  symmetricWipeTribal: -3, symmetricWipeAggro: -4, wipeFloor: -1,
   roleBase: 1, curve: 0.35,
   rampReliable: 1.5, drawQuality: 2, drawTrigger: 4
 };
+
+// Combat keywords that make a body better at its job. Every plain member of a tribe scores the same
+// otherwise, and ties fell to the alphabet, so a flying double striker lost to a vanilla 2/2. The
+// weights stay under a curve step or two: they order bodies inside the member tier, never lift a card
+// past it. Haste is left out on purpose (it does not make a deck aggro).
+const BOTTOM_UP_KEYWORD_WEIGHT = {
+  flying: 0.5, "first strike": 0.4, "double strike": 0.7, menace: 0.3,
+  trample: 0.2, vigilance: 0.2, lifelink: 0.2, deathtouch: 0.3
+};
+const BOTTOM_UP_KEYWORD_CAP = 1.4;
+
+// Scryfall's own keyword list when the card carries it, else the lines of rules text that are nothing
+// but keywords ("flying, first strike"), so a line like "target creature gains flying" is not read.
+function cardKeywords(card) {
+  const found = new Set();
+  const listed = card && card.raw && Array.isArray(card.raw.keywords) ? card.raw.keywords : null;
+  if (listed) {
+    for (const word of listed) {
+      const key = String(word).toLowerCase();
+      if (BOTTOM_UP_KEYWORD_WEIGHT[key] !== undefined) found.add(key);
+    }
+    return found;
+  }
+  for (const line of getCardText(card).replace(/\([^)]*\)/g, " ").split("\n")) {
+    const parts = line.split(/[,;]| and /).map((part) => part.trim()).filter(Boolean);
+    if (parts.length && parts.every((part) => BOTTOM_UP_KEYWORD_WEIGHT[part] !== undefined)) parts.forEach((part) => found.add(part));
+  }
+  return found;
+}
+
+function keywordScore(card) {
+  let total = 0;
+  for (const key of cardKeywords(card)) total += BOTTOM_UP_KEYWORD_WEIGHT[key];
+  return Math.min(BOTTOM_UP_KEYWORD_CAP, total);
+}
+
+// Scryfall's popularity rank for a card (1 is the most played; EDHREC's own ranking). It breaks ties
+// between cards the scorer cannot tell apart -- 118 blue counterspells score alike -- where the
+// alphabet used to choose. A card without one (a test fixture, a very new card) ranks last.
+const BOTTOM_UP_UNRANKED = 1e9;
+function popularityRank(card) {
+  const rank = card && card.raw ? Number(card.raw.edhrec_rank) : NaN;
+  return Number.isFinite(rank) && rank > 0 ? rank : BOTTOM_UP_UNRANKED;
+}
 
 function scaleSlots(slots, nonlandSlots) {
   const factor = nonlandSlots / BOTTOM_UP_NONLAND_SLOTS;
@@ -176,7 +220,7 @@ function bottomUpRole(card) {
   const base = detectRole(card, true);
   if (base === "wipe" && isEdict(getCardText(card))) return "removal";
   const fallbackRole = (skip) => getRoleContributions(card, true).find((role) => role !== skip) || "synergy";
-  if (base !== "removal" && base !== "wipe" && (isUpToExileRemoval(getCardText(card)) || isExtraRemoval(getCardText(card)))) return "removal";
+  if (base !== "removal" && base !== "wipe" && (isUpToExileRemoval(getCardText(card)) || isExtraRemoval(getCardText(card)) || isNarrowCounterSpell(getCardText(card)))) return "removal";
   if (base === "removal" && (isLandRemoval(getCardText(card)) || isFaceDamageOnly(getCardText(card)) || isBlink(getCardText(card)) || isSelfBounce(getCardText(card)))) return fallbackRole("removal");
   // A creature that sweeps through an activated ability (Ashling) is not a one-shot wipe; one that sweeps on entering is.
   if (base === "wipe" && getCardType(card).split("\u2014")[0].includes("creature") && !/\b(?:when|whenever)\b[^.]*\benters\b/.test(getCardText(card))) return fallbackRole("wipe");
@@ -186,9 +230,33 @@ function bottomUpRole(card) {
   return base;
 }
 
+// "counter target noncreature spell" and "counter target creature spell" are counterspells the shared
+// role pattern ("counter target spell") never matches; they answer only part of what a deck faces.
+function isNarrowCounterSpell(text) {
+  return /\bcounter target (?!spell\b)(?:[a-z-]+ )+?spell\b/.test(text);
+}
+
+// Small adjustments that order removal spells of the same kind (two "destroy target" cards tied, and the
+// alphabet chose): instant speed and a flexible target are worth a little, an extra cost, a narrow
+// target or a gift to the opponent cost a little. They stay under a quarter of a removal kind's weight.
+function removalFinesse(card) {
+  const text = getCardText(card).replace(/\([^)]*\)/g, " ");
+  let fine = 0;
+  if (getCardType(card).includes("instant") || /\bflash\b/.test(text)) fine += 0.3;
+  if (/\btarget (?:nonland )?permanent\b|creature or planeswalker|creature, planeswalker/.test(text)) fine += 0.3;
+  if (/as an additional cost to cast this spell, (?:sacrifice|discard|exile|pay)/.test(text)) fine -= 0.5;
+  if (/\btarget (?:artifact|enchantment|tapped|attacking|blocking|legendary|flying|monocolored|multicolored) creature|with (?:power|toughness|mana value) \d+ or (?:less|greater)/.test(text)) fine -= 0.5;
+  else if (/\btarget non[a-z]+ creature/.test(text)) fine -= 0.15;
+  if (/\bits controller (?:creates|investigates)|\bgift an?\b/.test(text)) fine -= 0.2;
+  return fine;
+}
+
 function removalKind(card) {
   const text = getCardText(card);
-  if (/counter target/.test(text)) return /unless (?:its controller|that player|they) pays?/.test(text) ? "softcounter" : "counter";
+  if (/counter target/.test(text)) {
+    if (/unless (?:its controller|that player|they) pays?/.test(text)) return "softcounter";
+    return isNarrowCounterSpell(text) ? "narrowcounter" : "counter";
+  }
   if (/return (?:target|up to)[^.]*to (?:its|their) owner/.test(text)) return "bounce";
   if (isPermanentAnswer(text)) return "permanent";
   if (/destroy target|exile target/.test(text) && /that was dealt damage/.test(text)) return "conditional";
@@ -266,13 +334,82 @@ function tribeFormsPattern(subtype) {
 const bottomUpTagCache = new WeakMap();
 function bottomUpTags(card) {
   let tags = bottomUpTagCache.get(card);
-  if (!tags) { tags = new Set(detectCardTags(card)); bottomUpTagCache.set(card, tags); }
+  if (!tags) {
+    tags = new Set(detectCardTags(card));
+    // Local to the bottom-up build (scoring.js is shared): a deathtouch creature is fodder for a poison plan.
+    const keywords = (card.raw && card.raw.keywords) || [];
+    if (keywords.includes("Deathtouch") || /\bdeathtouch\b/.test(getCardText(card).replace(/\([^)]*\)/g, " "))) tags.add("deathtouch");
+    bottomUpTagCache.set(card, tags);
+  }
   return tags;
+}
+
+// Theme plans read the shared terms (terms.js). planMakeTerms are what a plan's own cards make, found from the pool;
+// planTerms adds what the plan is known to feed on (proliferate feeds a poison plan). A plan card that needs a plan term
+// and does not make it is a payoff; one that needs and makes it is an amplifier (member with the engine flag).
+const THEME_PLAN_TERM_OVERRIDES = { "infect~deathtouch": ["poison counter", "counter"] };
+const THEME_PLAN_TERM_SHARE = 0.4;
+
+function derivePlanTerms(cards, subtype, vocab, supply) {
+  const tags = subtype.tag.split("~");
+  const members = (cards || []).filter((card) => tags.some((tag) => bottomUpTags(card).has(tag)));
+  const found = new Set();
+  if (!members.length) return found;
+  const counts = new Map();
+  for (const card of members) for (const t of getCardTerms(card, vocab).makes) counts.set(t, (counts.get(t) || 0) + 1);
+  for (const [t, n] of counts) if (n / members.length >= THEME_PLAN_TERM_SHARE && supply.isCounted(new Set([t]))) found.add(t);
+  return found;
+}
+
+const planTermCache = new WeakMap();
+// A theme plan with the terms attached; a tribal plan, or a theme with no terms, comes back unchanged.
+function withPlanTerms(subtype, cards) {
+  if (!subtype || subtype.kind === "tribal" || !Array.isArray(cards) || !cards.length) return subtype;
+  let byTag = planTermCache.get(cards);
+  if (!byTag) { byTag = new Map(); planTermCache.set(cards, byTag); }
+  if (!byTag.has(subtype.tag)) {
+    const vocab = buildTermVocab(cards);
+    const supply = createTermSupply(cards, vocab);
+    const planMakeTerms = derivePlanTerms(cards, subtype, vocab, supply);
+    const planTerms = new Set([...planMakeTerms, ...(THEME_PLAN_TERM_OVERRIDES[subtype.tag] || [])]);
+    byTag.set(subtype.tag, planTerms.size ? { planMakeTerms, planTerms, termVocab: vocab, termSupply: supply } : null);
+  }
+  const terms = byTag.get(subtype.tag);
+  return terms ? { ...subtype, ...terms } : subtype;
+}
+
+// The counted need clauses of a card that touch the plan, each with whether the card itself makes a term in it.
+function themeNeeds(card, subtype) {
+  const supply = subtype.termSupply;
+  const out = [];
+  for (const clause of getCardTerms(card, subtype.termVocab).clauses) {
+    if (![...clause].some((t) => subtype.planTerms.has(t))) continue;
+    const makes = cardMakesAny(card, clause, subtype.termVocab);
+    out.push({ clause, makes, counted: supply.isCounted(clause) && supply.suppliers(clause) - (makes ? 1 : 0) >= 2 });
+  }
+  return out;
+}
+
+function themeStanding(card, subtype) {
+  const tags = subtype.tag.split("~");
+  const tagged = tags.some((tag) => bottomUpTags(card).has(tag)) || (tags.includes("vehicles") && isCrewHelper(card));
+  if (!subtype.planTerms || !subtype.planTerms.size) return tagged ? "member" : "none";
+  const needs = themeNeeds(card, subtype);
+  const counted = needs.filter((n) => n.counted);
+  if (counted.length) return counted.some((n) => n.makes) ? "member" : "payoff";
+  if (tagged || [...subtype.planMakeTerms].some((t) => getCardTerms(card, subtype.termVocab).makes.has(t))) return "member";
+  return needs.length ? "mention" : "none";
+}
+
+function isThemeEngine(card, subtype) {
+  if (!subtype || subtype.kind === "tribal" || !subtype.planTerms || !subtype.planTerms.size) return false;
+  return themeNeeds(card, subtype).some((n) => n.counted && n.makes);
 }
 
 function subtypeStanding(card, subtype) {
   if (!subtype) return "none";
-  if (subtype.kind !== "tribal") return bottomUpTags(card).has(subtype.tag) ? "member" : "none";
+  // A theme may join tags with "~" (a plan with two parts, as in the theme: mode string).
+  if (subtype.kind !== "tribal") return themeStanding(card, subtype);
 
   const tribe = String(subtype.tribe || "").toLowerCase();
   if (!tribe) return "none";
@@ -283,11 +420,31 @@ function subtypeStanding(card, subtype) {
   const text = getCardText(card).replace(new RegExp(`\\bnon-?(?:${forms})\\b`, "g"), " ");
   if (!new RegExp(`\\b(?:${forms})\\b`).test(text)) return "none";
 
-  const payoff = new RegExp(
+  return tribePayoffPattern(forms).test(text) ? "payoff" : "mention";
+}
+
+function tribePayoffPattern(forms) {
+  return new RegExp(
     `\\b(?:${forms}) you control|\\bother (?:${forms})\\b|\\b(?:${forms}) (?:get|gain|have)\\b|` +
-    `whenever (?:a|an|one or more) (?:other )?(?:${forms})\\b|create[^.]*\\b(?:${forms})\\b|amass (?:${forms})\\b`
+    `whenever (?:a|an|one or more) (?:other )?(?:${forms})\\b|create[^.]*\\b(?:${forms})\\b|amass (?:${forms})\\b|` +
+    // Conditional wording: "if you control a Wizard", "costs {1} less if you control a Wizard", "for each Wizard you control",
+    // "the number of Wizards you control", "Wizard spells you cast".
+    `\\b(?:if|as long as|unless) you control (?:an? |another |at least \\w+ )?(?:${forms})\\b|less to cast if you control (?:an? )?(?:${forms})\\b|` +
+    `for each (?:${forms}) you control|number of (?:${forms}) you control|\\b(?:${forms}) spells? you cast`
   );
-  return payoff.test(text) ? "payoff" : "mention";
+}
+
+// A tribe member whose own text makes or pumps the tribe (a token maker, a lord, a count of the
+// tribe). Standing stays "member"; this is the extra the payoff reading used to throw away.
+// Reminder text is not an ability, and a token the opponent creates is not yours.
+function isTribeEngine(card, subtype) {
+  if (!subtype || subtype.kind !== "tribal" || !subtype.tribe) return false;
+  const forms = tribeFormsPattern(subtype);
+  const text = getCardText(card)
+    .replace(/\([^)]*\)/g, " ")
+    .replace(new RegExp(`\\bnon-?(?:${forms})\\b`, "g"), " ")
+    .replace(/\b(?:that player|an opponent|each opponent|target opponent|defending player) creates?\b[^.]*/g, " ");
+  return tribePayoffPattern(forms).test(text);
 }
 
 // A removal spell or sweeper that leaves the tribe alone ("except Zombies", "non-Zombie").
@@ -301,6 +458,12 @@ function sparesSubtype(card, subtype, role) {
   ).test(getCardText(card));
 }
 
+// A card that crews Vehicles better than its numbers say (Hotshot Mechanic) or makes a Pilot token that
+// does (Born to Drive, Back on Track): the plan's enabler, which the vehicle tag alone does not see.
+function isCrewHelper(card) {
+  return getCardAbilities(card).some((ab) => ab.effects.some((e) => e.label === "crew-helper"));
+}
+
 // Role and standing are looked up once per card: suggestions run dozens of builds over one pool.
 const bottomUpAnnotations = new WeakMap();
 
@@ -312,19 +475,22 @@ function annotateBottomUpCard(card, subtype) {
       role,
       isCreature: getCardType(card).split("—")[0].includes("creature"),
       removalKind: role === "removal" ? removalKind(card) : "",
+      removalFinesse: role === "removal" ? removalFinesse(card) : 0,
       rampKind: role === "ramp" ? rampKind(card) : "",
       drawKind: role === "draw" ? drawKind(card) : "",
-      haste: /\bhaste\b/.test(getCardText(card)),
       protects: protectsBoard(card),
+      crewHelper: isCrewHelper(card),
+      keywordScore: keywordScore(card),
       standing: new Map()
     };
     bottomUpAnnotations.set(card, base);
   }
-  const key = subtype ? `${subtype.kind}:${subtype.tag}` : "";
+  const key = subtype ? `${subtype.kind}:${subtype.tag}:${subtype.planTerms ? "t" : ""}` : "";
   if (!base.standing.has(key)) {
     base.standing.set(key, {
       standing: subtypeStanding(card, subtype),
       spares: sparesSubtype(card, subtype, base.role),
+      engine: subtype && subtype.kind !== "tribal" ? isThemeEngine(card, subtype) : isTribeEngine(card, subtype) && getCardSubtypes(card).includes(String(subtype.tribe).toLowerCase()),
       rebuild: rebuildKind(card, subtype),
       drawTrigger: base.role === "draw" ? drawTrigger(card, subtype) : ""
     });
@@ -339,12 +505,28 @@ function archetypeScore(card, ctx) {
   let score = 0;
 
   if (a.standing === "member") score += BOTTOM_UP_WEIGHT.member;
-  else if (a.standing === "payoff") score += BOTTOM_UP_WEIGHT.payoff;
+  // In a theme plan the sources are many and the payoffs few, so a payoff ranks above a source (as an amplifier does) or the sources crowd it out.
+  else if (a.standing === "payoff") score += ctx.subtype && ctx.subtype.kind !== "tribal" && ctx.subtype.planTerms ? BOTTOM_UP_WEIGHT.member + BOTTOM_UP_WEIGHT.engine : BOTTOM_UP_WEIGHT.payoff;
   else if (a.standing === "mention") score += BOTTOM_UP_WEIGHT.mention;
+  // A vehicle plan wants powerful creatures: crew N needs power N, and one 3-power body crews most vehicles.
+  if (a.isCreature && ctx.subtype && ctx.subtype.kind !== "tribal" && ctx.subtype.tag.split("~").includes("vehicles")) {
+    const power = getCrewPower(card);
+    if (power > 0) score += Math.min(power, 4) * BOTTOM_UP_WEIGHT.crewPower;
+  }
+  // An easy-to-crew vehicle ranks ahead (as engines.js scores a payload Vehicle), crew 1 most.
+  if (!a.isCreature && a.standing === "member" && ctx.subtype && ctx.subtype.kind !== "tribal" && ctx.subtype.tag.split("~").includes("vehicles")) {
+    const crew = (getCardText(card).match(/\bcrew (\d+)/) || [])[1];
+    if (crew) score += Math.max(0, 4 - Number(crew)) * BOTTOM_UP_WEIGHT.crewEase;
+  }
+  // A plan of two tags ("infect~deathtouch") ranks cards of the first, the plan's own, ahead of fodder.
+  if (a.standing === "member" && ctx.subtype && ctx.subtype.kind !== "tribal" && ctx.subtype.tag.includes("~") &&
+    bottomUpTags(card).has(ctx.subtype.tag.split("~")[0])) score += BOTTOM_UP_WEIGHT.primaryTag;
 
   if (a.role !== "synergy" && a.role !== "land") score += BOTTOM_UP_WEIGHT.roleBase;
   if (a.spares) score += BOTTOM_UP_WEIGHT.spares;
+  if (a.engine) score += BOTTOM_UP_WEIGHT.engine;
   if (a.role === "removal") score += REMOVAL_QUALITY[a.removalKind] * arch.removalQuality;
+  if (a.role === "removal" && (a.removalKind === "hard" || a.removalKind === "permanent")) score += a.removalFinesse;
   if (a.role === "ramp" && a.rampKind === "reliable") score += BOTTOM_UP_WEIGHT.rampReliable;
   if (a.role === "draw") score += DRAW_QUALITY[a.drawKind] * BOTTOM_UP_WEIGHT.drawQuality;
   if (a.drawTrigger) score += BOTTOM_UP_WEIGHT.drawTrigger;
@@ -355,7 +537,9 @@ function archetypeScore(card, ctx) {
   }
 
   if (a.isCreature) score += Math.max(0, 4 - cmc) * arch.cheapCreatures;
-  if (a.haste) score += arch.haste;
+  // Body quality orders the deck's own creatures. A creature that is only here for its support role
+  // (a flying card-drawer) would otherwise outrank the spells competing for the same slot.
+  if (a.isCreature && a.standing !== "none") score += a.keywordScore * arch.keywordFactor;
   if (ctx.archetype === "control" && (a.role === "draw" || a.role === "wipe")) score += 1;
 
   // Distance from the archetype's target, not a plain cost penalty: control reaches for 3s over 1s.

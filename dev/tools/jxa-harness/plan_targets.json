@@ -1,0 +1,17 @@
+{
+  "_notes": "Reference ranges for bottom-up and commander-first audits, measured 2026-10-29 from EDHREC average decks (regular and budget), MTGJSON Commander precons 2022-2026 and Scryfall type lines. Averages can include junk: treat a range as a sanity check, not a goal. A null range means no reference was found. Counts are nonland cards unless noted; lands counts the land slots.",
+  "bottomUp": {
+    "vampire":  { "source": "precons (Blood Rites 35/35) + EDHREC Edgar, Strefan, Olivia", "members": [26, 35], "creatures": [27, 35], "lands": [35, 38], "instSorc": [9, 19] },
+    "wizard":   { "source": "EDHREC Kaza, Adeliz, Azami (creature-heavy lists only)", "members": [21, 26], "creatures": [24, 27], "lands": [34, 37], "instSorc": [20, 32] },
+    "insect":   { "source": "none: no Insect precon, and EDHREC Insect commanders run almost no Insects", "members": null, "creatures": null, "lands": [34, 37], "instSorc": [15, 22] },
+    "knight":   { "source": "precon Cavalry Charge (32/32); EDHREC Knight commanders run few Knights", "members": [26, 32], "creatures": [28, 33], "lands": [35, 39], "instSorc": [13, 20] },
+    "vehicles": { "source": "EDHREC Greasefang, Depala, Kotori, Shorikai (regular and budget)", "vehicles": [13, 23], "creatures": [18, 25], "lands": [34, 37], "instSorc": [11, 18] },
+    "enchantments": { "source": "EDHREC Eriette, Callaphe, Sythis, Tuvasa, Zur, Go-Shintai", "enchantments": [23, 31], "creatures": [14, 22], "lands": [34, 37], "instSorc": [9, 17] },
+    "artifacts":    { "source": "EDHREC Ragost, Breya, Urza, Sai, Padeem, Saheeli", "artifacts": [19, 25], "creatures": [17, 25], "lands": [31, 35], "instSorc": [12, 20] },
+    "sacrifice":    { "source": "EDHREC Kardur, Korvold, Prosper, Teysa, Yawgmoth", "creatures": [25, 33], "lands": [34, 36], "instSorc": [15, 23] },
+    "spellslinger": { "source": "EDHREC Rielle, Veyran, Niv-Mizzet, Kalamax, Kess, Mizzix", "creatures": [11, 18], "lands": [33, 36], "instSorc": [33, 42] },
+    "lands":        { "source": "EDHREC Omnath, Lord Windgrace, Tatyova, Aesi, Titania, Moraug", "creatures": [24, 27], "lands": [37, 40], "instSorc": [16, 23] },
+    "infect~deathtouch": { "source": "none", "creatures": null, "lands": [34, 37] },
+    "graveyard":    { "source": "none", "creatures": null, "lands": [34, 37] }
+  }
+}

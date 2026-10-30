@@ -1,0 +1,25 @@
+{
+ "generated": "2026-10-29T23:08:03.847Z",
+ "decks": 113,
+ "supply": "owned collection (8627 nonland cards)",
+ "linked": {
+  "p10": 0.11475409836065574,
+  "p50": 0.5409836065573771,
+  "p90": 0.78125
+ },
+ "payoffs": {
+  "p10": 1,
+  "p50": 5,
+  "p90": 13
+ },
+ "engines": {
+  "p10": 0,
+  "p50": 1,
+  "p90": 2
+ },
+ "lift": {
+  "testable": 30,
+  "atLeast1_5": 15,
+  "noiseBelow1_2": 12
+ }
+}

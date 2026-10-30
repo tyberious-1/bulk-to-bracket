@@ -375,7 +375,7 @@ async function performBuildFromContext() {
     for (const [normalizedName, card] of allOwnedCardData) {
       if (alreadyIncluded.has(normalizedName) || !card) continue;
       if (getCardType(card).includes("land")) continue;
-      if (!legalForCommander(card.colors, commanders.colors, card)) continue;
+      if (!legalForCommander(card.colors, commanders.colors, card) || deadForColors(card, commanders.colors)) continue;
       if (!cardMatchesThemeFocus(card, modePrefs)) continue;
       widenedMatches.push({
         normalizedName,
@@ -411,7 +411,7 @@ async function performBuildFromContext() {
     const normalizedName = normalizeCardName(edhrecCard.name);
     const card = ownedCardData.get(normalizedName);
 
-    if (!card || getCardType(card).includes("land") || !legalForCommander(card.colors, commanders.colors, card)) {
+    if (!card || getCardType(card).includes("land") || !legalForCommander(card.colors, commanders.colors, card) || deadForColors(card, commanders.colors)) {
       maybeUpdateScoringProgress(processed, totalToScore);
       continue;
     }
