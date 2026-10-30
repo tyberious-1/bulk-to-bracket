@@ -1,0 +1,24 @@
+abilities.test.js: abilities: 21 passed, 0 failed SUITE OK 
+archetypes.test.js: archetypes: 45 passed, 0 failed SUITE OK 
+bottom-up-deck.test.js: bottom-up-deck: 36 passed, 0 failed SUITE OK 
+bottom-up.test.js: bottom-up: 13 passed, 0 failed SUITE OK 
+bracket.test.js: bracket: 3 passed, 0 failed SUITE OK 
+collection-summary.test.js: collection-summary: 8 passed, 0 failed SUITE OK 
+commander-fit.test.js: commander-fit: 10 passed, 0 failed SUITE OK 
+commanders-tab.test.js: commanders-tab: 3 passed, 0 failed SUITE OK 
+csv.test.js: csv: 6 passed, 0 failed SUITE OK 
+deck-stats.test.js: deck-stats: 4 passed, 0 failed SUITE OK 
+deck.test.js: deck: 16 passed, 0 failed SUITE OK 
+discovery.test.js: discovery: type lines: 6 passed, 0 failed SUITE OK 
+engines.test.js: engines: 98 passed, 0 failed SUITE OK 
+export.test.js: export: 8 passed, 0 failed SUITE OK 
+format.test.js: format: 13 passed, 0 failed SUITE OK 
+manabase.test.js: manabase: 26 passed, 0 failed SUITE OK 
+mode-prefs.test.js: mode-prefs: multi-theme plans: 4 passed, 0 failed SUITE OK 
+plans.test.js: plans: distinct options: 1 passed, 0 failed SUITE OK 
+reliability.test.js: reliability: 14 passed, 0 failed SUITE OK 
+scoring.test.js: scoring: 20 passed, 0 failed SUITE OK 
+scryfall.test.js: scryfall: 2 passed, 0 failed SUITE OK 
+smoke.test.js: smoke: 3 passed, 0 failed SUITE OK 
+theme-tab.test.js: theme-tab: 4 passed, 0 failed SUITE OK 
+type-plan.test.js: type-plan: 32 passed, 0 failed SUITE OK 

@@ -75,6 +75,10 @@ function describeBuild(report) {
   const notes = [];
   if (report.budget && report.budget.applied) notes.push(`ties between equal cards broken by EDHREC budget inclusion (${report.budget.matched} cards matched)`);
 
+  const res = report.payoffReservation;
+  if (res && res.minimum > 0 && res.available < res.minimum) notes.push(`only ${res.available} payoff card${res.available === 1 ? "" : "s"} in your collection for this plan (a deck usually has about ${res.minimum})`);
+  if (report.fallbackCount > 0) notes.push(`${report.fallbackCount} placeholder slots with no tie to the theme, so swap in cards you own that fit`);
+
   return { support: `${report.members} members, ${report.payoffs} payoffs, ${report.mentions} mentions`, quality, roles, notes };
 }
 

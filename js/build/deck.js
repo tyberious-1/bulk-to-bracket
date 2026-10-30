@@ -133,7 +133,7 @@ function pickFunCards(names, allOwnedCardData, collectionData, commanderColors, 
     const card = allOwnedCardData.get(key) || allOwnedCardData.get(normalizeCardName(getPrimaryCardName(name)));
     if (!card || !hasOwnedCard(collectionData, card.name)) continue;
     if (getCardType(card).includes("land")) continue;
-    if (!legalForCommander(card.colors, commanderColors, card)) continue;
+    if (!legalForCommander(card.colors, commanderColors, card) || deadForColors(card, commanderColors)) continue;
 
     picks.push({
       name: card.name,
@@ -305,7 +305,7 @@ function buildDeckFromScoredPool(
     const card = allOwnedCardData.get(normalizedName);
     if (!card) continue;
     if (getCardType(card).includes("land")) continue;
-    if (!legalForCommander(card.colors, commanderColors, card)) continue;
+    if (!legalForCommander(card.colors, commanderColors, card) || deadForColors(card, commanderColors)) continue;
 
     const fit = classifyBackfillModeFit(card, modePrefs, isTribalDeck);
     if (fit.tier >= 2) continue;
@@ -357,6 +357,9 @@ function buildDeckFromScoredPool(
 
   const plan = buildRoleTargetPlan(edhrecTypeAverages, strategyProfile, targetLandCount, roleTargets, commanderThemes, deckSize, modePrefs);
   const typePlan = { landCount: plan.landCount, nonlandCount: plan.nonlandCount, buckets: plan.typeBuckets };
+  const vehicleCeiling = planPayloadVehicles(typePlan.buckets.Creature, modePrefs.engineNeeds, typePlan.buckets.Artifact);
+  const vehiclePools = [scoredNonlands, themeFallbackPool, genericFallbackPool];
+  let vehiclesPicked = 0;
 
   // Curve First derives its shares from the land-drop odds instead (its ramp
   // cap is already baked into that shape, so only the strategy nudge applies).
@@ -402,6 +405,10 @@ function buildDeckFromScoredPool(
 
     deck.push({ ...card, source, roles });
     usedNames.add(key);
+    if (vehicleCeiling && isNoncreatureVehicle(card)) {
+      vehiclesPicked += 1;
+      if (vehiclesPicked >= vehicleCeiling) dropSpareVehicles(vehiclePools);
+    }
     recordCurvePick(curvePlan, curveCmcOf(card));
     adjustRedundancy(card, 1);
     return true;

@@ -103,7 +103,7 @@ async function buildBottomUpDeck(archetype, subtype, colors) {
     const landCount = bottomUpLandCount(archetype, colors);
     const budgetInclusion = await loadBottomUpBudgetInclusion(subtype);
     const { deck, report } = buildDeckBottomUp(owned, { archetype, subtype, colors, nonlandSlots: 99 - landCount, budgetInclusion });
-    const lands = buildBottomUpManaBase(deck, colors, getOwnedCollection(), bottomUpCardData, landCount);
+    const lands = buildBottomUpManaBase(deck, colors, getOwnedCollection(), bottomUpCardData, landCount, subtype);
 
     const ownedKeys = new Set(owned.map((card) => normalizeCardName(card.name)));
     const entries = owned.map((card) => ({ card, owned: true }));
@@ -157,7 +157,7 @@ function selectBottomUpCommander(index) {
     const deckSize = 99 - (row.cards.length - 1);
     const budgetInclusion = bottomUpBudgetCache.get(findBottomUpEntry(bottomUpSubtypeKey(r.subtype))?.slug) || new Map();
     const { deck, report } = buildDeckBottomUp(pool, { archetype: r.archetype, subtype: r.subtype, colors, nonlandSlots: deckSize - landCount, budgetInclusion });
-    const lands = buildBottomUpManaBase(deck, colors, getOwnedCollection(), bottomUpCardData, landCount);
+    const lands = buildBottomUpManaBase(deck, colors, getOwnedCollection(), bottomUpCardData, landCount, r.subtype);
     const kept = new Set(deck.map((card) => card.name));
     r.commander = { cards: row.cards, swappedOut: r.original.deck.filter((card) => !kept.has(card.name)).map((card) => card.name) };
     Object.assign(r, { colors, deck, lands, report });
@@ -245,7 +245,7 @@ function renderBottomUpResult() {
   const order = ["wipe", "removal", "ramp", "draw", "synergy"];
   const sections = order.filter((role) => groups[role]).map((role) => `
     <div class="priority-section-label">${role === "synergy" ? "Creatures and synergy" : role} (${groups[role].length})</div>
-    <ul class="bu-list">${groups[role].map((c) => `<li>${bottomUpCardLink(c)}${c.standing === "member" || c.standing === "payoff" ? ` <span class="plan-tag">${c.standing}</span>` : ""}</li>`).join("")}</ul>`).join("");
+    <ul class="bu-list">${groups[role].map((c) => `<li>${bottomUpCardLink(c)}${c.standing === "member" || c.standing === "payoff" ? ` <span class="plan-tag">${c.standing}</span>` : c.standing === "none" && c.bottomUpRole === "synergy" ? ' <span class="plan-tag">placeholder</span>' : ""}</li>`).join("")}</ul>`).join("");
   const d = describeBuild(r.report);
   // fitRow's index must stay the position in r.ownedFits, which the click handler reads back.
   const indexed = r.ownedFits.map((fit, index) => Object.assign({ index }, fit));

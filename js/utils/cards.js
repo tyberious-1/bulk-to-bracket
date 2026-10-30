@@ -119,3 +119,20 @@ function canBePauperCommander(card) {
   const frontType = getCardType(card).split("//")[0];
   return card?.rarity === "uncommon" && frontType.includes("creature");
 }
+
+// A card whose own ability keys on a color the deck lacks ("Black creature spells you cast cost
+// {1} less" in a blue deck). Colorless identity lets it past legalForCommander, but the ability
+// never fires. Only "you cast / you control" phrasing counts: "destroy target black creature" is
+// removal and works anywhere. A sentence naming several colors ("black or red") is dead only when
+// the deck has none of them.
+const DEAD_COLOR_WORDS = { white: "W", blue: "U", black: "B", red: "R", green: "G" };
+const DEAD_COLOR_KEYED = /\b(?:white|blue|black|red|green) (?:\w+ )?(?:spells?|permanents?|creatures?)(?: cards?)? you (?:cast|control)\b/;
+
+function deadForColors(card, colors) {
+  for (const sentence of getCardText(card).split(/[.\n]/)) {
+    if (!DEAD_COLOR_KEYED.test(sentence)) continue;
+    const named = Object.keys(DEAD_COLOR_WORDS).filter((word) => new RegExp(`\\b${word}\\b`).test(sentence));
+    if (!named.some((word) => colors.includes(DEAD_COLOR_WORDS[word]))) return true;
+  }
+  return false;
+}
