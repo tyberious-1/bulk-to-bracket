@@ -9,5 +9,9 @@ src_files=("${files[@]:0:$((count-1))}")
 
 tmp=$(mktemp /tmp/jxa-test-XXXXXX.js)
 cat dev/tests/jxa/helpers.js "${src_files[@]}" "$test_file" > "$tmp"
-osascript -l JavaScript "$tmp"
+if command -v osascript &> /dev/null; then
+  osascript -l JavaScript "$tmp"
+else
+  node "$tmp"
+fi
 rm -f "$tmp"

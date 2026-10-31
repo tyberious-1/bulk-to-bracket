@@ -518,10 +518,15 @@ function wheneverYouDrawIsRealDraw(text, pattern) {
   }
 }
 
+// Reminder text that says "draw a card" without the card drawing: a Blood token (discard first), dredge (replaces a draw), learn
+// (a Lesson or a loot), a gift (the opponent draws), the empower Jace token. Clue, blitz, cycling and connive are real draw
+// and stay. Used for the draw role only; the ramp patterns lean on reminder text on purpose.
+const FALSE_DRAW_REMINDER = /\([^)]*(?:discard a card, sacrifice (?:this|it)[^)]*draw a card|if you would draw a card|reveal a lesson|promise an opponent a gift|jace token)[^)]*\)/g;
+
 function cardMatchesRole(card, role, isTribalDeck = false) {
   if (!isTribalDeck && isFlexibleTribalPayoff(card)) return false;
 
-  const text = getCardText(card);
+  const text = role === "draw" ? getCardText(card).replace(FALSE_DRAW_REMINDER, " ") : getCardText(card);
 
   return (ROLE_TEXT_PATTERNS[role] || []).some((pattern) => {
     if (role === "ramp" && pattern === "search your library for") {

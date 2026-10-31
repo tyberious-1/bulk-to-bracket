@@ -12,7 +12,11 @@
 const SUGGESTION_TRIBES = 10;
 const SUGGESTION_THEMES = 6;
 // Rows kept per archetype, so Control is not left with what Aggro and Midrange did not take.
-const SUGGESTION_ROWS_PER_ARCHETYPE = { tribal: 8, theme: 4 };
+const SUGGESTION_ROWS_PER_ARCHETYPE = { tribal: 8, theme: 4, layered: 4 };
+// Tribes that also get layered plans (the tribe plus a second layer), and how many layer-only cards in the colors make a
+// layer worth offering.
+const SUGGESTION_LAYERED_TRIBES = 5;
+const SUGGESTION_LAYER_MIN_CARDS = 10;
 const SUGGESTION_COLORS = ["W", "U", "B", "R", "G"];
 // A second color must bring at least this many more supporting cards to be worth offering.
 const SUGGESTION_PAIR_GAIN = 3;
@@ -109,8 +113,36 @@ function rankBottomUpSuggestions(cards, catalog, tribeFor) {
     return ARCHETYPE_ORDER.flatMap((archetype) => rows.filter((row) => row.archetype === archetype).slice(0, perArchetype));
   };
 
+  // A tribe plus a second layer its cards point to (Vampire + sacrifice and death). Listed after the plain plans.
+  const layeredRows = (supportedRows) => {
+    const rows = [];
+    for (const supported of supportedRows) {
+      const plain = toBottomUpSubtype(supported.entry, tribeFor);
+      const colors = candidateColorSets(nonland, plain)[0];
+      if (!colors) continue;
+      const tribeCards = nonland.filter((card) => ["member", "payoff"].includes(ownSubtypeStanding(card, plain)) && legalForCommander(card.colors || [], colors, card));
+      for (const layerEntry of BOTTOM_UP_LAYERS) {
+        if (!pairFitsTribe(tribeCards, layerEntry.layer)) continue;
+        const subtype = { ...plain, layer: layerEntry.layer, layerLabel: layerEntry.label };
+        const layerCards = nonland.filter((card) => {
+          const own = ownSubtypeStanding(card, plain);
+          return own !== "member" && own !== "payoff" && layerStanding(card, layerEntry.layer) !== "none" && legalForCommander(card.colors || [], colors, card);
+        }).length;
+        if (layerCards < SUGGESTION_LAYER_MIN_CARDS) continue;
+        for (const archetype of ARCHETYPE_ORDER) {
+          const { report } = buildDeckBottomUp(nonland, { archetype, subtype, colors });
+          rows.push({ subtype, colors, archetype, report, rating: rateBuild(report), layered: true, ...describeBuild(report) });
+        }
+      }
+    }
+    rows.sort((a, b) => RATING_RANK[a.rating] - RATING_RANK[b.rating] || share(b) - share(a));
+    return ARCHETYPE_ORDER.flatMap((archetype) => rows.filter((row) => row.archetype === archetype).slice(0, SUGGESTION_ROWS_PER_ARCHETYPE.layered));
+  };
+
+  const tribalRanked = ranked.filter((r) => r.entry.kind === "tribal");
   return [
-    ...rowsFor(ranked.filter((r) => r.entry.kind === "tribal").slice(0, SUGGESTION_TRIBES), SUGGESTION_ROWS_PER_ARCHETYPE.tribal),
+    ...rowsFor(tribalRanked.slice(0, SUGGESTION_TRIBES), SUGGESTION_ROWS_PER_ARCHETYPE.tribal),
+    ...layeredRows(tribalRanked.slice(0, SUGGESTION_LAYERED_TRIBES)),
     ...rowsFor(ranked.filter((r) => r.entry.kind !== "tribal").slice(0, SUGGESTION_THEMES), SUGGESTION_ROWS_PER_ARCHETYPE.theme)
   ];
 }
@@ -127,6 +159,6 @@ function groupBottomUpSuggestions(rows) {
       .map((row, index) => ({ row, index }))
       .filter((item) => item.row.archetype === id)
       .sort((a, b) =>
-        RATING_RANK[a.row.rating] - RATING_RANK[b.row.rating] || kindRank(a.row) - kindRank(b.row) || share(b.row) - share(a.row))
+        RATING_RANK[a.row.rating] - RATING_RANK[b.row.rating] || kindRank(a.row) - kindRank(b.row) || Number(Boolean(a.row.layered)) - Number(Boolean(b.row.layered)) || share(b.row) - share(a.row))
   }));
 }

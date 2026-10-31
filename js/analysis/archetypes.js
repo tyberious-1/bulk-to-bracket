@@ -347,7 +347,7 @@ function bottomUpTags(card) {
 // Theme plans read the shared terms (terms.js). planMakeTerms are what a plan's own cards make, found from the pool;
 // planTerms adds what the plan is known to feed on (proliferate feeds a poison plan). A plan card that needs a plan term
 // and does not make it is a payoff; one that needs and makes it is an amplifier (member with the engine flag).
-const THEME_PLAN_TERM_OVERRIDES = { "infect~deathtouch": ["poison counter", "counter"] };
+const THEME_PLAN_TERM_OVERRIDES = { "infect~deathtouch": ["poison counter", "-1/-1 counter", "counter"] };
 const THEME_PLAN_TERM_SHARE = 0.4;
 
 function derivePlanTerms(cards, subtype, vocab, supply) {
@@ -364,7 +364,7 @@ function derivePlanTerms(cards, subtype, vocab, supply) {
 const planTermCache = new WeakMap();
 // A theme plan with the terms attached; a tribal plan, or a theme with no terms, comes back unchanged.
 function withPlanTerms(subtype, cards) {
-  if (!subtype || subtype.kind === "tribal" || !Array.isArray(cards) || !cards.length) return subtype;
+  if (!subtype || subtype.kind === "tribal" || subtype.kind === "roles" || !Array.isArray(cards) || !cards.length) return subtype;
   let byTag = planTermCache.get(cards);
   if (!byTag) { byTag = new Map(); planTermCache.set(cards, byTag); }
   if (!byTag.has(subtype.tag)) {
@@ -406,8 +406,117 @@ function isThemeEngine(card, subtype) {
   return themeNeeds(card, subtype).some((n) => n.counted && n.makes);
 }
 
+// A "roles" plan is built on what cards do rather than a tag: { kind: "roles", tag, label, roles: ["outlet", "death", "mill"] }.
+// Outlets and mill cards make the events (members); death-trigger cards want them (payoffs). A card that does both is an engine.
+function cardEngineRoles(card) {
+  const abs = getCardAbilities(card);
+  return {
+    outlet: abs.some((ab) => (ab.kind === "activated" && ab.cost.includes("sacrifice-other")) || ab.cost.includes("sacrifice-additional") || ab.effects.some((e) => e.label === "sacrifice-choice")),
+    death: abs.some((ab) => (ab.trigger || []).includes("dies")),
+    mill: abs.some((ab) => ab.effects.some((e) => e.label === "mill-self" || e.label === "mill-other"))
+  };
+}
+
+function rolesStanding(card, subtype) {
+  const r = cardEngineRoles(card);
+  const wanted = subtype.roles || [];
+  const makes = (wanted.includes("outlet") && r.outlet) || (wanted.includes("mill") && r.mill);
+  const wants = wanted.includes("death") && r.death;
+  if (makes) return "member";
+  return wants ? "payoff" : "none";
+}
+
+function isRolesEngine(card, subtype) {
+  if (!subtype || subtype.kind !== "roles") return false;
+  const r = cardEngineRoles(card);
+  return rolesStanding(card, subtype) === "member" && r.death && (subtype.roles || []).includes("death");
+}
+
+// A tribal plan may carry a second layer, a roles plan its own members point to (Vampire + sacrifice and death):
+// { kind: "tribal", ..., layer: { kind: "roles", roles: ["outlet", "death"] } }. A layer card that is not a tribe
+// member or payoff is a payoff (an enabler or a death trigger the tribe's bodies feed), so it counts as a plan card.
 function subtypeStanding(card, subtype) {
+  const own = ownSubtypeStanding(card, subtype);
+  if (subtype && subtype.kind === "tribal" && subtype.layer && own !== "member" && own !== "payoff") {
+    if (layerStanding(card, subtype.layer) !== "none") return "payoff";
+  }
+  return own;
+}
+
+// A layer is a roles plan or a theme tag ({ kind: "theme", tag: "spellslinger" }, tags joined with "~").
+function layerStanding(card, layer) {
+  if (layer.kind === "roles") return rolesStanding(card, layer);
+  if (layer.kind === "pair") return pairStanding(card, layer);
+  const tags = bottomUpTags(card);
+  return layer.tag.split("~").some((tag) => tags.has(tag)) ? "member" : "none";
+}
+
+// A "pair" layer is one output matched to one input, read from the card text: { kind: "pair", pair: "blood" }.
+// `makes` cards produce the event and `wants` cards run on it. A card that wants it always counts; a maker counts
+// only when the pair says makers are plan cards (Blood tokens: yes; lifelink: no, the tribe already has plenty).
+const BOTTOM_UP_PAIRS = {
+  blood: {
+    makes: (t) => /create[^.]*\bblood token/.test(t),
+    wants: (t) => /\bblood tokens?\b|sacrifice a blood|\bblood\b[^.]*you control/.test(t) && !/create[^.]*\bblood token/.test(t),
+    makersCount: true
+  },
+  lifegain: {
+    makes: (t) => /\blifelink\b|\byou gain \d+ life|gain life equal/.test(t),
+    wants: (t) => /whenever you gain life|if you gained life|you gained life this turn|for each (?:1 )?life you gained|life you(?:'ve)? gained/.test(t),
+    makersCount: false
+  },
+  landfall: {
+    makes: (t) => !/landfall/.test(t) && /(?:put|onto the battlefield)[^.]*\bland\b|search your library for[^.]*\bland\b[^.]*onto the battlefield|play an additional land|create[^.]*\bland\b/.test(t),
+    wants: (t) => /landfall|whenever a land (?:you control )?enters/.test(t),
+    makersCount: true
+  }
+};
+
+function pairText(card) {
+  return getCardText(card).replace(/\([^)]*\)/g, " ");
+}
+
+// Direction: a pair suits a tribe when the tribe already runs on one side of it. Enough members make the output
+// (Vampires make Blood and lifelink) or enough of the tribe's own cards want it (Insects with landfall). Insects
+// make no Blood and want none, so a Blood layer is never offered for them.
+const PAIR_MAKER_SHARE = 0.25;
+const PAIR_OWN_WANTS_MIN = 3;
+function pairFitsTribe(tribeCards, layer) {
+  if (layer.kind !== "pair") return true;
+  const def = BOTTOM_UP_PAIRS[layer.pair];
+  if (!def || !tribeCards.length) return false;
+  const texts = tribeCards.map(pairText);
+  const makers = texts.filter((t) => def.makes(t)).length;
+  const wants = texts.filter((t) => def.wants(t)).length;
+  return makers / texts.length >= PAIR_MAKER_SHARE || wants >= PAIR_OWN_WANTS_MIN;
+}
+
+function pairStanding(card, layer) {
+  const def = BOTTOM_UP_PAIRS[layer.pair];
+  if (!def) return "none";
+  const t = pairText(card);
+  if (def.wants(t)) return "payoff";
+  return def.makersCount && def.makes(t) ? "member" : "none";
+}
+
+// The second layers a tribe can be offered (the Bottom-Up tab's "Second layer" choice). Which tribes suit which layer
+// came from reading the pool and what Vampire, Insect and Wizard decks run (see AGENTS.md).
+const BOTTOM_UP_LAYERS = [
+  { key: "aristocrats", label: "Sacrifice and death triggers", layer: { kind: "roles", roles: ["outlet", "death"] } },
+  { key: "mill", label: "Mill, sacrifice and death triggers", layer: { kind: "roles", roles: ["outlet", "death", "mill"] } },
+  { key: "spells", label: "Instants and sorceries", layer: { kind: "theme", tag: "spellslinger" } },
+  { key: "blood", label: "Blood tokens", layer: { kind: "pair", pair: "blood" } },
+  { key: "lifegain", label: "Lifegain payoffs", layer: { kind: "pair", pair: "lifegain" } },
+  { key: "landfall", label: "Landfall", layer: { kind: "pair", pair: "landfall" } }
+];
+
+function bottomUpLayerKey(layer) {
+  return layer ? `${layer.kind}:${layer.tag || layer.pair || (layer.roles || []).join(",")}` : "";
+}
+
+function ownSubtypeStanding(card, subtype) {
   if (!subtype) return "none";
+  if (subtype.kind === "roles") return rolesStanding(card, subtype);
   // A theme may join tags with "~" (a plan with two parts, as in the theme: mode string).
   if (subtype.kind !== "tribal") return themeStanding(card, subtype);
 
@@ -425,7 +534,11 @@ function subtypeStanding(card, subtype) {
 
 function tribePayoffPattern(forms) {
   return new RegExp(
-    `\\b(?:${forms}) you control|\\bother (?:${forms})\\b|\\b(?:${forms}) (?:get|gain|have)\\b|` +
+    // A list of types before "you control" ("skeletons, vampires, and zombies you control get +1/+1") and "Vampire creatures you control".
+    `\\b(?:${forms})\\b(?:,? (?:and |or )?\\w+s?){0,3}(?: creatures?)? you control|\\bother (?:${forms})\\b|` +
+    // An aura or equipment that favors the tribe, a card that makes something one, a spell that turns a body into one.
+    `as long as (?:it's|it is|that creature is) an? (?:${forms})\\b|\\bis an? (?:${forms}) in addition|\\bequip [^.{]*\\b(?:${forms})\\b|\\bbecomes? an? [^.]*?\\b(?:${forms})\\b|` +
+    `\\b(?:${forms}) (?:get|gain|have)\\b|` +
     `whenever (?:a|an|one or more) (?:other )?(?:${forms})\\b|create[^.]*\\b(?:${forms})\\b|amass (?:${forms})\\b|` +
     // Conditional wording: "if you control a Wizard", "costs {1} less if you control a Wizard", "for each Wizard you control",
     // "the number of Wizards you control", "Wizard spells you cast".
@@ -485,12 +598,12 @@ function annotateBottomUpCard(card, subtype) {
     };
     bottomUpAnnotations.set(card, base);
   }
-  const key = subtype ? `${subtype.kind}:${subtype.tag}:${subtype.planTerms ? "t" : ""}` : "";
+  const key = subtype ? `${subtype.kind}:${subtype.tag}:${subtype.planTerms ? "t" : ""}:${bottomUpLayerKey(subtype.layer)}` : "";
   if (!base.standing.has(key)) {
     base.standing.set(key, {
       standing: subtypeStanding(card, subtype),
       spares: sparesSubtype(card, subtype, base.role),
-      engine: subtype && subtype.kind !== "tribal" ? isThemeEngine(card, subtype) : isTribeEngine(card, subtype) && getCardSubtypes(card).includes(String(subtype.tribe).toLowerCase()),
+      engine: subtype && subtype.kind === "roles" ? isRolesEngine(card, subtype) : subtype && subtype.kind !== "tribal" ? isThemeEngine(card, subtype) : isTribeEngine(card, subtype) && getCardSubtypes(card).includes(String(subtype.tribe).toLowerCase()),
       rebuild: rebuildKind(card, subtype),
       drawTrigger: base.role === "draw" ? drawTrigger(card, subtype) : ""
     });

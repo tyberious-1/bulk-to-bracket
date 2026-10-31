@@ -72,7 +72,7 @@ function tagCostLabels(costText) {
 function tagTriggerLabels(trigger) {
   const labels = [];
   const rules = [
-    ["etb", /\benters\b/], ["attacks", /\battacks?\b/], ["dies", /\bdies\b/], ["leaves-battlefield", /leaves the battlefield/],
+    ["etb", /\benters\b/], ["attacks", /\battacks?\b/], ["dies", /\bdies\b|\b(?:is|are) put into (?:a|an|your|its owner's|their owner's)\b[^,]*graveyard from the battlefield/], ["leaves-battlefield", /leaves the battlefield/],
     ["upkeep", /beginning of (?:your|each|the) upkeep/], ["end-step", /end step/], ["combat-begin", /beginning of combat/],
     ["main-phase", /main phase/], ["cast-spell", /\bcasts?\b/], ["discard-event", /\bdiscards?\b/], ["cycle-event", /\bcycles?\b/],
     ["leave-graveyard", /leave your graveyard/], ["becomes-tapped", /becomes tapped(?! for mana)/], ["crews", /\bcrews?\b|becomes crewed/],
@@ -111,6 +111,13 @@ function tagEffects(text) {
 
   if (/(?:^|[\s.,;:])mill (?:a|one|two|three|four|five|six|seven|x|\d+) cards?\b|\byou mill\b|\b(?:each|target) player mills\b|put the top (?:a|one|two|three|four|five|x|\w+) cards? of your library into your graveyard/.test(text)) add("mill-self");
   if (/(?:each|target) opponents? mills|its controller mills|that player mills|mills? that many/.test(text)) add("mill-other");
+  // "look at the top N cards of your library, put one into your hand and the rest into your graveyard" fills the graveyard.
+  const dig = /(?:look at|reveal) the top [^.]*?library[.,](?:[^.]*\.){0,2}[^.]*?\binto (?:your|their|its owner's) graveyard/.exec(text);
+  if (dig) {
+    const others = /(?:target player's|an opponent's|each opponent's) library/.test(dig[0]) || /\binto their graveyard/.test(dig[0]);
+    const label = others ? "mill-other" : "mill-self";
+    if (!out.some((e) => e.label === label)) add(label);
+  }
   if (/\bsurveil (?:\d+|x)\b/.test(text)) add("surveil");
   if (/\bscry (?:\d+|x)\b/.test(text)) add("scry");
 
@@ -156,6 +163,8 @@ function tagEffects(text) {
   if (/\blose (?:\d+|x) life|loses (?:\d+|x) life/.test(text)) add("lose-life");
   if (/\btap (?:target|up to|all|each)|\buntap\b/.test(text)) add("tap-untap");
   if (/\bsacrifice\b/.test(text)) add("sacrifice");
+  // An optional sacrifice of your own permanent ("at the beginning of your upkeep, you may sacrifice a creature") is an outlet of a kind.
+  if (/\byou may sacrifice (?:a|an|another|one or more|any number of|up to \w+|x|two|three)\b/.test(text)) add("sacrifice-choice");
   if (/\bexile\b/.test(text) && !out.some((e) => e.label === "exile-from-graveyard")) add("exile");
   if (/return [^.]*to (?:its owner's|their owner's|your) hand/.test(text) && !out.some((e) => e.label === "return-from-graveyard")) add("bounce");
   if (/\b(?:copy|copies)\b/.test(text)) add("copy");
@@ -202,13 +211,18 @@ function tagLineBody(line) {
   }
   const gyKw = /^(flashback|escape|unearth|embalm|eternalize|disturb|jump-start|aftermath|retrace|scavenge|dredge)\b/.exec(stripped);
   if (gyKw) { ab.kind = "keyword"; ab.effects = [{ label: "keyword:" + gyKw[1] }]; return ab; }
-  if (/^dredge \d+$/.test(stripped)) { ab.kind = "keyword"; ab.effects = [{ label: "keyword:dredge" }]; return ab; }
+  // Keywords whose reminder text (stripped above) is a death trigger or an optional sacrifice.
+  const deathKw = /^(undying|persist|afterlife|modular)\b/.exec(stripped);
+  if (deathKw) { ab.kind = "keyword"; ab.keyword = true; ab.trigger = ["dies"]; ab.effects = [{ label: "keyword:" + deathKw[1] }]; return ab; }
+  const sacKw = /^(casualty|bargain|devour|exploit|emerge)\b/.exec(stripped);
+  if (sacKw) { ab.kind = "keyword"; ab.keyword = true; ab.effects = [{ label: "keyword:" + sacKw[1] }, { label: "sacrifice-choice" }]; return ab; }
   const isKw = (w) => TAG_KEYWORDS.has(w) || TAG_KEYWORDS.has(w.replace(/\s+(?:\{m\}.*|\d+.*|—.*)$/, "")) || TAG_KEYWORDS.has(w.split(" ")[0]);
   const words = stripped.split(/,\s*/).map((w) => w.trim());
   if (words.length && words.every(isKw)) {
     ab.keyword = true;
     ab.kind = "keyword";
     ab.effects = [{ label: "keyword:" + stripped.split(/[ ,]/)[0] }];
+    if (words.some((w) => /^(?:undying|persist|afterlife)\b/.test(w))) ab.trigger = ["dies"];
     return ab;
   }
   const colon = stripped.indexOf(":");
@@ -226,6 +240,7 @@ function tagLineBody(line) {
   } else {
     ab.effects = tagEffects(stripped);
   }
+  if (/^as an additional cost to cast (?:this spell|~), (?:you may )?sacrifice /.test(stripped)) ab.cost.push("sacrifice-additional");
   return ab;
 }
 

@@ -497,6 +497,20 @@ function landConditionMatchesStrategy(tag, strategyProfile, modePrefs) {
   return aliases.includes(tag) || aliases.includes(`${tag}s`);
 }
 
+// The land rule (player preference): untapped lands first. A tapped land is allowed only when it does something for the plan
+// (surveil, recursion, a manland, one that names the tribe); a "choose a color, enters tapped" land and a "{1},{t}: add any
+// color" land are skipped. A land that enters tapped unless a condition holds can still come down untapped, so it stays.
+function landRuleAllows(card, tribe = "") {
+  const text = getCardText(card).toLowerCase().replace(/\([^)]*\)/g, " ");
+  if (/choose a color/.test(text) && /enters tapped/.test(text)) return false;
+  if (/\{1\},\s*\{t\}: add (?:one mana of )?any color/.test(text)) return false;
+  if (!/enters (?:the battlefield )?tapped/.test(text) || /enters (?:the battlefield )?tapped unless/.test(text)) return true;
+  return /\bsurveil\b/.test(text) ||
+    /graveyard/.test(text) ||
+    /becomes? an? [^.]*creature/.test(text) ||
+    Boolean(tribe && new RegExp(`\\b${tribe.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}s?\\b`).test(text));
+}
+
 function evaluateNonbasicLand(card, commanderColors, strategyProfile, modePrefs, edhrecCardLookup = null, colorTargets = null) {
   if (!getCardType(card).includes("land")) return null;
   if (isBasicLand(card.name)) return null;

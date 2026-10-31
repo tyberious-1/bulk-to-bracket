@@ -745,9 +745,17 @@ function buildDeckFromScoredPool(
   ];
   const colorTargets = computeColorSourceTargets(resolvedNonlandCards, commanderColors, targetLandCount);
 
+  // The land rule: untapped lands first, as the bottom-up builder does. Path of Ancestry stays for a tribal build, where its
+  // scry is the point (evaluateNonbasicLand already favors it there).
+  const landRuleData = new Map();
+  for (const [key, card] of allOwnedCardData) {
+    const keepsTribalPath = strategyProfile.wantsTribal && normalizeCardName(card.name) === "path of ancestry";
+    if (!getCardType(card).includes("land") || isBasicLand(card.name) || keepsTribalPath || landRuleAllows(card)) landRuleData.set(key, card);
+  }
+
   const selectedNonbasicLands = buildNonbasicManaBase(
     collectionData,
-    allOwnedCardData,
+    landRuleData,
     commanderColors,
     targetLandCount,
     strategyProfile,
