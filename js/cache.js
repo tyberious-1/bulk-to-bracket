@@ -10,10 +10,11 @@
 // falling back to v2 data the way earlier bumps did would keep serving that
 // stale, empty manaCost forever for anyone with a warm cache. No fallback to
 // v2 (or v1) this time -- a one-time full re-fetch instead.
-const CARD_CACHE_STORAGE_KEY = "mtg_commander_builder_card_cache_v3";
+const CARD_CACHE_STORAGE_KEY = "mtg_commander_builder_card_cache_v4";
 const LEGACY_CARD_CACHE_STORAGE_KEYS = [
   "mtg_commander_builder_card_cache_v1",
-  "mtg_commander_builder_card_cache_v2"
+  "mtg_commander_builder_card_cache_v2",
+  "mtg_commander_builder_card_cache_v3"
 ];
 const MAX_PERSISTED_CACHE_ENTRIES = 8000;
 

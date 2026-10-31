@@ -61,6 +61,14 @@ function byBottomUpRank(x, y) {
 // A plan's payoffs (and amplifiers) are what make its sources worth playing, and the builder's weights alone leave them
 // to chance; after the role loop a plan is guaranteed this many, if the collection owns them.
 const PLAN_PAYOFF_MIN = 5;
+// A roles plan (archetypes.js) reserves this many cards of each role before the creature fill, and lets only
+// ROLES_PURE_MILL_MAX cards that mill and do nothing else in: mill alone wins nothing, it feeds the other two roles.
+const ROLES_PLAN_MIN = { death: 10, outlet: 8, mill: 6 };
+const ROLES_PURE_MILL_MAX = 8;
+// A tribal plan's roles layer reserves fewer: the tribe's own creatures are most of the deck.
+const ROLES_LAYER_MIN = { death: 6, outlet: 4, mill: 3 };
+// ...and admits at most this many cards that belong to the plan only through the layer (not tribe members or tribe payoffs).
+const ROLES_LAYER_MAX = 20;
 
 function buildDeckBottomUp(cards, options) {
   const archetype = options.archetype;
@@ -124,7 +132,11 @@ function buildDeckBottomUp(cards, options) {
     if (powers.some(Number.isNaN)) return true;
     return powers.filter((power) => power >= Math.ceil(crew / 2)).length >= BOTTOM_UP_CREWERS_MIN;
   };
-  const canTake = (row) => !picked.has(row) && !(row.a.standing === "mention" && mentions >= BOTTOM_UP_MENTION_CAP) &&
+  const rolesSpec = subtype ? (subtype.kind === "roles" ? subtype : subtype.layer && subtype.layer.kind === "roles" ? subtype.layer : null) : null;
+  const rolesPlan = Boolean(rolesSpec);
+  const isPureMill = (row) => rolesPlan && rolesStanding(row.card, rolesSpec) === "member" && (() => { const r = cardEngineRoles(row.card); return r.mill && !r.outlet && !r.death; })();
+  const layerOnly = (row) => Boolean(subtype) && subtype.kind === "tribal" && Boolean(subtype.layer) && (() => { const own = ownSubtypeStanding(row.card, subtype); return own !== "member" && own !== "payoff" && layerStanding(row.card, subtype.layer) !== "none"; })();
+  const canTake = (row) => !picked.has(row) && !(layerOnly(row) && deck.filter(layerOnly).length >= (options.layerMax === undefined ? ROLES_LAYER_MAX : options.layerMax)) && !(isPureMill(row) && deck.filter(isPureMill).length >= ROLES_PURE_MILL_MAX) && !(row.a.standing === "mention" && mentions >= BOTTOM_UP_MENTION_CAP) &&
     !(vehiclePlan && isVehicle(row) && !vehicleFits(row)) &&
     !(row.a.role === "wipe" && row.score < BOTTOM_UP_WEIGHT.wipeFloor);
   const roleOpen = (row) => roleCounts[row.a.role] === undefined || roleCounts[row.a.role] < caps[row.a.role];
@@ -188,6 +200,20 @@ function buildDeckBottomUp(cards, options) {
     }
   }
 
+  // A roles plan then reserves a minimum of each role (a card with two roles counts for both).
+  const rolesReserved = {};
+  if (rolesPlan) {
+    const mins = { ...(subtype.kind === "roles" ? ROLES_PLAN_MIN : ROLES_LAYER_MIN), ...(options.roleMin || {}) };
+    for (const role of (rolesSpec.roles || []).filter((r) => mins[r] > 0)) {
+      const has = (row) => cardEngineRoles(row.card)[role];
+      rolesReserved[role] = { minimum: mins[role], available: pool.filter(has).length, reserved: 0 };
+      for (const row of pool) {
+        if (deck.filter(has).length >= mins[role] || deck.length >= nonlandSlots) break;
+        if (has(row) && canTake(row) && roleOpen(row)) { take(row); rolesReserved[role].reserved += 1; }
+      }
+    }
+  }
+
   // Creatures up to the archetype's count, then theme cards of any type (members and payoffs the
   // creature count passed over), as the commander-first builder takes its theme tier before generic
   // cards; then everything else, then whatever is left.
@@ -235,6 +261,7 @@ function buildDeckBottomUp(cards, options) {
       payoffs: count((r) => r.a.standing === "payoff"),
       payoffCards: count(isPayoff),
       payoffReservation: { minimum: payoffMin, available: payoffAvailable, reserved: payoffReserved },
+      rolesReservation: rolesReserved,
       mentions,
       fallbackCount: count((r) => r.a.standing === "none" && r.a.role === "synergy"),
       shortfalls,
@@ -295,13 +322,24 @@ function bottomUpLandNeeds(subtype) {
   return String(subtype.tribe || "").toLowerCase() === "mount" ? { payloadType: "mount" } : null;
 }
 
+// The land rule itself lives in manabase.js (landRuleAllows); the bottom-up builder passes the plan's tribe.
+function bottomUpLandAllowed(card, subtype = null) {
+  const tribe = subtype && subtype.kind === "tribal" ? String(subtype.tribe || "").toLowerCase() : "";
+  return landRuleAllows(card, tribe);
+}
+
 function buildBottomUpManaBase(nonlandDeck, colors, collection, cardData, landCount, subtype = null) {
   const strategyProfile = getCommanderStrategyProfile("", [], colors);
   const modePrefs = getModePreferences("", strategyProfile);
   modePrefs.engineNeeds = bottomUpLandNeeds(subtype);
   const colorTargets = computeColorSourceTargets(nonlandDeck, colors, landCount);
-  const nonbasics = buildNonbasicManaBase(collection, cardData, colors, landCount, strategyProfile, modePrefs, null, colorTargets);
-  includePlanLands(nonbasics, collection, cardData, colors, strategyProfile, modePrefs, colorTargets);
+  // The land rule is applied here, on a filtered copy of the card data, so the shared land scorer (manabase.js) is untouched.
+  const allowedData = new Map();
+  for (const [key, card] of cardData) {
+    if (!getCardType(card).includes("land") || isBasicLand(card.name) || bottomUpLandAllowed(card, subtype)) allowedData.set(key, card);
+  }
+  const nonbasics = buildNonbasicManaBase(collection, allowedData, colors, landCount, strategyProfile, modePrefs, null, colorTargets);
+  includePlanLands(nonbasics, collection, allowedData, colors, strategyProfile, modePrefs, colorTargets);
   const basics = buildBasicManaBase(colors, Math.max(0, landCount - nonbasics.length), nonbasics, colorTargets);
   return [...nonbasics, ...basics];
 }

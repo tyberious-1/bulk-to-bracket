@@ -1,7 +1,11 @@
 function jxaPrint(s) {
-  $.NSFileHandle.fileHandleWithStandardOutput.writeData(
-    $.NSString.alloc.initWithUTF8String(s + "\n").dataUsingEncoding($.NSUTF8StringEncoding)
-  );
+  if (typeof $ !== 'undefined' && $.NSFileHandle) {
+    $.NSFileHandle.fileHandleWithStandardOutput.writeData(
+      $.NSString.alloc.initWithUTF8String(s + "\n").dataUsingEncoding($.NSUTF8StringEncoding)
+    );
+  } else {
+    console.log(s);
+  }
 }
 
 function assertEqual(actual, expected, message) {

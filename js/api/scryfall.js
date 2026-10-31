@@ -109,6 +109,29 @@ function collectCachedCards(uniqueNames) {
   return results;
 }
 
+// Layouts that are never part of a deck. A name lookup can land on one when a real card shares its name (No Way Out is both an
+// Innistrad: Midnight Hunt instant and a Planechase plane); the plane is colorless, so it fit every deck and Moxfield then
+// flagged the black instant.
+const NON_DECK_LAYOUTS = new Set(["planar", "scheme", "vanguard", "token", "double_faced_token", "emblem", "art_series", "augment", "host"]);
+
+function isNonDeckLayout(card) {
+  return NON_DECK_LAYOUTS.has(String(card?.layout || "").toLowerCase());
+}
+
+// The deck-legal card behind a name whose first answer was not one, or null when Scryfall has none.
+async function fetchPlayableCardByName(cardName) {
+  const query = `!"${cleanCardNameForLookup(cardName)}" -layout:planar -layout:scheme -layout:vanguard -layout:token -layout:double_faced_token -layout:emblem -layout:art_series -layout:augment -layout:host`;
+  try {
+    const response = await fetch(`https://api.scryfall.com/cards/search?q=${encodeURIComponent(query)}`);
+    if (!response.ok) return null;
+    const data = await response.json();
+    const found = Array.isArray(data.data) && data.data[0];
+    return found ? convertScryfallCard(found) : null;
+  } catch (error) {
+    return null;
+  }
+}
+
 async function fetchCardDataBatchWithProgress(cardNames, progressCallback) {
   const uniqueNames = Array.from(new Set(cardNames.map(normalizeCardName)));
   const missingNames = uniqueNames.filter((name) => !cardCache.has(name));
@@ -147,7 +170,15 @@ async function fetchCardDataBatchWithProgress(cardNames, progressCallback) {
       const data = await response.json();
       const returnedCards = Array.isArray(data.data) ? data.data : [];
 
-      const convertedCards = returnedCards.map((rawCard) => convertScryfallCard(rawCard));
+      const convertedCards = [];
+      for (const rawCard of returnedCards) {
+        let converted = convertScryfallCard(rawCard);
+        if (isNonDeckLayout(converted)) {
+          const playable = await fetchPlayableCardByName(converted.name);
+          if (playable) converted = playable;
+        }
+        convertedCards.push(converted);
+      }
 
       for (const converted of convertedCards) {
         cardCache.set(normalizeCardName(converted.name), converted);

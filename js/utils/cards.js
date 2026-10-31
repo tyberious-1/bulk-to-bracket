@@ -87,6 +87,8 @@ function isGameChanger(cardName) {
 }
 
 function legalForCommander(cardColors, commanderColors, card) {
+  // A plane, scheme, vanguard or token has no place in a deck whatever its colors (an old cached lookup can still hold one).
+  if (card && /^(?:plane|phenomenon|scheme|ongoing scheme|vanguard|conspiracy|dungeon|emblem|token)\b/.test(getCardType(card).replace(/^(?:legendary|basic|snow|world)\s+/g, ""))) return false;
   for (const color of cardColors) {
     if (!commanderColors.includes(color)) return false;
   }

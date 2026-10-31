@@ -128,8 +128,14 @@ function getCardTerms(card, vocab) {
       // A creature with an enters trigger of its own is what blink gives value to.
       if (isCreature && /^(?:when|whenever) (?:~|this \w+) enters/.test(clause)) makes.add("ev:enter-trigger");
       if (!self && !/opponent/.test(clause)) {
-        addClause(termsInPhrase(clause, vocab));
+        const clauseTerms = termsInPhrase(clause, vocab);
+        // A trigger on one kind of counter (-1/-1, charge, poison) does not want the generic "counter" a +1/+1 plan makes:
+        // Wickersmith's Tools reads "-1/-1 counters" and was filed as a payoff in a +1/+1 counters deck.
+        const kindCounter = [...clauseTerms].some((t) => / counter$/.test(t) && t !== "+1/+1 counter");
+        if (kindCounter) clauseTerms.delete("counter");
+        addClause(clauseTerms);
         for (const t of ab.trigger) {
+          if (kindCounter && t === "counter-placed") continue;
           // abilities.js labels any trigger that says "token" as token-event; "whenever you sacrifice a Blood token" is about
           // a sacrifice, so a token-creation need requires create/enters wording.
           if (t === "token-event" && !/\b(?:creates?|created|enters)\b/.test(clause)) continue;

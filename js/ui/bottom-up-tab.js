@@ -19,7 +19,7 @@ let bottomUpResult = null;
 let bottomUpOpenGroups = new Set();
 // EDHREC budget inclusion per tag slug, fetched once; an empty map means no budget page (or Pauper).
 let bottomUpBudgetCache = new Map();
-let bottomUpPicks = { archetype: "midrange", subtypeKey: "", colors: new Set() };
+let bottomUpPicks = { archetype: "midrange", subtypeKey: "", layerKey: "", colors: new Set() };
 
 function resetBottomUpTab() {
   bottomUpCardData = null;
@@ -193,7 +193,7 @@ function renderBottomUpSuggestions() {
             ${group.items.map(({ row, index }) => `
               <button type="button" class="bu-suggestion" data-bu-suggestion="${index}"
                 title="${escapeHtml([row.support, row.quality, ...row.roles].join("; "))}">
-                ${escapeHtml(row.subtype.label)}
+                ${escapeHtml(row.subtype.label)}${row.subtype.layerLabel ? ` + ${escapeHtml(row.subtype.layerLabel)}` : ""}
                 <span class="plan-tag">${escapeHtml(bottomUpColorsLabel(row.colors))}</span>
                 <span class="status-chip status-${row.rating === "Strong" ? "deep" : row.rating === "OK" ? "ok" : "thin"}">${row.rating}</span>
                 <span class="bu-suggestion-note">${row.report.members} + ${row.report.payoffs}</span>
@@ -208,6 +208,8 @@ function renderBottomUpPickers() {
     const key = `${entry.kind}:${entry.tag}`;
     return `<option value="${escapeHtml(key)}"${key === bottomUpPicks.subtypeKey ? " selected" : ""}>${escapeHtml(entry.label)} (${entry.kind === "tribal" ? "tribe" : "theme"})</option>`;
   }).join("");
+  const layerOptions = BOTTOM_UP_LAYERS.map((entry) =>
+    `<option value="${entry.key}"${entry.key === bottomUpPicks.layerKey ? " selected" : ""}>+ ${escapeHtml(entry.label)}</option>`).join("");
   const archetypeOptions = ARCHETYPE_ORDER.map((id) =>
     `<option value="${id}"${id === bottomUpPicks.archetype ? " selected" : ""}>${ARCHETYPES[id].label}</option>`).join("");
   const colorButtons = BOTTOM_UP_COLOR_LETTERS.map((c) =>
@@ -217,6 +219,7 @@ function renderBottomUpPickers() {
     <div class="bu-pickers">
       <select id="buArchetype">${archetypeOptions}</select>
       <select id="buSubtype"><option value="">Choose a subtype</option>${subtypeOptions}</select>
+      <select id="buLayer" title="A tribe plus a second layer its cards point to (tribes only)"><option value="">No second layer</option>${layerOptions}</select>
       <span class="bu-colors">${colorButtons}</span>
       <button id="buBuildBtn" type="button">Build this deck</button>
     </div>`;
@@ -267,7 +270,7 @@ function renderBottomUpResult() {
       </div>` : "";
   return `
     <div class="bu-result">
-      <h3>${escapeHtml(ARCHETYPES[r.archetype].label)} ${escapeHtml(r.subtype.label)} <span class="plan-tag">${escapeHtml(bottomUpColorsLabel(r.colors))}</span></h3>
+      <h3>${escapeHtml(ARCHETYPES[r.archetype].label)} ${escapeHtml(r.subtype.label)}${r.subtype.layerLabel ? ` + ${escapeHtml(r.subtype.layerLabel)}` : ""} <span class="plan-tag">${escapeHtml(bottomUpColorsLabel(r.colors))}</span></h3>
       ${commanderBox}
       <p class="detail-note">${escapeHtml(d.support)}; ${escapeHtml(d.quality)}; average mana value ${r.report.avgCmc}; ${r.lands.length} lands.${d.roles.length ? ` ${escapeHtml(d.roles.join("; "))}.` : ""}${d.notes.length ? ` ${escapeHtml(d.notes.join("; "))}.` : ""}</p>
       ${renderBottomUpReliability(r)}
@@ -310,6 +313,7 @@ function bindBottomUpTab() {
   panel.addEventListener("change", (event) => {
     if (event.target.id === "buArchetype") bottomUpPicks.archetype = event.target.value;
     if (event.target.id === "buSubtype") bottomUpPicks.subtypeKey = event.target.value;
+    if (event.target.id === "buLayer") bottomUpPicks.layerKey = event.target.value;
   });
 
   bindPreviewHoverImages("bottomUpPanel");
@@ -341,7 +345,11 @@ function bindBottomUpTab() {
       const colors = BOTTOM_UP_COLOR_LETTERS.filter((c) => bottomUpPicks.colors.has(c));
       // No color picked would build from colorless cards alone, which is never what was meant.
       if (!colors.length) { showToast("Choose at least one color."); return; }
-      buildBottomUpDeck(bottomUpPicks.archetype, toBottomUpSubtype(entry, themeTabTribeFor), colors);
+      const subtype = toBottomUpSubtype(entry, themeTabTribeFor);
+      const layer = BOTTOM_UP_LAYERS.find((l) => l.key === bottomUpPicks.layerKey);
+      // A second layer only goes under a tribe; a theme plan is already built on what its cards do.
+      if (layer && subtype.kind === "tribal") { subtype.layer = layer.layer; subtype.layerLabel = layer.label; }
+      buildBottomUpDeck(bottomUpPicks.archetype, subtype, colors);
       return;
     }
 
