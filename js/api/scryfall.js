@@ -59,7 +59,7 @@ function convertScryfallCard(data) {
     imageUrl: pickCommanderImage(data),
     manaCost: readManaCost(data),
     scryfallUrl: data.scryfall_uri || "",
-    raw: data
+    raw: slimScryfallRaw(data)
   };
 }
 
@@ -119,10 +119,10 @@ function isNonDeckLayout(card) {
 }
 
 // The deck-legal card behind a name whose first answer was not one, or null when Scryfall has none.
-async function fetchPlayableCardByName(cardName) {
+async function fetchPlayableCardByName(cardName, signal) {
   const query = `!"${cleanCardNameForLookup(cardName)}" -layout:planar -layout:scheme -layout:vanguard -layout:token -layout:double_faced_token -layout:emblem -layout:art_series -layout:augment -layout:host`;
   try {
-    const response = await fetch(`https://api.scryfall.com/cards/search?q=${encodeURIComponent(query)}`);
+    const response = await fetch(`https://api.scryfall.com/cards/search?q=${encodeURIComponent(query)}`, { signal });
     if (!response.ok) return null;
     const data = await response.json();
     const found = Array.isArray(data.data) && data.data[0];
@@ -132,7 +132,21 @@ async function fetchPlayableCardByName(cardName) {
   }
 }
 
+// Collection requests: 75 names is the endpoint's maximum. A request that never answers used to hold the whole load (and the
+// "Reading your collection..." message) forever, so each gets a deadline, a couple run at once, and the cache is saved every few
+// requests rather than once at the end -- a stall, reload or killed tab then costs one batch, not the whole read.
+const SCRYFALL_CHUNK_SIZE = 75;
+const SCRYFALL_CHUNK_TIMEOUT_MS = 20000;
+const SCRYFALL_CHUNK_ATTEMPTS = 4;
+const SCRYFALL_CONCURRENCY = 2;
+const SCRYFALL_CHUNK_GAP_MS = 120;
+const SCRYFALL_PERSIST_EVERY_CHUNKS = 8;
+const SCRYFALL_RATE_LIMIT_WAIT_MS = 3000;
+const SCRYFALL_RATE_LIMIT_WAIT_MAX_MS = 15000;
+
 async function fetchCardDataBatchWithProgress(cardNames, progressCallback) {
+  await cardCacheReady;
+
   const uniqueNames = Array.from(new Set(cardNames.map(normalizeCardName)));
   const missingNames = uniqueNames.filter((name) => !cardCache.has(name));
   const total = missingNames.length;
@@ -143,12 +157,12 @@ async function fetchCardDataBatchWithProgress(cardNames, progressCallback) {
     return collectCachedCards(uniqueNames);
   }
 
-  const chunkSize = 75;
   const chunks = [];
-  for (let i = 0; i < missingNames.length; i += chunkSize) {
-    chunks.push(missingNames.slice(i, i + chunkSize));
+  for (let i = 0; i < missingNames.length; i += SCRYFALL_CHUNK_SIZE) {
+    chunks.push(missingNames.slice(i, i + SCRYFALL_CHUNK_SIZE));
   }
 
+  // Resolves to the cards this chunk added to the cache (the ones worth saving).
   async function fetchChunk(chunk, attempt = 1) {
     // The collection endpoint has no entry under "Front // Back" -- that
     // spelling comes back in not_found, so asking with the name a ManaBox CSV
@@ -156,15 +170,28 @@ async function fetchCardDataBatchWithProgress(cardNames, progressCallback) {
     // resolves to the whole card.
     const identifiers = chunk.map((name) => ({ name: cleanCardNameForLookup(name) }));
 
+    // One deadline covers the headers and the body read, and the playable-card re-searches below.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SCRYFALL_CHUNK_TIMEOUT_MS);
+
     try {
       const response = await fetch(SCRYFALL_COLLECTION, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identifiers })
+        body: JSON.stringify({ identifiers }),
+        signal: controller.signal
       });
 
       if (!response.ok) {
-        throw new Error(`Scryfall collection request failed with status ${response.status}.`);
+        const failure = new Error(`Scryfall collection request failed with status ${response.status}.`);
+        if (response.status === 429) {
+          const retryAfter = Number(response.headers && response.headers.get && response.headers.get("Retry-After"));
+          failure.rateLimitWaitMs = Math.min(
+            SCRYFALL_RATE_LIMIT_WAIT_MAX_MS,
+            Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : SCRYFALL_RATE_LIMIT_WAIT_MS * attempt
+          );
+        }
+        throw failure;
       }
 
       const data = await response.json();
@@ -174,7 +201,7 @@ async function fetchCardDataBatchWithProgress(cardNames, progressCallback) {
       for (const rawCard of returnedCards) {
         let converted = convertScryfallCard(rawCard);
         if (isNonDeckLayout(converted)) {
-          const playable = await fetchPlayableCardByName(converted.name);
+          const playable = await fetchPlayableCardByName(converted.name, controller.signal);
           if (playable) converted = playable;
         }
         convertedCards.push(converted);
@@ -193,9 +220,11 @@ async function fetchCardDataBatchWithProgress(cardNames, progressCallback) {
       for (const requestedName of chunk) {
         if (!cardCache.has(requestedName)) cardCache.set(requestedName, null);
       }
+
+      return convertedCards;
     } catch (error) {
-      if (attempt < 4) {
-        const waitMs = 300 * attempt;
+      if (attempt < SCRYFALL_CHUNK_ATTEMPTS) {
+        const waitMs = error && error.rateLimitWaitMs ? error.rateLimitWaitMs : 300 * attempt;
         console.warn(`Retrying Scryfall chunk (${attempt}) after failure.`, error);
         await sleep(waitMs);
         return fetchChunk(chunk, attempt + 1);
@@ -205,17 +234,42 @@ async function fetchCardDataBatchWithProgress(cardNames, progressCallback) {
       for (const requestedName of chunk) {
         if (!cardCache.has(requestedName)) cardCache.set(requestedName, null);
       }
+      return [];
+    } finally {
+      clearTimeout(timer);
     }
   }
 
-  for (const chunk of chunks) {
-    await fetchChunk(chunk);
-    done += chunk.length;
-    if (progressCallback) progressCallback(done, total);
-    await sleep(120);
+  let nextChunk = 0;
+  let pendingSave = [];
+  let chunksSinceSave = 0;
+
+  async function savePending() {
+    if (!pendingSave.length) return;
+    const cards = pendingSave;
+    pendingSave = [];
+    await persistCardsToStorage(cards);
   }
 
-  persistCardCacheToStorage();
+  async function worker() {
+    while (nextChunk < chunks.length) {
+      const chunk = chunks[nextChunk++];
+      const cards = await fetchChunk(chunk);
+      for (const card of cards) pendingSave.push(card);
+      done += chunk.length;
+      if (progressCallback) progressCallback(done, total);
+
+      chunksSinceSave += 1;
+      if (chunksSinceSave >= SCRYFALL_PERSIST_EVERY_CHUNKS) {
+        chunksSinceSave = 0;
+        await savePending();
+      }
+      await sleep(SCRYFALL_CHUNK_GAP_MS);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(SCRYFALL_CONCURRENCY, chunks.length) }, worker));
+  await savePending();
 
   return collectCachedCards(uniqueNames);
 }
