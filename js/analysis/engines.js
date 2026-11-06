@@ -70,12 +70,64 @@ function getCommanderEvents(commanderTexts) {
   return events;
 }
 
+// A commander's center (design: dev/docs/superpowers/specs/2026-11-05-commander-center-reader-design.md):
+// the number, event or exchange its own words run on. Read only, nothing scores from it yet. Kinds:
+//   quantity: { measure: total-power | greatest-power | count, filter?, uses: cost-reduction | scaling }
+//   event:    { event: cast | enter, filter }  (a type filter the plain event list drops)
+//   exchange: { pays, count, gets }            (a sacrifice cost and what it buys)
+//   delivery: { keyword }                      (trample, flying given or held)
+function getCommanderCenter(commanderTexts) {
+  const out = [];
+  const add = (rec) => {
+    if (!out.some((r) => JSON.stringify(r) === JSON.stringify(rec))) out.push(rec);
+  };
+  const clean = (w) => String(w || "").replace(/\b(?:other|another|nontoken|non-token|already)\b/g, "").replace(/s$/, "").trim();
+  const COUNTS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4 };
+  const texts = (commanderTexts || []).filter((t) => typeof t === "string" && t.trim());
+  for (const raw of texts) {
+    for (const ab of tagTextAbilities(raw, "")) {
+      for (const a of [ab].concat(ab.quoted || [])) {
+        const line = String(a.line || "").toLowerCase();
+        let m = /costs \{[xm]\} less to cast, where x is the (total|greatest) power (?:of|among) creatures you control/.exec(line);
+        if (m) add({ kind: "quantity", measure: m[1] + "-power", uses: "cost-reduction" });
+        m = /for each ([a-z' -]+?) you (?:already )?control/.exec(line) || /the number of ([a-z' -]+?) you control/.exec(line);
+        if (m && !/^(?:creature|permanent)s?$/.test(clean(m[1])) || (m && /creature/.test(m[1]))) add({ kind: "quantity", measure: "count", filter: clean(m[1]), uses: a.kind === "static" ? "scaling" : "scaling" });
+        if (a.kind === "triggered") {
+          m = /whenever you cast an? ([a-z]+) spell/.exec(line);
+          if (m) add({ kind: "event", event: "cast", filter: m[1] });
+          if (/whenever you gain life/.test(line)) add({ kind: "event", event: "gain-life" });
+          m = /whenever (?:another |one or more )?(?:nontoken )?([a-z]+?)s? (?:you control )?enters?/.exec(line);
+          if (m && !/^(?:creature|permanent)$/.test(m[1])) add({ kind: "event", event: "enter", filter: m[1] });
+        }
+        if (a.kind === "activated" && a.cost.includes("sacrifice-other")) {
+          const cost = line.split(":")[0];
+          const sac = /sacrifice (a|an|one|two|three|four|another) ([a-z]+?)s?(?:,|$| )/.exec(cost);
+          const kinds = a.effects.map((e) => e.label);
+          let gets = null;
+          if (/where x is the sacrificed creature's power/.test(line)) gets = "tokens equal to its power";
+          else if (kinds.includes("return-from-graveyard")) gets = "return a card from the graveyard";
+          else if (kinds.includes("draw")) gets = "draw";
+          else if (kinds.includes("create-token")) gets = "tokens";
+          if (sac && gets) add({ kind: "exchange", pays: clean(sac[2]), count: COUNTS[sac[1]] || 1, gets });
+        }
+        for (const e of a.effects) {
+          if (e.label === "grant-keyword" || e.label.startsWith("keyword:")) {
+            const k = /\b(trample|flying|menace|unblockable|haste)\b/.exec(line);
+            if (k) add({ kind: "delivery", keyword: k[1] });
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
 function parseCommanderNeeds(commanderTexts) {
   const text = (commanderTexts || [])
     .filter((t) => typeof t === "string" && t.trim())
     .map((t) => t.toLowerCase())
     .join("\n");
-  const needs = { payloadType: null, payloadTypes: [], graveyard: false, returnsFromGraveyard: false, devotionColors: [], events: [] };
+  const needs = { payloadType: null, payloadTypes: [], graveyard: false, returnsFromGraveyard: false, devotionColors: [], events: [], center: [] };
   if (!text) return needs;
 
   needs.graveyard = /\bgraveyard\b/.test(text);
@@ -120,6 +172,7 @@ function parseCommanderNeeds(commanderTexts) {
     }
   }
   needs.events = getCommanderEvents(commanderTexts);
+  needs.center = getCommanderCenter(commanderTexts);
   return needs;
 }
 
@@ -373,6 +426,10 @@ function hasEventNeeds(needs) {
   return Boolean(needs && Array.isArray(needs.events) && needs.events.length);
 }
 
+function hasCenterNeeds(needs) {
+  return Boolean(needs && Array.isArray(needs.center) && needs.center.some((c) => c.kind !== "delivery"));
+}
+
 function isEventClass(cls) {
   return String(cls).startsWith("event:");
 }
@@ -380,7 +437,7 @@ function isEventClass(cls) {
 // The "Event Engines" switch (a build mode): off drops every event, so the builder runs exactly as it
 // did before events existed. `modePrefs.eventEngines` is undefined when no mode was parsed, which keeps events.
 function applyEventSwitch(needs, modePrefs) {
-  if (needs && modePrefs && modePrefs.eventEngines === false) needs.events = [];
+  if (needs && modePrefs && modePrefs.eventEngines === false) { needs.events = []; needs.center = []; }
   return needs;
 }
 
@@ -509,8 +566,109 @@ const ENGINE_BONUS_CAP = 36;           // keep one card from swamping roles and 
 const ENGINE_DEVOTION_PIP_BONUS = 4;   // per pip of the devotion color on a permanent
 const ENGINE_DEVOTION_PIP_CAP = 12;
 
+// What a card does for the commander's center: one link per way it feeds, reads or delivers the number,
+// event or exchange (design spec, section 3). Weights are first guesses, meant to be measured.
+const CENTER_BONUS_CAP = 20;
+const CENTER_LINK_WEIGHTS = {
+  "supplies-power": 8, "big-power": 10, "multiplies-power": 10, "ramps-at-power": 10, "reads-power": 8, "grants-delivery": 3,
+  "counts-type": 5, "boosts-type": 8, "reads-count": 8,
+  "makes-event": 6, "makes-event-once": 2, "makes-type": 6, "makes-type-weak": 3, "event-payoff": 10, "cheaper-casts": 8,
+  fodder: 2, "fodder-dies": 3, "graveyard-leave-payoff": 8, outlet: 6, "death-payoff": 6, "return-target": 6, "return-target-small": 3, reanimates: 8, "comes-back": 4, "graveyard-fill": 6, "power-fodder": 6
+};
+
+function centerTypeHas(card, type) {
+  if (!type) return false;
+  const line = getCardType(card);
+  return line.split("—")[0].split(/\s+/).includes(type) || (line.split("—")[1] || "").split(/\s+/).includes(type);
+}
+
+function getCenterLinks(card, needs) {
+  if (!card || !needs || !Array.isArray(needs.center) || !needs.center.length) return [];
+  const type = getCardType(card);
+  if (type.split("—")[0].includes("land")) return [];
+  const text = getCardText(card).replace(/\([^)]*\)/g, " ");
+  const cmc = Number(card.cmc) || 0;
+  const isCreature = type.includes("creature");
+  const power = parseInt((card.raw && card.raw.power) != null ? card.raw.power : card.power, 10) || 0;
+  const abilities = getCardAbilities(card);
+  const found = new Map();
+  const add = (name, via) => { if (!found.has(name)) found.set(name, { link: name, via, weight: CENTER_LINK_WEIGHTS[name] || 0 }); };
+  const mentions = (word) => new RegExp("\\b" + word + "s?\\b").test(text);
+  const usesLabel = (label) => abilities.some((ab) => ab.effects.some((e) => e.label === label));
+
+  for (const c of needs.center) {
+    if (c.kind === "quantity" && /power$/.test(c.measure)) {
+      if (isCreature && power >= 6) add("big-power", "power " + power);
+      else if (isCreature && power >= 4) add("supplies-power", "power " + power);
+      if (abilities.some((ab) => ab.effects.some((e) => e.label === "counters" && e.counter === "+1/+1") && /\b(?:put|enters with)\b/.test(ab.line))) add("supplies-power", "puts +1/+1 counters");
+      if (/\bdoubles? (?:the |its |their )?power|twice (?:its|their) power|power and toughness (?:are|is) doubled/.test(text) || /(?:x \+1\/\+1 counters|\+x\/\+x|x damage|draw x cards)[^.]*where x is [^.]*\bpower\b|x is (?:its|that creature's|the greatest) power/.test(text)) add("multiplies-power", "doubles or scales power");
+      if (usesLabel("add-mana") && /\bpower\b/.test(text)) add("ramps-at-power", "mana that reads power");
+      if (/\b(?:greatest|total) power\b|power \d+ or greater/.test(text)) add("reads-power", "reads power");
+      if (/(?:other )?creatures you control (?:have|gain) trample|trample to/.test(text)) add("grants-delivery", "grants trample");
+    }
+    if (c.kind === "quantity" && c.measure === "count" && c.filter) {
+      if (centerTypeHas(card, c.filter)) add("counts-type", "is a " + c.filter);
+      if (new RegExp("(?:for each|number of|affinity for) [^.]*\\b" + c.filter + "s?\\b").test(text)) add("reads-count", "reads the " + c.filter + " count");
+      if (abilities.some((ab) => ab.effects.some((e) => ["anthem-lord", "counters", "pump"].includes(e.label)) && new RegExp("\\b" + c.filter + "s? (?:creatures? )?you control|each " + c.filter).test(ab.line))) add("boosts-type", "grows " + c.filter + "s");
+    }
+    if (c.kind === "event" && c.event === "gain-life") {
+      // Dina: every life gain is a trigger, so a card that gains life (lifelink, a drain, an enters gain) makes the event,
+      // another "whenever you gain life" card pays off the same event, and Food makes it later (weak).
+      // Only a source that keeps gaining life (lifelink, a recurring trigger, an ability that does not use the card up) is a real
+      // engine; one gain from a spell, an enters trigger or a sacrifice is one drain and ranks low.
+      const gains = abilities.filter((ab) => ab.effects.some((e) => e.label === "gain-life"));
+      const repeats = gains.some((ab) => (ab.kind === "triggered" && !ab.trigger.some((t) => t === "etb" || t === "dies"))
+        || (ab.kind === "activated" && !/(?:sacrifice|exile) ~/.test(String(ab.line).split(":")[0])));
+      if (/\blifelink\b/.test(text) || repeats) add("makes-event", "keeps gaining life");
+      else if (gains.length) add("makes-event-once", "gains life once");
+      if (/whenever you gain life|whenever you gain or lose life/.test(text)) add("event-payoff", "triggers on life gain");
+      if (/create (?:an? |\w+ )?food token/.test(text)) add("makes-type-weak", "makes Food");
+    }
+    if (c.kind === "event" && c.filter) {
+      const f = c.filter;
+      if (c.event === "cast" && centerTypeHas(card, f)) add("makes-event", "a " + f + " spell");
+      if (c.event === "enter" && centerTypeHas(card, f)) add("makes-event", "a " + f + " entering");
+      if (abilities.some((ab) => ab.effects.some((e) => e.label === "create-token") && new RegExp("\\b" + f + "\\b").test(ab.line))) add(c.event === "cast" ? "makes-type-weak" : "makes-type", "makes " + f + " tokens");
+      // The number behind a typed event is the count of that type (Sai: artifacts), so cards that scale with it link too.
+      if (new RegExp("(?:for each|number of|affinity for) [^.]*\\b" + f + "s?\\b").test(text)) add("reads-count", "reads the " + f + " count");
+      if (new RegExp("whenever (?:you cast an? |another |one or more |an? )?[^.,]*\\b" + f + "s?\\b[^.,]*(?:spell|enters?)").test(text)) add("event-payoff", "triggers on " + f);
+      if (new RegExp("\\b" + f + " spells you cast cost").test(text)) add("cheaper-casts", f + " spells cost less");
+      if (abilities.some((ab) => ab.effects.some((e) => ["anthem-lord", "counters", "pump"].includes(e.label)) && new RegExp("\\b" + f + "s? (?:creatures? )?you control|each " + f).test(ab.line))) add("boosts-type", "grows " + f + "s");
+    }
+    if (c.kind === "exchange") {
+      const fodderType = c.pays;
+      if (centerTypeHas(card, fodderType) && (usesLabel("create-token") || abilities.some((ab) => ab.trigger.includes("etb") || ab.trigger.includes("dies")))) add("fodder", "sacrifice fodder with value");
+      // Fodder that pays you back for dying (Doomed Dissenter's Zombie) is worth more than a body with some other trigger.
+      if (isCreature && abilities.some((ab) => /\bwhen(?:ever)? ~ dies\b/.test(ab.line) && ab.effects.some((e) => ["create-token", "draw", "return-from-graveyard"].includes(e.label)))) add("fodder-dies", "pays you back when it dies");
+      if (abilities.some((ab) => ab.kind === "activated" && ab.cost.includes("sacrifice-other"))) add("outlet", "sacrifice outlet");
+      if (/whenever (?:another |a |an |one or more |a nontoken )?[^.,]*\b(?:dies|die)\b|whenever you sacrifice/.test(text)) add("death-payoff", "death or sacrifice payoff");
+      // The commander returns cards from the graveyard, so "whenever cards leave your graveyard" triggers on every use (Tormod).
+      if (/return/.test(c.gets) && /whenever (?:one or more |a |another )?(?:other )?cards? leaves? your graveyard/.test(text)) add("graveyard-leave-payoff", "triggers when cards leave the graveyard");
+      if (/return/.test(c.gets)) {
+        // A second way to put a creature back (insurance), or fodder that returns itself.
+        const back = abilities.flatMap((ab) => ab.effects).filter((e) => e.label === "return-from-graveyard" && e.from === "your");
+        if (back.some((e) => e.object !== "self" && /creature/.test(String(e.object || "creature")))) add("reanimates", "returns a creature from the graveyard");
+        else if (back.some((e) => e.object === "self") && isCreature) add("comes-back", "returns itself");
+      }
+      if (/return/.test(c.gets) && isCreature) {
+        // "Better than what was sacrificed": a big body, or an enters trigger that fires again (a smaller link).
+        if (cmc >= 5) add("return-target", "big return target");
+        else if (cmc >= 3 && abilities.some((ab) => ab.trigger.includes("etb"))) add("return-target-small", "enters trigger returns again");
+      }
+      if (/return/.test(c.gets) && abilities.some((ab) => ab.effects.some((e) => ["mill-self", "discard-self", "loot", "rummage", "put-into-graveyard"].includes(e.label)))) add("graveyard-fill", "fills the graveyard");
+      if (/power/.test(c.gets) && isCreature && power >= 4) add("power-fodder", "power " + power);
+    }
+  }
+  return Array.from(found.values());
+}
+
+function getCenterBonus(card, needs) {
+  const links = getCenterLinks(card, needs);
+  return Math.min(CENTER_BONUS_CAP, links.reduce((sum, l) => sum + l.weight, 0));
+}
+
 function getEngineBonus(card, needs) {
-  if (!card || (!isEngineActive(needs) && !hasEventNeeds(needs))) return 0;
+  if (!card || (!isEngineActive(needs) && !hasEventNeeds(needs) && !hasCenterNeeds(needs))) return 0;
   const type = getCardType(card);
   if (type.split("—")[0].includes("land")) return 0;
 
@@ -542,6 +700,7 @@ function getEngineBonus(card, needs) {
       if (Number(card.cmc || 0) <= 3 && pips >= 2) bonus += 2;
     }
   }
+  bonus += getCenterBonus(card, needs);
   return Math.min(ENGINE_BONUS_CAP, bonus);
 }
 

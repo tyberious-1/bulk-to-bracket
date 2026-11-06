@@ -164,7 +164,7 @@ function pickCheapThemeSeeds(pool, curvePlan, usedNames, commanderKeys) {
       const key = normalizeCardName(card.name);
       if (usedNames.has(key) || commanderKeys.has(key) || claimedKeys.has(key)) continue;
       if (getCmcBand(curveCmcOf(card)) !== band) continue;
-      if (!curveHasRoom(curvePlan, curveCmcOf(card))) continue;
+      if (!curveHasRoom(curvePlan, curveCmcOf(card), card)) continue;
 
       picks.push(card);
       claimedKeys.add(key);
@@ -173,6 +173,15 @@ function pickCheapThemeSeeds(pool, curvePlan, usedNames, commanderKeys) {
   }
 
   return picks;
+}
+
+// Scryfall's popularity rank (edhrec_rank, 1 is the most played), the same tie-break the bottom-up builder
+// uses (popularityRank in archetypes.js, not called here so this file keeps its own load order). A card without
+// one -- a test fixture, a very new card -- ranks last.
+const UNRANKED_POPULARITY = 1e9;
+function popularityOf(card) {
+  const rank = card && card.raw ? Number(card.raw.edhrec_rank) : NaN;
+  return Number.isFinite(rank) && rank > 0 ? rank : UNRANKED_POPULARITY;
 }
 
 function getFallbackSource(card) {
@@ -196,7 +205,7 @@ function pickBestFallbackCard(pool, usedNames, commanderKeys, bucket, curvePlan,
 
     const adjusted = Number(card.score || 0) - getRedundancyPenalty(card.redundancyKeys, redundancyCounts);
 
-    if (curveHasRoom(curvePlan, curveCmcOf(card))) {
+    if (curveHasRoom(curvePlan, curveCmcOf(card), card)) {
       if (adjusted > bestScore) {
         best = card;
         bestScore = adjusted;
@@ -333,6 +342,7 @@ function buildDeckFromScoredPool(
       colors: card.colors,
       modeFitTier: fit.tier,
       themeMatch,
+      popularity: popularityOf(card),
       // Precomputed: the pickers read these once per candidate per slot.
       redundancyKeys: getCardRedundancyKeys(card, planTraits),
       roles: getRoleContributions(card, isTribalDeck)
@@ -346,8 +356,22 @@ function buildDeckFromScoredPool(
   // tier has nothing left that fits the slot.
   const fallbackTiers = [themeFallbackPool, genericFallbackPool];
 
+  // A card that links strongly into the commander's center (engines.js getCenterLinks) is a plan card: it
+  // does not wait on the curve band's cap (type-plan.js curveHasRoom reads centerWeight).
+  for (const pool of [scoredNonlands, themeFallbackPool, genericFallbackPool]) {
+    for (const candidate of pool) {
+      const owned = allOwnedCardData.get(normalizeCardName(candidate.name));
+      candidate.centerWeight = owned ? getCenterBonus(owned, modePrefs.engineNeeds) : 0;
+    }
+  }
   scoredNonlands.sort((a, b) => b.score - a.score);
-  for (const tier of fallbackTiers) tier.sort((a, b) => b.score - a.score);
+  // The fallback score has no term for what a card does beyond its role tag and mana value, so whole groups
+  // of cards tie (on Callaphe 118 blue instants scored alike, and in the 13 sample builds 22 of 25 generic
+  // picks and 18% of theme-fallback picks were decided by a tie). Every picker keeps the first of equal scores,
+  // so the order here is the tie-break: the more played card first (the collection's order only when the rank also ties).
+  for (const tier of fallbackTiers) {
+    tier.sort((a, b) => b.score - a.score || a.popularity - b.popularity);
+  }
 
   const recommendedLandCount = recommendLandCount(commanderColors);
   const combinedPool = [...themeFallbackPool, ...genericFallbackPool];
@@ -483,7 +507,7 @@ function buildDeckFromScoredPool(
         bestIgnoringCurveScore = adjusted;
       }
 
-      if (!curveHasRoom(curvePlan, curveCmcOf(card))) continue;
+      if (!curveHasRoom(curvePlan, curveCmcOf(card), card)) continue;
 
       if (adjusted > bestScore) {
         best = card;
@@ -549,14 +573,15 @@ function buildDeckFromScoredPool(
       }
     }
 
-    // Phase 1b: bring every type bucket up to its target, theme tier
-    // first and generic tier second *per bucket*. Phase 2 below asks the tiers
+    // Phase 1b: bring every type bucket up to its target from the EDHREC
+    // pool, then the theme tier, *per bucket*. Phase 2 below asks the tiers
     // in order for whatever card scores best overall, so a theme tier that
-    // still holds creatures but no spells keeps winning slots and the generic
-    // tier's spells are never reached -- a Kaza, Roil Chaser build ended on 36
+    // still holds creatures but no spells keeps winning slots and the spells
+    // are never reached -- a Kaza, Roil Chaser build ended on 36
     // creatures against EDHREC's 24 with ~790 owned instants and sorceries
-    // untouched. Asking per bucket is the "generic only when theme runs dry
-    // for a slot" rule Phase 1 already follows for the minimums.
+    // untouched. Asking per bucket fixes that. The generic tier is not asked here
+    // (changed 2026-11-03): topping a bucket up from it padded builds with unconnected
+    // cards; a bucket the theme tier cannot fill is left to Phase 2.
     // A bucket stops being filled the first time its best remaining candidate
     // fails the quality floor (clearsTypeTargetFloor): padding it with filler
     // is worse than leaving the slot to Phase 2's score-ordered fill.
@@ -582,7 +607,14 @@ function buildDeckFromScoredPool(
         continue;
       }
 
-      const fallbackPick = pickFromTiers(fallbackTiers, (tier) => {
+      // A generic card has no tie to the plan, so topping a creature, artifact or
+      // enchantment bucket up from it left builds with arbitrary padding (Omnath: Apes of
+      // Rath, Arms Race, Altar of the Pantheon) while on-plan cards of other types waited.
+      // Those buckets ask the theme tier only and fall through to Phase 2 when it is dry.
+      // Instants and sorceries still reach the generic tier: a theme tier of creatures
+      // alone otherwise drafts far past the creature target (the Kaza case above).
+      const spellBucket = neededBucket === "Instant" || neededBucket === "Sorcery";
+      const fallbackPick = pickFromTiers(spellBucket ? fallbackTiers : [themeFallbackPool], (tier) => {
         const candidate = pickBestFallbackCard(tier, usedNames, commanderKeys, neededBucket, curvePlan, redundancyCounts, roomInRole);
         return candidate && clearsTypeTargetFloor(candidate, getFallbackSource(candidate), deck) ? candidate : null;
       });
@@ -643,7 +675,7 @@ function buildDeckFromScoredPool(
 
         let adjusted = Number(card.score || 0);
         if (chargeRedundancy) adjusted -= getRedundancyPenalty(card.redundancyKeys, redundancyCounts);
-        if (!curveHasRoom(curvePlan, curveCmcOf(card))) adjusted -= 8;
+        if (!curveHasRoom(curvePlan, curveCmcOf(card), card)) adjusted -= 8;
 
         if (adjusted > bestScore) {
           best = card;
@@ -724,6 +756,43 @@ function buildDeckFromScoredPool(
         adjustRedundancy(deck[replaceIndex], -1);
         deck.splice(replaceIndex, 1);
         addCard(fallbackCreature, getFallbackSource(fallbackCreature));
+      }
+    }
+
+    // Phase 5: center upgrades. A card that links strongly into the commander's center (engines.js getCenterLinks)
+    // replaces the lowest-scoring deck card that has no such link, when a type target or the plan-card cap
+    // was already full. A victim must not be a fun pick, equipment, or a card a support role still needs.
+    if (hasCenterNeeds(modePrefs.engineNeeds)) {
+      const strong = [scoredNonlands, themeFallbackPool, genericFallbackPool]
+        .flatMap((pool, i) => pool.map((c) => ({ card: c, source: i === 0 ? "edhrec" : null })))
+        .filter(({ card }) => Number(card.centerWeight || 0) >= CENTER_STRONG_LINK)
+        .sort((a, b) => b.card.centerWeight - a.card.centerWeight || (b.card.score || 0) - (a.card.score || 0));
+      let swaps = 0;
+      for (const { card: cand, source } of strong) {
+        if (swaps >= CENTER_UPGRADE_MAX) break;
+        const key = normalizeCardName(cand.name);
+        if (usedNames.has(key) || commanderKeys.has(key)) continue;
+        const roleCounts = getDeckRoleCounts();
+        let victimIndex = -1;
+        let victimScore = Infinity;
+        for (let i = 0; i < deck.length; i++) {
+          const existing = deck[i];
+          if (existing.fun || isEquipmentCard(existing) || Number(existing.centerWeight || 0) >= CENTER_LINK_KEEP) continue;
+          const existingRoles = existing.roles || getRoleContributions(getRedundancySource(existing) || existing, isTribalDeck);
+          if (existingRoles.some((r) => supportRoles.includes(r) && roleCounts[r] <= Number(plan.roleBuckets[r]?.target || 0))) continue;
+          if ((existing.score || 0) < victimScore) { victimScore = existing.score || 0; victimIndex = i; }
+        }
+        // A card with no link at all (centerWeight 0) holds its slot on score alone, and the scores come from
+        // different sources: a Dinosaur theme card outscored a power-6 card with an 18-point link. So against
+        // a victim with no link the candidate's strong link is enough; a weakly linked victim still has to lose on score.
+        if (victimIndex === -1) continue;
+        if (Number(deck[victimIndex].centerWeight || 0) > 0 && (cand.score || 0) <= victimScore) continue;
+        usedNames.delete(normalizeCardName(deck[victimIndex].name));
+        releaseCurvePick(curvePlan, curveCmcOf(deck[victimIndex]));
+        adjustRedundancy(deck[victimIndex], -1);
+        deck.splice(victimIndex, 1);
+        addCard(cand, source || getFallbackSource(cand));
+        swaps++;
       }
     }
   }

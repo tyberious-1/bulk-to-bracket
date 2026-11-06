@@ -276,8 +276,13 @@ function buildCurvePlan(nonlandCount, shares = DEFAULT_CURVE_SHARES) {
   return { caps, counts: {} };
 }
 
-function curveHasRoom(curvePlan, cmc) {
+const CENTER_UPGRADE_MAX = 12;   // most deck cards a build swaps out for strong center links (deck.js Phase 5)
+const CENTER_LINK_KEEP = 3;     // a deck card with at least this center bonus is not swapped out
+const CENTER_STRONG_LINK = 14;  // engines.js getCenterBonus at or above this: the card is a plan card
+
+function curveHasRoom(curvePlan, cmc, card) {
   if (!curvePlan) return true;
+  if (card && Number(card.centerWeight || 0) >= CENTER_STRONG_LINK) return true;
   const band = getCmcBand(cmc);
   return (curvePlan.counts[band] || 0) < (curvePlan.caps[band] || 0);
 }
@@ -372,7 +377,7 @@ function pickBestCardForBucket(pool, usedNames, excludedKeys, bucket, curvePlan 
 
     // The pool is score-sorted, so the first card whose band still has room is
     // the best card we can take without distorting the curve.
-    if (curveHasRoom(curvePlan, curveCmcOf(card))) return card;
+    if (curveHasRoom(curvePlan, curveCmcOf(card), card)) return card;
     if (!bestIgnoringCurve) bestIgnoringCurve = card;
   }
 
@@ -441,7 +446,7 @@ function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys, curve
       bestIgnoringCurveScore = adjustedScore;
     }
 
-    if (!curveHasRoom(curvePlan, curveCmcOf(card))) continue;
+    if (!curveHasRoom(curvePlan, curveCmcOf(card), card)) continue;
 
     if (adjustedScore > bestScore) {
       best = card;
