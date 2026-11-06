@@ -42,6 +42,73 @@ The build process:
 
 This prevents issues like overloading instants or underfilling creatures.
 
+### App overview
+
+```mermaid
+flowchart LR
+    U[ManaBox CSV upload] --> T{Pick a tab}
+    T --> B[Build a Deck<br/>type a commander]
+    T --> C[Your Commanders<br/>owned, ranked by EDHREC decks]
+    T --> TH[Theme / Typal<br/>pick a theme or typal first]
+    T --> BU[Bottom-Up Build<br/>start from the cards, not a commander]
+    T --> A[Collection Analytics<br/>creature types and role coverage]
+    TH --> D[What does my collection support?<br/>commander discovery]
+    D --> C
+    B --> G[Commander-first build]
+    C --> G
+    TH --> G
+    G --> R[Deck, report and plan options]
+    BU --> R2[Deck and reliability panel]
+    R --> X[Export to Moxfield]
+    R2 --> X
+```
+
+### Commander-first build
+
+```mermaid
+flowchart TD
+    A[Commander and owned collection] --> F{Format?}
+    F -->|Commander| E[Fetch EDHREC synergy<br/>and average type mix]
+    F -->|Pauper| S[Skip EDHREC<br/>Scryfall and collection only]
+    E --> TH[Detect themes and plan options]
+    S --> TH
+    TH --> N[Read commander needs<br/>vehicles, devotion, events, partners]
+    N --> M{Build modes}
+    M -.->|Minimal Build| M1[Stop at commander, lands<br/>and support package]
+    M -.->|Curve First| M2[Cap ramp and wipes<br/>boost cheap draw and removal]
+    M -.->|Event Engines| M3[Score cards that cause<br/>the commander's events]
+    M --> P[Create target buckets per card type]
+    P --> P1[Cheap theme seeds]
+    P1 --> P2[Support roles<br/>ramp, draw, removal, wipes]
+    P2 --> P3[Type minimums<br/>then type targets]
+    P3 --> P4[Flexible fill<br/>EDHREC matches, then theme fit]
+    P4 --> P5[Fun slots<br/>up to 5, never evicted]
+    P5 --> P6[Evict and backfill<br/>plus or minus 2 variance]
+    P6 --> L[Mana base<br/>untapped lands first]
+    L --> BR[Bracket estimate]
+    BR --> O[Export to Moxfield]
+```
+
+### Bottom-Up build
+
+```mermaid
+flowchart TD
+    A[Owned collection] --> SC[Scan typals and themes<br/>rated Strong, OK or Thin]
+    SC --> PL[Pick a plan<br/>typal or theme, optional second layer]
+    PL --> AR{Archetype}
+    AR --> AG[Aggro]
+    AR --> MI[Midrange]
+    AR --> CO[Control]
+    AG --> RL[Fill roles<br/>ramp, draw, removal, wipes]
+    MI --> RL
+    CO --> RL
+    RL --> PY[Reserve payoff cards]
+    PY --> CF[Fill plan creatures<br/>then no-signal filler]
+    CF --> LD[Mana base<br/>land count set by archetype]
+    LD --> RE[Reliability panel<br/>odds for lands, ramp, draw, removal]
+    RE --> X[Export to Moxfield]
+```
+
 
 ## 🚀 How It Works
 

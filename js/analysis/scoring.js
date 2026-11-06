@@ -257,7 +257,7 @@ const SUPPORT_ROLES = ["wipe", "removal", "ramp", "draw"];
 // One-sided sweepers stay sweepers on purpose: "each creature your opponents
 // control" clears three boards at a four-player table, which is the job.
 const WIPE_SCOPE_NARROWER =
-  /\b(?:with|without)\s+(?:flying|reach|defender|shadow|horsemanship|protection)\b|\b(?:that|target|defending)\s+player\s+controls\b|\bblocking (?:it|them)\b|\bdealt damage this turn\b/;
+  /\b(?:with|without)\s+(?:flying|reach|defender|shadow|horsemanship|protection)\b|\b(?:that|target|defending)\s+player\s+controls\b|\bblocking (?:it|them)\b|\bdealt damage this turn\b|^\s*you control\b/;
 
 // True when every occurrence of the pattern is narrowed to a slice of the board
 // rather than the whole of it. Bounded to the sentence the match sits in, so a
@@ -523,10 +523,52 @@ function wheneverYouDrawIsRealDraw(text, pattern) {
 // and stay. Used for the draw role only; the ramp patterns lean on reminder text on purpose.
 const FALSE_DRAW_REMINDER = /\([^)]*(?:discard a card, sacrifice (?:this|it)[^)]*draw a card|if you would draw a card|reveal a lesson|promise an opponent a gift|jace token)[^)]*\)/g;
 
+// Wordings the literal lists in ROLE_TEXT_PATTERNS cannot hold, because they carry a number, a verb ending
+// or an "up to" (found 2026-11-03 by checking every owned card against Scryfall's oracle tags: the lists
+// missed 673 of 1,520 removal cards and 82 of 919 draw cards, and a card with no role is generic filler to
+// the builder, ordered by collection order). Each wording below agreed with the tags 88-100% of the time on
+// the cards it added.
+// Draw: "target player draws two cards", "draw X cards", "draw cards equal to". Left out on purpose:
+// wheels and rummages ("discard ... then draw that many cards"), cards where the opponent draws, and
+// anything with a discard clause, since those are not net card advantage.
+const DRAW_WORDING = /\bdraws? (?:x|two|three|four|five|six|seven) cards\b|\bdraws a card\b|\bdraws? cards (?:equal|for each)\b/;
+
+function drawsByWording(text) {
+  if (!DRAW_WORDING.test(text)) return false;
+  if (/(?:its|their) controller draws|opponent draws|each player (?:discards|draws)/.test(text)) return false;
+  return !text.includes("discard");
+}
+
+// Removal: burn of 2 or more (or X) to any target, an "exile up to one target" enchantment or
+// creature (not a flicker that returns it, not a graveyard exile), tucking a creature or permanent into a
+// library, bouncing a target that is not yours, and auras that stop a permanent attacking or untapping.
+function removesByWording(text) {
+  const burn = text.match(/(\d+|x) damage (?:to any target|divided as you choose among any number of targets)/);
+  if (burn && (burn[1] === "x" || Number(burn[1]) >= 2)) return true;
+
+  const exile = text.match(/exile up to \w+ (?:other )?target (?:nonland )?(?:permanent|creature|artifact|enchantment)s?\b[^.]*/);
+  if (exile && !/graveyard|you control/.test(exile[0]) && !/return (?:it|that card|them|those cards) to the battlefield/.test(text)) return true;
+
+  if (/(?:put|puts) (?:up to \w+ )?target (?:nonland )?(?:creature|permanent)s? (?:on|into)\b[^.]*library|owner puts it (?:on|into)[^.]*library/.test(text)) return true;
+
+  if (/return (?:up to \w+ )?(?:other )?target [^.:;]*?to (?:its|their) owners?['\u2019]s? hands?/.test(text)
+    && !/you control[^.:;]*to (?:its|their) owner/.test(text)) return true;
+
+  return /enchanted (?:creature|permanent) (?:can't attack or block|doesn't untap|loses all abilities)/.test(text);
+}
+
+function matchesRoleWording(role, text) {
+  if (role === "draw") return drawsByWording(text);
+  if (role === "removal") return removesByWording(text);
+  return false;
+}
+
 function cardMatchesRole(card, role, isTribalDeck = false) {
   if (!isTribalDeck && isFlexibleTribalPayoff(card)) return false;
 
   const text = role === "draw" ? getCardText(card).replace(FALSE_DRAW_REMINDER, " ") : getCardText(card);
+
+  if (matchesRoleWording(role, text)) return true;
 
   return (ROLE_TEXT_PATTERNS[role] || []).some((pattern) => {
     if (role === "ramp" && pattern === "search your library for") {
