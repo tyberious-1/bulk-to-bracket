@@ -616,7 +616,39 @@ function getThemeKeywords(theme) {
 // Whole words only. A plain substring test makes "ramp" match every trample
 // creature, which handed Yisan's toolbox deck Yavimaya Wurm, Craw Giant and
 // Elfhame Wurm as theme cards.
+// A theme named for something Scryfall's catalogs know (a keyword, an ability word, a creature type) is matched by what the card
+// is, not by the word in its text: "flying" read 1,325 owned cards by text and 913 have it, "haste" 383 against 142, while
+// cycling (68 against 114), fight (16 against 51) and werewolves (3 against 32) were undercounted. "eggs" is an EDHREC theme
+// for cheap artifacts but also a creature type, so it stays on the text pass.
+const CATALOG_THEME_SKIP = new Set(["eggs"]);
+
+function resolveCatalogTheme(theme) {
+  if (typeof CATALOG_KEYWORDS === "undefined") return null;
+  const name = normalizeThemeName(theme);
+  if (CATALOG_THEME_SKIP.has(name)) return null;
+  for (const form of [name, name.replace(/ies$/, "y"), name.replace(/ves$/, "f"), name.replace(/s$/, "")]) {
+    if (CATALOG_KEYWORDS.has(form)) return { kind: "keyword", term: form };
+    if (CATALOG_CREATURE_TYPES.has(form)) return { kind: "type", term: form };
+  }
+  return null;
+}
+
+// null when the card carries no Scryfall keywords (test fixtures, cards from an old cache): the caller falls back to the text pass.
+function cardMatchesCatalogTheme(card, resolved) {
+  if (resolved.kind === "type") return getCardSubtypes(card).includes(resolved.term);
+  const raw = card.raw && Array.isArray(card.raw.keywords) ? card.raw.keywords : null;
+  if (!raw) return null;
+  if (raw.some((k) => String(k).toLowerCase() === resolved.term)) return true;
+  // a granted keyword counts too: "gains flying", "creatures you control have deathtouch"
+  return new RegExp(`\\b(?:has|have|gains?|gain) (?:[a-z+/\\d, ]+ and )?${resolved.term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(getCardText(card));
+}
+
 function cardMatchesThemeText(card, theme) {
+  const resolved = resolveCatalogTheme(theme);
+  if (resolved) {
+    const exact = cardMatchesCatalogTheme(card, resolved);
+    if (exact !== null) return exact;
+  }
   const keywords = getThemeKeywords(theme);
   if (!keywords.length) return false;
 

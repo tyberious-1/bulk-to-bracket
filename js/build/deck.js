@@ -110,6 +110,28 @@ function isThemeFallback(card) {
 // re-sorting.
 const THEME_SEED_BAND_LIMITS = { 1: 1, 2: 2, 3: 2 };
 
+// Phase 0 fills ramp/draw/removal/wipe by score alone, so a role card that also feeds the commander's
+// plan (engines.js getCenterBonus, carried as `centerWeight`) lost to a slightly higher-scoring generic
+// one. Within this many points of the best candidate, the stronger plan link wins; farther behind it does
+// not. Scores swing 20+ points between cards, so 3 means "close". With no center (centerWeight 0 on
+// every card) the pick is exactly the highest score, first of equals, as before.
+const ROLE_PLAN_TIE_MARGIN = 3;
+
+// entries: [{ card, adjusted }]. Returns the card to take for the role, or null.
+function pickRoleCandidate(entries) {
+  if (!entries.length) return null;
+  const top = Math.max(...entries.map((e) => e.adjusted));
+  let best = null;
+  for (const entry of entries) {
+    if (entry.adjusted < top - ROLE_PLAN_TIE_MARGIN) continue;
+    if (!best) { best = entry; continue; }
+    const link = Number(entry.card.centerWeight || 0);
+    const bestLink = Number(best.card.centerWeight || 0);
+    if (link > bestLink || (link === bestLink && entry.adjusted > best.adjusted)) best = entry;
+  }
+  return best.card;
+}
+
 // Fun slots: cards the player names because they like them (a favourite that
 // "looks interesting"), kept out of every synergy and score floor. Commander is
 // casual, so a few flavour picks can matter more than the last point of synergy
@@ -482,10 +504,8 @@ function buildDeckFromScoredPool(
   // the deck's slots -- the same prefer-in-budget-else-fallback split Phase 1's
   // pickBestCardForBucket already uses, applied here too.
   function pickBestForRole(pool, role, chargeRedundancy) {
-    let best = null;
-    let bestScore = -Infinity;
-    let bestIgnoringCurve = null;
-    let bestIgnoringCurveScore = -Infinity;
+    const inBudget = [];
+    const ignoringCurve = [];
     const typeCounts = countByType(deck);
 
     for (const card of pool) {
@@ -502,20 +522,14 @@ function buildDeckFromScoredPool(
       const typeRule = typePlan?.buckets?.[bucket];
       if (typeRule && (typeCounts[bucket] || 0) > Number(typeRule.target || 0)) adjusted -= 6;
 
-      if (adjusted > bestIgnoringCurveScore) {
-        bestIgnoringCurve = card;
-        bestIgnoringCurveScore = adjusted;
-      }
+      ignoringCurve.push({ card, adjusted });
 
       if (!curveHasRoom(curvePlan, curveCmcOf(card), card)) continue;
 
-      if (adjusted > bestScore) {
-        best = card;
-        bestScore = adjusted;
-      }
+      inBudget.push({ card, adjusted });
     }
 
-    return best || bestIgnoringCurve;
+    return pickRoleCandidate(inBudget) || pickRoleCandidate(ignoringCurve);
   }
 
   while (deck.length < targetNonlandCount) {

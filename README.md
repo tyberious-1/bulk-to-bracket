@@ -72,11 +72,11 @@ flowchart TD
     F -->|Pauper| S[Skip EDHREC<br/>Scryfall and collection only]
     E --> TH[Detect themes and plan options]
     S --> TH
-    TH --> N[Read commander needs<br/>vehicles, devotion, events, partners]
+    TH --> N[Read commander needs<br/>vehicles, devotion, events, center, partners]
     N --> M{Build modes}
     M -.->|Minimal Build| M1[Stop at commander, lands<br/>and support package]
     M -.->|Curve First| M2[Cap ramp and wipes<br/>boost cheap draw and removal]
-    M -.->|Event Engines| M3[Score cards that cause<br/>the commander's events]
+    M -.->|Event Engines| M3[Score cards that cause<br/>the commander's events and<br/>link into its center]
     M --> P[Create target buckets per card type]
     P --> P1[Cheap theme seeds]
     P1 --> P2[Support roles<br/>ramp, draw, removal, wipes]
@@ -84,7 +84,8 @@ flowchart TD
     P3 --> P4[Flexible fill<br/>EDHREC matches, then theme fit]
     P4 --> P5[Fun slots<br/>up to 5, never evicted]
     P5 --> P6[Evict and backfill<br/>plus or minus 2 variance]
-    P6 --> L[Mana base<br/>untapped lands first]
+    P6 --> P7[Center upgrades<br/>cards that link into the commander's plan<br/>replace cards with no link]
+    P7 --> L[Mana base<br/>untapped lands first]
     L --> BR[Bracket estimate]
     BR --> O[Export to Moxfield]
 ```

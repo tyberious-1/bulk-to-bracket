@@ -64,27 +64,31 @@ function buildCardData(collection) {
         type: typeKey,
         colorId,
         count: 0,
+        unique: 0,
         cards: []
       });
     }
     const typeEntry = byTypeSubtype.get(byTypeKey);
     typeEntry.count += entry.quantity;
+    typeEntry.unique += 1;
     typeEntry.cards.push({ name: entry.rawName, quantity: entry.quantity });
 
     // Support roles: every job a card does, so a removal spell that also draws
     // is counted in both lists. detectRole alone files it under one.
-    for (const role of getRoleContributions(card)) {
+    for (const role of getCollectionRoles(card)) {
       const roleKey = `${role}|${colorId}`;
       if (!bySupportRole.has(roleKey)) {
         bySupportRole.set(roleKey, {
           role,
           colorId,
           count: 0,
+          unique: 0,
           cards: []
         });
       }
       const roleEntry = bySupportRole.get(roleKey);
       roleEntry.count += entry.quantity;
+      roleEntry.unique += 1;
       roleEntry.cards.push({ name: entry.rawName, quantity: entry.quantity, imageUrl: getCardImageUrl(card) });
     }
   }
@@ -167,10 +171,10 @@ function buildTypeSummary(byTypeSubtype) {
 
     if (!typeKey || !summary[typeKey]) continue;
 
-    summary[typeKey].totalCount += entry.count;
+    summary[typeKey].totalCount += entry.unique;
     if (isLegendary) {
       summary[typeKey].hasLegendary = true;
-      summary[typeKey].legendaryCount += entry.count;
+      summary[typeKey].legendaryCount += entry.unique;
     }
     summary[typeKey].colors.add(entry.colorId);
   }
@@ -191,7 +195,7 @@ function getColorDistribution(subtypeEntries) {
   }
 
   for (const entry of subtypeEntries) {
-    distribution[entry.colorId] = (distribution[entry.colorId] || 0) + entry.count;
+    distribution[entry.colorId] = (distribution[entry.colorId] || 0) + entry.unique;
   }
 
   return distribution;
@@ -346,14 +350,15 @@ function renderSupportPackageSection(role, entries) {
 
   sortedColors.forEach(colorId => {
     const colorEntries = groupedByColor.get(colorId);
-    const totalCount = colorEntries.reduce((sum, e) => sum + e.count, 0);
+    const uniqueCount = colorEntries.reduce((sum, e) => sum + e.unique, 0);
+    const copyCount = colorEntries.reduce((sum, e) => sum + e.count, 0);
     const colorLabel = colorId || "Colorless";
     const collapsibleId = `${role}-${colorId || "C"}-cards`;
 
     html += `
       <div class="color-group">
         <div class="color-group-header">
-          ${colorLabel}: <span class="count-badge">${totalCount}</span>
+          ${colorLabel}: <span class="count-badge">${uniqueCount}${copyCount !== uniqueCount ? ` (${copyCount} copies)` : ''}</span>
         </div>
         ${renderCollapsible(collapsibleId, 'View cards', renderCardsList(colorEntries))}
       </div>
@@ -552,7 +557,7 @@ function renderCollectionSummary(byTypeSubtype, bySupportRole, monoColorDist) {
   html += '<div class="summary-block"><h4>Support roles against a typical deck</h4>';
   for (const row of buildRoleCoverage(bySupportRole)) {
     html += '<div class="role-row"><span class="role-name">' + ROLE_LABELS[row.role] + '</span>';
-    html += '<span class="role-count">' + row.total + ' of ~' + row.target + '</span>';
+    html += '<span class="role-count" title="Different cards, then copies you own">' + row.unique + ' of ~' + row.target + ' (' + row.total + ' copies)</span>';
     html += '<span class="status-chip ' + row.status + '">' + ROLE_STATUS_TEXT[row.status] + '</span>';
     html += '<span class="role-colors" title="Cards you could play in a deck of only that color (that color plus colorless)">';
     for (const c of ['W', 'U', 'B', 'R', 'G']) {
@@ -561,9 +566,47 @@ function renderCollectionSummary(byTypeSubtype, bySupportRole, monoColorDist) {
     }
     html += '</span></div>';
   }
-  html += '<p class="detail-note">Targets are typical EDHREC averages (ramp 10, draw 10, removal 8, wipes 3). The five numbers are the cards a deck of only that color could play, colorless included.</p></div>';
+  html += '<p class="detail-note">Targets are typical EDHREC averages (ramp 10, draw 10, removal 8, wipes 3). The five colored numbers count copies, so each shows how many cards a deck of only that color could play from your whole pile, colorless included. The main number counts different cards, since a deck holds one of each.</p></div>';
 
   return html + '</div>';
+}
+
+const CONNECTION_STATUS_TEXT = { missing: 'None', thin: 'Thin', ok: 'Enough', deep: 'Deep' };
+
+function escapeAnalyticsText(text) {
+  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function nameList(names, max) {
+  const shown = names.slice(0, max).map(escapeAnalyticsText).join(', ');
+  return shown + (names.length > max ? ', and ' + (names.length - max) + ' more' : '');
+}
+
+// The web of connected cards: for each thing cards need (a creature dying, a land entering...), how
+// many of your cards need it and how many make it. An engine runs only as deep as its thinner side.
+function renderConnectionsSection(collection) {
+  const cards = [];
+  for (const entry of getCollectionEntries(collection)) {
+    const card = cardCache.get(entry.normalizedName);
+    if (card) cards.push({ name: entry.rawName, card, colorId: getCardColorIdentity(card) });
+  }
+  const web = buildCollectionConnections(cards);
+  if (!web.channels.length) return '';
+
+  let body = '<p class="detail-note">Each card is read as what it makes and what it needs. A payoff needs a feeder, and a feeder needs a payoff, so an engine is only as deep as the smaller side. Different cards, not copies. The Enough and Deep cut-offs (6 and 15) are rough guesses. The five colored numbers show the same depth inside a deck of only that color, colorless cards included.</p>';
+  for (const row of web.channels) {
+    body += '<div class="role-row"><span class="role-name">' + escapeAnalyticsText(row.label) + '</span>';
+    body += '<span class="role-count" title="Cards that need it, then cards that make it">' + row.wanters + ' need it, ' + row.givers + ' make it</span>';
+    body += '<span class="status-chip ' + row.status + '">' + CONNECTION_STATUS_TEXT[row.status] + '</span>';
+    body += '<span class="role-colors" title="How deep the engine runs in a deck of only that color (that color plus colorless): the smaller of cards that need it and cards that make it">';
+    for (const c of ['W', 'U', 'B', 'R', 'G']) {
+      const seg = COLOR_SEGMENTS.find((x) => x.key === c);
+      body += '<span class="role-color"><span class="legend-swatch" style="background: ' + seg.bg + ';"></span>' + row.byColor[c].depth + '</span>';
+    }
+    body += '</span></div>';
+    body += renderCollapsible('conn-' + row.channel, 'View cards', '<p class="detail-note">Need it: ' + nameList(row.wantNames, 25) + '.</p><p class="detail-note">Make it: ' + (row.giveNames.length ? nameList(row.giveNames, 25) : 'nothing you own') + '.</p>');
+  }
+  return '<div class="analytics-section">' + renderCollapsible('card-connections', 'Engines your cards connect into (' + web.channels.length + ' kinds)', body) + '</div>';
 }
 
 function renderAnalyticsPanel() {
@@ -627,16 +670,19 @@ function renderAnalyticsPanel() {
   );
   html += '</div>';
 
+  html += renderConnectionsSection(collection);
+
   // Support packages
   const roles = ['ramp', 'draw', 'removal', 'wipe'];
   const roleTargets = normalizeRoleTargets({});
   roles.forEach(role => {
     const entries = roleGroups.get(role) || [];
-    const totalCount = entries.reduce((sum, e) => sum + e.count, 0);
+    const uniqueCount = entries.reduce((sum, e) => sum + e.unique, 0);
+    const copyCount = entries.reduce((sum, e) => sum + e.count, 0);
     html += '<div class="analytics-section">';
     html += renderCollapsible(
       `support-${role}`,
-      `${ROLE_LABELS[role]} (${totalCount} of ~${roleTargets[role]})`,
+      `${ROLE_LABELS[role]} (${uniqueCount} of ~${roleTargets[role]}, ${copyCount} copies)`,
       entries.length ? renderSupportPackageSection(role, entries) : '<p class="detail-note">No cards found.</p>'
     );
     html += '</div>';

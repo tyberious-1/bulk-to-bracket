@@ -26,6 +26,17 @@ function isTokenMaker(card) {
   return getCardText(card).includes("create") && getCardText(card).includes("token");
 }
 
+// A token maker whose only trigger is "whenever you cast an artifact/enchantment/instant... spell"
+// makes nothing unless the deck casts that type (Efficient Construction in a Fractal deck with two
+// artifacts). It counts as a token maker only when the commander's themes name that type.
+const TYPE_KEYED_TOKEN_TRIGGER = /whenever you cast an? (artifact|enchantment|instant|sorcery|noncreature)\b/;
+function tokenMakerPaysOff(card, themeSignals) {
+  if (!isTokenMaker(card)) return false;
+  const m = getCardText(card).match(TYPE_KEYED_TOKEN_TRIGGER);
+  if (!m) return true;
+  return [...themeSignals].some((t) => t.includes(m[1]) || (m[1] === "instant" || m[1] === "sorcery") && t.includes("spellslinger"));
+}
+
 function isSacrificeCard(card) {
   return getCardText(card).includes("sacrifice");
 }
@@ -1049,7 +1060,7 @@ function scoreCard(card, edhrecCard, commanderThemes, strategyProfile, commander
   }
 
   if (strategyProfile.wantsCreatures && isCreatureCard(card)) themeBonus += 5 * modePrefs.creatureBias;
-  if (strategyProfile.wantsTokens && isTokenMaker(card) && strategyBonusAllowed(modePrefs, ["tokens", "gowide"])) themeBonus += 7 * modePrefs.synergyBias;
+  if (strategyProfile.wantsTokens && tokenMakerPaysOff(card, themeSignals) && strategyBonusAllowed(modePrefs, ["tokens", "gowide"])) themeBonus += 7 * modePrefs.synergyBias;
   if (strategyProfile.wantsSacrifice && isSacrificeCard(card) && strategyBonusAllowed(modePrefs, ["sacrifice", "aristocrats"])) themeBonus += 6 * modePrefs.synergyBias;
   if (strategyProfile.wantsGoWide && isCreatureCard(card) && strategyBonusAllowed(modePrefs, ["tokens", "gowide"])) themeBonus += 3 * modePrefs.creatureBias;
 
@@ -1110,7 +1121,7 @@ function scoreFallbackCard(card, commanderThemes, strategyProfile, commanderColo
   score += getEngineBonus(card, modePrefs.engineNeeds);
 
   if (strategyProfile.wantsCreatures && isCreatureCard(card)) score += 6 * modePrefs.creatureBias;
-  if (strategyProfile.wantsTokens && isTokenMaker(card) && strategyBonusAllowed(modePrefs, ["tokens", "gowide"])) score += 8 * modePrefs.synergyBias;
+  if (strategyProfile.wantsTokens && tokenMakerPaysOff(card, themeSignals) && strategyBonusAllowed(modePrefs, ["tokens", "gowide"])) score += 8 * modePrefs.synergyBias;
   if (strategyProfile.wantsSacrifice && isSacrificeCard(card) && strategyBonusAllowed(modePrefs, ["sacrifice", "aristocrats"])) score += 7 * modePrefs.synergyBias;
   if (strategyProfile.wantsGoWide && isCreatureCard(card) && strategyBonusAllowed(modePrefs, ["tokens", "gowide"])) score += 3 * modePrefs.creatureBias;
 
