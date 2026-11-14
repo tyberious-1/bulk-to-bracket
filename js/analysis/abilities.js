@@ -16,6 +16,9 @@ const TAG_KEYWORDS = new Set([
   "jump-start", "aftermath", "retrace", "scavenge", "boast", "reconfigure", "fabricate", "squad", "offspring", "saddle", "station", "warp", "backup", "increment"
 ]);
 
+// Keywords whose reminder text is "whenever you cast ...": the keyword line carries that trigger.
+const KEYWORD_SPELL_TRIGGERS = { prowess: "cast-noncreature", extort: "cast-spell" };
+
 // The pieces of text to read: a two-faced card face by face (each face's own name
 // becomes "~"), anything else as one piece.
 function abilitySources(card) {
@@ -72,10 +75,10 @@ function tagCostLabels(costText) {
 function tagTriggerLabels(trigger) {
   const labels = [];
   const rules = [
-    ["etb", /\benters\b/], ["attacks", /\battacks?\b/], ["dies", /\bdies\b|\b(?:is|are) put into (?:a|an|your|its owner's|their owner's)\b[^,]*graveyard from the battlefield/], ["leaves-battlefield", /leaves the battlefield/],
+    ["etb", /\benters?\b/], ["attacks", /\battacks?\b/], ["dies", /\bdies\b|\b(?:is|are) put into (?:a|an|your|its owner's|their owner's)\b[^,]*graveyard from the battlefield/], ["leaves-battlefield", /leaves the battlefield/],
     ["upkeep", /beginning of (?:your|each|the) upkeep/], ["end-step", /end step/], ["combat-begin", /beginning of combat/],
     ["main-phase", /main phase/], ["cast-spell", /\bcasts?\b/], ["discard-event", /\bdiscards?\b/], ["cycle-event", /\bcycles?\b/],
-    ["leave-graveyard", /leave your graveyard/], ["becomes-tapped", /becomes tapped(?! for mana)/], ["crews", /\bcrews?\b|becomes crewed/],
+    ["leave-graveyard", /leave your graveyard/], ["becomes-tapped", /becomes? tapped(?! for mana)/], ["crews", /\bcrews?\b|becomes crewed/],
     ["draw-event", /\bdraws?\b/], ["life-event", /gain(?:s)? life|lose(?:s)? life/], ["combat-damage", /combat damage/],
     ["landfall", /\bland(?: you control)? enters/], ["sacrifice-event", /sacrifices?\b/], ["token-event", /\btokens?\b/],
     ["cast-noncreature", /\bcasts? (?:a|an) noncreature spell/], ["cast-second", /\bcasts? (?:their|your|his or her) second spell/],
@@ -99,6 +102,11 @@ function tagEffects(text) {
   else if (/discard (?:a|two|three|x|\d+) cards?[^.]*?,? then draw|you may discard a card\. if you do, draw|\brummage\b/.test(text)) add("rummage");
   else if (/\bconnives?\b/.test(text)) add("loot");
   if (/\bexplores?\b|\blearn\b/.test(text)) add("explore-or-learn");
+  // Recent action verbs (2025 sets): earthbend N puts N +1/+1 counters on a land that becomes a creature; blight N puts N -1/-1 counters;
+  // recruit is a loot that can make a token.
+  if (/\bearthbend (?:\d+|x)\b/.test(text)) add("counters", { counter: "+1/+1" });
+  if (/\bblight (?:\d+|x)\b/.test(text)) add("counters", { counter: "-1/-1" });
+  if (/\brecruit\b/.test(text) && !out.some((e) => e.label === "loot")) add("loot");
   // discard as an effect (costs are tagged separately). who discards decides whether it fuels us or them;
   // the card filter ("a creature card") decides whether it can discard a given card at all.
   if (/(?:each|target) opponents? discards?|each other player discards|that player discards/.test(text)) add("discard-opponent");
@@ -202,6 +210,21 @@ function tagLine(line) {
   return ab;
 }
 
+// The longest known mechanic the line starts with ("earthbend 2", "warp {1}{r}"), or null.
+function mechanicKeywordOf(stripped) {
+  if (typeof MECHANIC_REMINDERS === "undefined") return null;
+  let best = null;
+  for (const k of Object.keys(MECHANIC_REMINDERS)) {
+    // Only a line that is the keyword and its cost or number ("warp {1}{r}", "firebending 2"), never a spell that starts with one.
+    if (stripped.startsWith(k) && /^(?:\s*(?:\{[^}]*\}|\d+|x|[+-]\d+|\u2014[^.]*))*[.,]?$/.test(stripped.slice(k.length)) && (!best || k.length > best.length)) best = k;
+  }
+  return best;
+}
+
+function mechanicReminderText(keyword) {
+  return String(MECHANIC_REMINDERS[keyword] || "").toLowerCase().replace(/\bthis (?:creature|permanent|card|spell|artifact|enchantment|vehicle|equipment|land|aura|saga|spacecraft)\b/g, "~");
+}
+
 function tagLineBody(line) {
   const ab = { line, kind: "static", trigger: [], cost: [], costText: "", effects: [], restrictions: tagRestrictions(line), keyword: false, quoted: [] };
   const stripped = line.replace(/^[^—:]{1,40} — /, ""); // ability words: "channel — ", "landfall — "
@@ -223,6 +246,22 @@ function tagLineBody(line) {
     ab.kind = "keyword";
     ab.effects = [{ label: "keyword:" + stripped.split(/[ ,]/)[0] }];
     if (words.some((w) => /^(?:undying|persist|afterlife)\b/.test(w))) ab.trigger = ["dies"];
+    // A keyword whose reminder text (stripped above) is a spell trigger: Thor's "flying, vigilance, prowess" runs on noncreature spells.
+    for (const w of words) {
+      const kw = w.split(" ")[0], trig = KEYWORD_SPELL_TRIGGERS[kw];
+      if (!trig) continue;
+      if (!ab.trigger.includes(trig)) ab.trigger.push(trig);
+      if (!ab.effects.some((e) => e.label === "keyword:" + kw)) ab.effects.push({ label: "keyword:" + kw });
+    }
+    return ab;
+  }
+  // A keyword the plain keyword list does not know (a recent mechanic): its own reminder text says what it does, so the
+  // effect labels run over that (js/analysis/mechanics-data.js, built by dev/tools/jxa-harness/build_mechanics.py).
+  const mech = mechanicKeywordOf(stripped);
+  if (mech) {
+    ab.kind = "keyword";
+    ab.keyword = true;
+    ab.effects = [{ label: "keyword:" + mech }].concat(tagEffects(mechanicReminderText(mech)));
     return ab;
   }
   const colon = stripped.indexOf(":");

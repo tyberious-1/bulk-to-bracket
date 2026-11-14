@@ -309,6 +309,7 @@ async function performBuildFromContext() {
   const modePrefs = getModePreferences(getCurrentBuildMode(), strategyProfile);
   modePrefs.planSignature = getActivePlanSignature(modePrefs.themeFocus, currentRunContext?.planOptions);
   modePrefs.engineNeeds = applyEventSwitch(parseCommanderNeeds([commanders.primary?.text, commanders.partner?.text]), modePrefs);
+  attachSharedTerms(modePrefs.engineNeeds, [commanders.primary?.text, commanders.partner?.text], allOwnedCardData, modePrefs);
   const isTribalDeck = isActiveBuildTribal(strategyProfile, modePrefs);
 
   updateProgress(78, "Checking legality and scoring cards...");
