@@ -196,7 +196,31 @@ function getThemeAliases(theme) {
 
   if (TRIBAL_PLURAL_ALIASES[normalized]) aliases.add(TRIBAL_PLURAL_ALIASES[normalized]);
   if (normalized.endsWith(" tribal")) aliases.add(normalized);
+  // A creature type the fixed tables lack (Minotaurs): EDHREC names it as a plural and the commander reader finds it, so the
+  // tribal machinery must accept it. A theme with a direct alias keeps its own meaning ("clones" is a plan, not Clone cards).
+  if (!directAliases[normalized] && !TRIBAL_PLURAL_ALIASES[normalized]) {
+    const type = creatureTypeFromThemeWord(normalized);
+    if (type) aliases.add(`${type} tribal`);
+  }
   return Array.from(aliases);
+}
+
+// The creature type a one-word theme names ("minotaurs" -> "minotaur"), from the reader's full type list, or "".
+function creatureTypeFromThemeWord(word) {
+  if (typeof centerTypeWord !== "function" || typeof CATALOG_CREATURE_TYPES === "undefined") return "";
+  if (!/^[a-z'-]+$/.test(word)) return "";
+  const type = centerTypeWord(word);
+  return type && CATALOG_CREATURE_TYPES.has(type) ? type : "";
+}
+
+// A creature type in EDHREC's theme spelling ("elf" -> "elves"), the inverse of centerTypeWord's plural reading.
+const CREATURE_TYPE_PLURALS = { elf: "elves", wolf: "wolves", dwarf: "dwarves", werewolf: "werewolves", thief: "thieves", mouse: "mice", fungus: "fungi", ox: "oxen", cyclops: "cyclopes" };
+function pluralizeCreatureType(type) {
+  const t = String(type || "").toLowerCase();
+  if (CREATURE_TYPE_PLURALS[t]) return CREATURE_TYPE_PLURALS[t];
+  if (/[^aeiou]y$/.test(t)) return t.slice(0, -1) + "ies";
+  if (/(?:s|x|z|ch|sh)$/.test(t)) return t + "es";
+  return t + "s";
 }
 
 function buildThemeSignalSet(themes) {
@@ -249,7 +273,42 @@ function detectTribalThemes(cards) {
     .map(([tribe]) => `${tribe} tribal`);
 }
 
-async function detectCommanderThemes(edhrecCards, edhrecTags, collectionData, allOwnedCardData, commanderColors) {
+// Themes for a commander EDHREC gave no tags for, read from the commander's own words and kept only when the collection owns
+// enough to build on (2026-11-17). The reader's `type` (a creature type it names), `keyword` and `term` records name the thing
+// the commander runs on; a card type (artifact tokens) and a thin term (+1/+1 counters) never become a theme because every deck
+// has them. Order: types, then keywords, then terms; within a group, the better supported first. The first is what a build
+// starts on, so a named creature type beats a keyword. Empty when nothing is readable or supported: the caller falls back.
+const DERIVED_THEME_MAX = 5;
+const DERIVED_THEME_MIN_OWNED = 5;
+
+function deriveCommanderThemes(commanderTexts, collectionData, allOwnedCardData, commanderColors) {
+  const texts = (commanderTexts || []).filter(Boolean);
+  if (!texts.length) return [];
+  const types = [];
+  const keywords = [];
+  const terms = [];
+  for (const rec of getCommanderCenter(texts)) {
+    if (rec.kind === "type" && creatureTypeFromThemeWord(rec.type)) types.push(pluralizeCreatureType(rec.type));
+    else if (rec.kind === "keyword" && rec.kw) keywords.push(rec.kw);
+    else if (rec.kind === "term" && rec.term && !rec.thin) terms.push(rec.term);
+  }
+  const out = [];
+  const seen = new Set();
+  for (const group of [types, keywords, terms]) {
+    const supported = [];
+    for (const theme of group) {
+      if (seen.has(theme)) continue;
+      seen.add(theme);
+      const owned = findLocalThemeMatches(theme, collectionData, allOwnedCardData, commanderColors).size;
+      if (owned >= DERIVED_THEME_MIN_OWNED) supported.push({ theme, owned });
+    }
+    supported.sort((a, b) => b.owned - a.owned);
+    for (const s of supported) out.push(s.theme);
+  }
+  return out.slice(0, DERIVED_THEME_MAX);
+}
+
+async function detectCommanderThemes(edhrecCards, edhrecTags, collectionData, allOwnedCardData, commanderColors, commanderTexts) {
   // edhrecTags already carries extractEdhrecTagsFromData's own count-based
   // selection (see EDHREC_THEME_MAX_COUNT in edhrec.js) -- re-truncating to 5
   // here would throw away exactly the secondary themes that selection was
@@ -258,6 +317,11 @@ async function detectCommanderThemes(edhrecCards, edhrecTags, collectionData, al
   if (cleanedTags.length) {
     return cleanedTags;
   }
+
+  // No tags: read the commander before counting the pool. The pool count below mirrors whichever cards come first in the
+  // collection, so two different commanders got the same themes (Shelob and Sethron: "human tribal, artifact creature tribal").
+  const derived = deriveCommanderThemes(commanderTexts, collectionData, allOwnedCardData, commanderColors);
+  if (derived.length) return derived;
 
   const themeCards = [];
   const topSynergy = [...edhrecCards]

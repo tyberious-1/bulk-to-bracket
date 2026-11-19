@@ -159,7 +159,8 @@ async function generateDeck() {
       edhrecTags,
       collection,
       allOwnedCardData,
-      commanders.colors
+      commanders.colors,
+      [commanders.primary?.text, commanders.partner?.text]
     );
     displayThemes(commanderThemes);
     renderPriorityButtons(commanderThemes, allOwnedCardData, edhrecAllTags);
@@ -172,8 +173,12 @@ async function generateDeck() {
       commanderThemes,
       allOwnedCardData,
       commanders.colors,
-      commanders.primary.name
+      commanders.primary.name,
+      !(edhrecTags && edhrecTags.length)
     );
+    // Start on the first plan the collection supports unless the player already picked one (the Theme tab can hand one over):
+    // a blend of every theme serves no plan.
+    if (!getCurrentThemeFocus()) setCurrentThemeFocus(pickDefaultPlanFocus(planOptions));
     renderPlanOptions(planOptions);
     logMessage(`Detected themes: ${commanderThemes.join(", ") || "none"}`);
 
@@ -444,7 +449,8 @@ async function performBuildFromContext() {
       score,
       type: getCardType(card),
       cmc: card.cmc,
-      colors: card.colors
+      colors: card.colors,
+      popularity: popularityOf(card)
     });
 
     maybeUpdateScoringProgress(processed, totalToScore);
@@ -513,6 +519,7 @@ async function performBuildFromContext() {
       commanderTexts: [commanders.primary?.text, commanders.partner?.text],
       deckSize: commanders.deckSize,
       themeCardNames,
+      supportOverhead: !edhrecCards.length,
       funPicks: getFunPickNames()
     }
   );
