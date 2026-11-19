@@ -186,7 +186,9 @@ function buildCustomPlan(text, allOwnedCardData, commanderColors, commanderName 
 // collection barely supports.
 const PLAN_MIN_FILL_OWNED = 5;
 
-function addCollectionPlans(plans, detectedThemes, allOwnedCardData, commanderColors, commanderName = "") {
+// keepOrder: the themes came ranked (the commander reading puts a named creature type first), so a build's default plan is the
+// first, not the one with the most owned cards. Themes counted from the pool have no ranking worth keeping and sort by owned.
+function addCollectionPlans(plans, detectedThemes, allOwnedCardData, commanderColors, commanderName = "", keepOrder = false) {
   const out = (plans || []).slice();
   if (out.length >= PLAN_MAX_OPTIONS) return out;
   const covered = new Set(out.flatMap((plan) => plan.themes.map((t) => normalizeThemeName(t))));
@@ -200,7 +202,7 @@ function addCollectionPlans(plans, detectedThemes, allOwnedCardData, commanderCo
     plan.fromCollection = true;
     extra.push(plan);
   }
-  extra.sort((a, b) => b.owned - a.owned);
+  if (!keepOrder) extra.sort((a, b) => b.owned - a.owned);
   return out.concat(extra.slice(0, PLAN_MAX_OPTIONS - out.length));
 }
 
@@ -214,4 +216,16 @@ function getActivePlanSignature(themeFocus, plans) {
 
 function planFocusMode(plan) {
   return (plan?.themes || []).join(PLAN_THEME_SEPARATOR);
+}
+
+// The plan a build starts on when the player has not chosen one (2026-11-17): the first offered plan the collection supports
+// (not "light"), in the order the plans were ranked. With no tags for the commander the first plan is the best-read one. A blend
+// of every theme builds a deck that serves no plan. When every plan is light the best supported wins, unless even that is thin
+// (fewer than PLAN_MIN_FILL_OWNED owned): then there is no default and the blend stands.
+function pickDefaultPlanFocus(plans) {
+  const list = Array.isArray(plans) ? plans : [];
+  const supported = list.find((plan) => !plan.light);
+  const best = supported || list.reduce((top, plan) => (!top || plan.owned > top.owned ? plan : top), null);
+  if (!best || (best.light && best.owned < PLAN_MIN_FILL_OWNED)) return "";
+  return planFocusMode(best);
 }

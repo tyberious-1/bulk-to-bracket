@@ -394,8 +394,8 @@ function pickBestCardForBucket(pool, usedNames, excludedKeys, bucket, curvePlan 
 // curve, like this file's own unit tests, can omit it) and, same as the
 // other two pickers, being over a band's cap never excludes a card outright
 // -- bestIgnoringCurve stays available if nothing in-budget fits.
-function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys, curvePlan = null) {
-  const typeCounts = countByType(deck);
+function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys, curvePlan = null, typeDeck = deck) {
+  const typeCounts = countByType(typeDeck);
   const roleCounts = getRoleCounts(deck);
   const roleBuckets = plan?.roleBuckets || {};
   const typeBuckets = plan?.typeBuckets || {};

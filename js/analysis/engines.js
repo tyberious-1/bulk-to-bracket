@@ -209,7 +209,7 @@ function getCommanderCenter(commanderTexts) {
         if (/copy target (?:activated or triggered )?abilit|create a token that's a copy of another target (creature|artifact)/.test(bare)) add({ kind: "copy" });
         if (/^(?:creatures|each creature) can't attack you|^creatures can't attack you or planeswalkers you control unless/.test(bare)) add({ kind: "pillowfort" });
         if (/seven or more cards in hand|no maximum hand size|cards in your hand/.test(bare)) add({ kind: "hand" });
-        const kwm = /(?:other )?creatures you control with (flying|first strike|deathtouch|haste|trample|menace|vigilance|lifelink|reach|hexproof|indestructible)/.exec(bare);
+        const kwm = /creatures? you control with (flying|first strike|deathtouch|haste|trample|menace|vigilance|lifelink|reach|hexproof|indestructible)/.exec(bare);
         if (kwm) add({ kind: "keyword", kw: kwm[1] });
         if (/\btokens? you control\b|tokens? would be created/.test(bare)) add({ kind: "event", event: "token-created" });
         if (/(?:if|when(?:ever)?) (?:a|one or more) (?:creatures?|permanents?)[^,.]*?(?:died|dies?|left the battlefield|leaves? the battlefield)(?: this turn)?|creature died (?:this turn|under)/.test(bare) && a.kind === "triggered") add({ kind: "exchange", pays: "creature", count: 1, gets: "value" });
@@ -1081,6 +1081,20 @@ function getCenterBonus(card, needs) {
   return Math.min(CENTER_BONUS_CAP, links.reduce((sum, l) => sum + l.weight, 0) + getSharedTermBonus(card, needs));
 }
 
+// Fodder is cheap by design: when the commander's trigger names a keyword ("a creature you control with deathtouch"),
+// a 1-mana carrier does the job a 5-mana one does, a turn sooner and with the mana left for the rest of the deck. The
+// fallback score already pays a flat bonus for any card at 3-4 mana, which this has to outweigh. Payoffs and engines
+// are not charged for cost: only the carriers (kw-member) are touched, so this stays a nudge, never a gate.
+const PLAN_FODDER_LINKS = new Set(["kw-member"]);
+const PLAN_FODDER_COST_BONUS = [6, 6, 4, 2, 1];  // indexed by mana value; 5 and up earn nothing
+
+function getPlanFodderCostBonus(card, needs) {
+  if (!needs || !Array.isArray(needs.center) || !needs.center.some((c) => c.kind === "keyword")) return 0;
+  if (!getCenterLinks(card, needs).some((l) => PLAN_FODDER_LINKS.has(l.link))) return 0;
+  const cmc = Math.max(0, Math.round(Number(card.cmc) || 0));
+  return PLAN_FODDER_COST_BONUS[cmc] || 0;
+}
+
 function getEngineBonus(card, needs) {
   if (!card || (!isEngineActive(needs) && !hasEventNeeds(needs) && !hasCenterNeeds(needs) && !(needs && needs.sharedTerms))) return 0;
   const type = getCardType(card);
@@ -1114,7 +1128,7 @@ function getEngineBonus(card, needs) {
       if (Number(card.cmc || 0) <= 3 && pips >= 2) bonus += 2;
     }
   }
-  bonus += getCenterBonus(card, needs);
+  bonus += getCenterBonus(card, needs) + getPlanFodderCostBonus(card, needs);
   return Math.min(ENGINE_BONUS_CAP, bonus);
 }
 

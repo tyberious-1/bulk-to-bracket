@@ -117,6 +117,21 @@ const THEME_SEED_BAND_LIMITS = { 1: 1, 2: 2, 3: 2 };
 // every card) the pick is exactly the highest score, first of equals, as before.
 const ROLE_PLAN_TIE_MARGIN = 3;
 
+// How well a card does a support job as its main job (ramp, draw, removal, wipe), for choosing among support
+// cards that have no tie to the plan. Their scores tie (the fallback score has no term for the job), and the
+// tie went to whatever was most played: a creature that only touches the role beat a mana rock. A card that is
+// not a creature, costs little, and (for ramp) makes mana or fetches a land does the job best. 0 when unknown.
+function supportRoleFit(source, role) {
+  if (!source) return 0;
+  const type = String(source.type || source.rawType || "").toLowerCase();
+  const text = String(source.text || source.rawText || "").toLowerCase();
+  const cmc = Number(source.cmc) || 0;
+  let fit = type.includes("creature") ? 0 : 4;
+  fit -= Math.max(0, cmc - (role === "wipe" ? 5 : 3)) * 1.5;
+  if (role === "ramp" && (/add \{|adds? (?:one|two|three|an additional)/.test(text) || /search your library for (?:a|up to \w+) (?:basic )?land/.test(text))) fit += 3;
+  return fit;
+}
+
 // entries: [{ card, adjusted }]. Returns the card to take for the role, or null.
 function pickRoleCandidate(entries) {
   if (!entries.length) return null;
@@ -386,7 +401,10 @@ function buildDeckFromScoredPool(
       candidate.centerWeight = owned ? getCenterBonus(owned, modePrefs.engineNeeds) : 0;
     }
   }
-  scoredNonlands.sort((a, b) => b.score - a.score);
+  // With no EDHREC page this pool is the whole collection and thousands of cards tie, so the tie-break matters
+  // here as much as in the fallback tiers below (a candidate without a popularity ranks last, as before).
+  scoredNonlands.sort((a, b) => b.score - a.score
+    || (a.popularity ?? UNRANKED_POPULARITY) - (b.popularity ?? UNRANKED_POPULARITY));
   // The fallback score has no term for what a card does beyond its role tag and mana value, so whole groups
   // of cards tie (on Callaphe 118 blue instants scored alike, and in the 13 sample builds 22 of 25 generic
   // picks and 18% of theme-fallback picks were decided by a tie). Every picker keeps the first of equal scores,
@@ -414,6 +432,26 @@ function buildDeckFromScoredPool(
     : adjustCurveShares(DEFAULT_CURVE_SHARES, roleTargets, strategyProfile);
   const curvePlan = buildCurvePlan(targetNonlandCount, curveShares);
 
+  // Support overhead (collection fallback only): ramp, draw, removal and wipes are a must-have, so they are
+  // a fixed overhead and do not use up the plan's slots. A support card with no tie to the plan is marked
+  // `supportOnly`; it is left out of the curve bands and the type counts, and the plan's type targets and
+  // curve caps are scaled to the slots left after the support package.
+  const supportOverhead = Boolean(options.supportOverhead) && !modePrefs.minimalBuild;
+  if (supportOverhead) {
+    const supportTotal = ["ramp", "draw", "removal", "wipe"].reduce((sum, role) => sum + (plan.roleBuckets[role]?.target || 0), 0);
+    const planFraction = Math.max(0.2, (targetNonlandCount - Math.min(supportTotal, targetNonlandCount * 0.8)) / targetNonlandCount);
+    for (const [bucket, rule] of Object.entries(plan.typeBuckets || {})) {
+      if (bucket === "Land" || !rule) continue;
+      plan.typeBuckets[bucket] = { ...rule, target: Math.round((rule.target || 0) * planFraction), min: Math.round((rule.min || 0) * planFraction) };
+    }
+    for (const band of Object.keys(curvePlan.caps)) curvePlan.caps[band] = Math.max(1, Math.round(curvePlan.caps[band] * planFraction));
+  }
+  const planCards = () => (supportOverhead ? deck.filter((entry) => !entry.supportOnly) : deck);
+  function releaseDeckPick(entry) {
+    if (!entry || entry.supportOnly) return;
+    releaseCurvePick(curvePlan, curveCmcOf(entry));
+  }
+
   // Traits of everything already drafted, EDHREC picks included -- a Rogue
   // taken from the EDHREC pool makes the next Rogue no less of a repeat.
   const redundancyCounts = new Map();
@@ -435,7 +473,7 @@ function buildDeckFromScoredPool(
     }
   }
 
-  function addCard(card, source) {
+  function addCard(card, source, supportOnly = false) {
     if (!card) return false;
     const key = normalizeCardName(card.name);
     if (usedNames.has(key) || commanderKeys.has(key)) return false;
@@ -449,13 +487,13 @@ function buildDeckFromScoredPool(
     // silently getting nothing back.
     const roles = getRoleContributions(getRedundancySource(card) || card, isTribalDeck);
 
-    deck.push({ ...card, source, roles });
+    deck.push({ ...card, source, roles, supportOnly });
     usedNames.add(key);
     if (vehicleCeiling && isNoncreatureVehicle(card)) {
       vehiclesPicked += 1;
       if (vehiclesPicked >= vehicleCeiling) dropSpareVehicles(vehiclePools);
     }
-    recordCurvePick(curvePlan, curveCmcOf(card));
+    if (!supportOnly) recordCurvePick(curvePlan, curveCmcOf(card));
     adjustRedundancy(card, 1);
     return true;
   }
@@ -503,10 +541,15 @@ function buildDeckFromScoredPool(
   // through a band's cap during this phase even though it fills the bulk of
   // the deck's slots -- the same prefer-in-budget-else-fallback split Phase 1's
   // pickBestCardForBucket already uses, applied here too.
+  // A support card with no tie to the plan (see supportOverhead above).
+  function isSupportOnly(card) {
+    return supportOverhead && !isThemeFallback(card) && Number(card.centerWeight || 0) < CENTER_LINK_KEEP;
+  }
+
   function pickBestForRole(pool, role, chargeRedundancy) {
     const inBudget = [];
     const ignoringCurve = [];
-    const typeCounts = countByType(deck);
+    const typeCounts = countByType(planCards());
 
     for (const card of pool) {
       const key = normalizeCardName(card.name);
@@ -517,6 +560,8 @@ function buildDeckFromScoredPool(
 
       let adjusted = Number(card.score || 0);
       if (chargeRedundancy) adjusted -= getRedundancyPenalty(card.redundancyKeys, redundancyCounts);
+      // No plan tie: the score is mostly noise (spells score ~5 below creatures for no reason), so rank by job fit.
+      if (isSupportOnly(card)) adjusted = supportRoleFit(getRedundancySource(card), role) * 2 + adjusted / 10;
 
       const bucket = getDeckTypeBucket(card.type || card.type_line || "");
       const typeRule = typePlan?.buckets?.[bucket];
@@ -549,7 +594,7 @@ function buildDeckFromScoredPool(
 
     const edhrecPick = pickBestForRole(scoredNonlands, neediestRole, false);
     if (edhrecPick) {
-      addCard(edhrecPick, "edhrec");
+      addCard(edhrecPick, "edhrec", isSupportOnly(edhrecPick));
       continue;
     }
 
@@ -561,7 +606,7 @@ function buildDeckFromScoredPool(
       continue;
     }
 
-    addCard(fallbackPick, getFallbackSource(fallbackPick));
+    addCard(fallbackPick, getFallbackSource(fallbackPick), isSupportOnly(fallbackPick));
   }
 
   // Minimal Build stops here: the support package (Phase 0 above) plus
@@ -571,7 +616,7 @@ function buildDeckFromScoredPool(
   // exactly what Minimal Build is asking to skip.
   if (!modePrefs.minimalBuild) {
     // Phase 1: satisfy missing type minimums from the rest of the collection.
-    for (const neededBucket of getCardsNeededForTypeMinimums(deck, typePlan.buckets)) {
+    for (const neededBucket of getCardsNeededForTypeMinimums(planCards(), typePlan.buckets)) {
       if (deck.length >= targetNonlandCount) break;
 
       const edhrecPick = pickBestCardForBucket(scoredNonlands, usedNames, commanderKeys, neededBucket, curvePlan);
@@ -600,7 +645,7 @@ function buildDeckFromScoredPool(
     // fails the quality floor (clearsTypeTargetFloor): padding it with filler
     // is worse than leaving the slot to Phase 2's score-ordered fill.
     const bucketsPastFloor = new Set();
-    for (const neededBucket of getCardsNeededForTypeTargets(deck, typePlan.buckets)) {
+    for (const neededBucket of getCardsNeededForTypeTargets(planCards(), typePlan.buckets)) {
       if (deck.length >= targetNonlandCount) break;
       if (bucketsPastFloor.has(neededBucket)) continue;
 
@@ -616,7 +661,7 @@ function buildDeckFromScoredPool(
       };
 
       const edhrecPick = pickBestCardForBucket(scoredNonlands, usedNames, commanderKeys, neededBucket, curvePlan, roomInRole);
-      if (edhrecPick && clearsTypeTargetFloor(edhrecPick, "edhrec", deck)) {
+      if (edhrecPick && clearsTypeTargetFloor(edhrecPick, "edhrec", planCards())) {
         addCard(edhrecPick, "edhrec");
         continue;
       }
@@ -630,7 +675,7 @@ function buildDeckFromScoredPool(
       const spellBucket = neededBucket === "Instant" || neededBucket === "Sorcery";
       const fallbackPick = pickFromTiers(spellBucket ? fallbackTiers : [themeFallbackPool], (tier) => {
         const candidate = pickBestFallbackCard(tier, usedNames, commanderKeys, neededBucket, curvePlan, redundancyCounts, roomInRole);
-        return candidate && clearsTypeTargetFloor(candidate, getFallbackSource(candidate), deck) ? candidate : null;
+        return candidate && clearsTypeTargetFloor(candidate, getFallbackSource(candidate), planCards()) ? candidate : null;
       });
       if (fallbackPick) addCard(fallbackPick, getFallbackSource(fallbackPick));
       else bucketsPastFloor.add(neededBucket);
@@ -644,7 +689,7 @@ function buildDeckFromScoredPool(
     const flexibleTiers = fallbackTiers.map((tier) => [...scoredNonlands, ...tier]);
     while (deck.length < targetNonlandCount) {
       const best = pickFromTiers(flexibleTiers, (tier) =>
-        chooseBestFlexibleCard(tier, deck, plan, usedNames, commanderKeys, curvePlan));
+        chooseBestFlexibleCard(tier, deck, plan, usedNames, commanderKeys, curvePlan, planCards()));
       if (!best) break;
 
       addCard(best, scoredNonlands.includes(best) ? "edhrec" : getFallbackSource(best));
@@ -733,7 +778,7 @@ function buildDeckFromScoredPool(
 
         if (replaceIndex === -1) break;
         usedNames.delete(normalizeCardName(deck[replaceIndex].name));
-        releaseCurvePick(curvePlan, curveCmcOf(deck[replaceIndex]));
+        releaseDeckPick(deck[replaceIndex]);
         adjustRedundancy(deck[replaceIndex], -1);
         deck.splice(replaceIndex, 1);
         addCard(pick, edhrecPick ? "edhrec" : getFallbackSource(pick));
@@ -766,7 +811,7 @@ function buildDeckFromScoredPool(
 
         if (replaceIndex === -1) break;
         usedNames.delete(normalizeCardName(deck[replaceIndex].name));
-        releaseCurvePick(curvePlan, curveCmcOf(deck[replaceIndex]));
+        releaseDeckPick(deck[replaceIndex]);
         adjustRedundancy(deck[replaceIndex], -1);
         deck.splice(replaceIndex, 1);
         addCard(fallbackCreature, getFallbackSource(fallbackCreature));
@@ -802,7 +847,7 @@ function buildDeckFromScoredPool(
         if (victimIndex === -1) continue;
         if (Number(deck[victimIndex].centerWeight || 0) > 0 && (cand.score || 0) <= victimScore) continue;
         usedNames.delete(normalizeCardName(deck[victimIndex].name));
-        releaseCurvePick(curvePlan, curveCmcOf(deck[victimIndex]));
+        releaseDeckPick(deck[victimIndex]);
         adjustRedundancy(deck[victimIndex], -1);
         deck.splice(victimIndex, 1);
         addCard(cand, source || getFallbackSource(cand));
