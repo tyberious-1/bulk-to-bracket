@@ -17,6 +17,60 @@ const EDHREC_THEME_PAGE_LIMIT = 12;
 // serves pages built from as few as four decks, where one deck is 25%.
 const EDHREC_THEME_MIN_DECKS = 20;
 
+// A commander with few decks on EDHREC (Ghalta the Unstoppable: 255 decks against 11,262 for Ghalta, Primal
+// Hunger) gets near-empty theme counts and a thin card pool, so the builder never sees the plan its popular
+// sibling is built around. EDHREC lists similar commanders on each page; the first one in the same color
+// identity with far more decks lends its cards, theme pages and theme tags to the pool.
+const EDHREC_THIN_COMMANDER_DECKS = 1000;
+const EDHREC_SIBLING_MIN_DECK_RATIO = 5;
+const EDHREC_SIBLING_TRY_LIMIT = 6;
+
+function edhrecCommanderDeckCount(data) {
+  return Number(data?.container?.json_dict?.card?.num_decks || 0);
+}
+
+function edhrecColorKey(data) {
+  const identity = data?.container?.json_dict?.card?.color_identity;
+  return Array.isArray(identity) ? identity.slice().sort().join("") : "";
+}
+
+// Returns { data, slug } for the first similar commander that shares the color identity and has at least
+// EDHREC_SIBLING_MIN_DECK_RATIO times the decks, or null when the commander is not thin or none qualifies.
+async function findSimilarCommanderPool(data, commanderNames) {
+  const ownDecks = edhrecCommanderDeckCount(data);
+  if (!ownDecks || ownDecks >= EDHREC_THIN_COMMANDER_DECKS) return null;
+
+  const ownKey = edhrecColorKey(data);
+  const own = new Set((commanderNames || []).map((name) => normalizeCardName(name)));
+  const similar = (Array.isArray(data?.similar) ? data.similar : []).filter((name) => typeof name === "string");
+
+  for (const name of similar.slice(0, EDHREC_SIBLING_TRY_LIMIT)) {
+    if (own.has(normalizeCardName(name))) continue;
+    const fetched = await fetchEdhrecCommanderJson([name]);
+    if (!fetched) continue;
+    if (!ownKey || edhrecColorKey(fetched.data) !== ownKey) continue;
+    if (edhrecCommanderDeckCount(fetched.data) < ownDecks * EDHREC_SIBLING_MIN_DECK_RATIO) continue;
+    return fetched;
+  }
+  return null;
+}
+
+// Theme tags of both commanders on one list, the larger deck count per slug, so the borrowed commander's
+// plans (Vehicles, Voltron) can compete with the thin commander's own.
+function mergeEdhrecTaglinks(ownData, siblingData) {
+  const bySlug = new Map();
+  for (const tag of [...(ownData?.panels?.taglinks || []), ...(siblingData?.panels?.taglinks || [])]) {
+    const key = tag?.slug || tag?.value;
+    if (!key) continue;
+    const prior = bySlug.get(key);
+    if (!prior || Number(tag.count || 0) > Number(prior.count || 0)) bySlug.set(key, tag);
+  }
+  return {
+    ...ownData,
+    panels: { ...(ownData?.panels || {}), taglinks: Array.from(bySlug.values()) }
+  };
+}
+
 function toEdhrecSlug(name) {
   return slugifyForEdhrec(name);
 }
@@ -613,23 +667,37 @@ async function getEDHREC(commanderNames) {
   // distinctive cards from the commander's general staples (analysis/plans.js).
   const themeCardStats = {};
 
-  const themeSlugs = pickEdhrecThemeSlugs(data);
-  for (const themeSlug of themeSlugs) {
-    const themeData = await fetchEdhrecThemePage(commanderSlug, themeSlug);
-    if (themeData) {
-      collectEdhrecCards(themeData, deduped);
+  const loadThemePages = async (pageData, slug) => {
+    for (const themeSlug of pickEdhrecThemeSlugs(pageData)) {
+      const themeData = await fetchEdhrecThemePage(slug, themeSlug);
+      if (themeData) {
+        collectEdhrecCards(themeData, deduped);
 
-      const perTheme = new Map();
-      collectEdhrecCards(themeData, perTheme);
-      themeCardLists[normalizeThemeName(themeSlug)] =
-        Array.from(perTheme.values()).map((entry) => entry.name);
-      themeCardStats[normalizeThemeName(themeSlug)] = Array.from(perTheme.values());
+        const perTheme = new Map();
+        collectEdhrecCards(themeData, perTheme);
+        const themeKey = normalizeThemeName(themeSlug);
+        // A theme both commanders have keeps the thin commander's own list.
+        if (!themeCardLists[themeKey]) {
+          themeCardLists[themeKey] = Array.from(perTheme.values()).map((entry) => entry.name);
+          themeCardStats[themeKey] = Array.from(perTheme.values());
+        }
+      }
+      await sleep(120);
     }
-    await sleep(120);
+  };
+
+  await loadThemePages(data, commanderSlug);
+
+  const sibling = await findSimilarCommanderPool(data, commanderNames);
+  let tagData = data;
+  if (sibling) {
+    collectEdhrecCards(sibling.data, deduped);
+    await loadThemePages(sibling.data, sibling.slug);
+    tagData = mergeEdhrecTaglinks(data, sibling.data);
   }
 
-  const tags = extractEdhrecTagsFromData(data);
-  const allTags = extractAllEdhrecTaglinkNames(data);
+  const tags = extractEdhrecTagsFromData(tagData);
+  const allTags = extractAllEdhrecTaglinkNames(tagData);
   const typeAverages = extractEdhrecTypeAverages(data);
   const roleTargets = extractEdhrecRoleTargets(data, tags);
 
@@ -645,6 +713,7 @@ async function getEDHREC(commanderNames) {
     typeAverages,
     roleTargets,
     themeCardLists,
+    borrowedFrom: sibling ? sibling.slug : null,
     unavailable: false
   };
 }

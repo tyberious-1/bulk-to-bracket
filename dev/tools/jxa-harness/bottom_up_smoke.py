@@ -6,7 +6,7 @@ read), clicks through the tab, and prints what the page rendered.
 Usage: python3 dev/tools/jxa-harness/bottom_up_smoke.py [index.html|pauper.html]
 
 Steps it takes: open the Bottom-Up tab, "Suggest decks from my collection", build a Control suggestion,
-read the Reliability panel and result notes, then "Use as commander" on the first owned fit. Every
+read the Reliability panel and result notes, "Use as commander" on the first owned fit, then a hand-picked Vampire + sacrifice and death layer build. Every
 EDHREC budget page is answered with a made-up list of owned cards of the subtype's tribe (so the budget
 tiebreak path runs); Scryfall and everything else comes from the fixtures. Prints any JavaScript errors.
 Needs Google Chrome in /Applications.
@@ -105,6 +105,22 @@ INJECT = r"""
       out.reliabilityAfterCommander = rel2 ? text(rel2.querySelector("summary")) : null;
       out.noteAfterCommander = after ? text(after.querySelector(".detail-note")) : null;
     }
+    // Pick a tribe by hand with a second layer: Vampire + sacrifice and death triggers, in black and red.
+    const subSel = document.getElementById("buSubtype");
+    const vamp = subSel && [...subSel.options].find((o) => /^tribal:/.test(o.value) && /vampire/i.test(o.textContent));
+    out.layerPicker = Boolean(document.getElementById("buLayer"));
+    if (vamp) {
+      subSel.value = vamp.value; subSel.dispatchEvent(new Event("change", { bubbles: true }));
+      const layerSel = document.getElementById("buLayer");
+      layerSel.value = "aristocrats"; layerSel.dispatchEvent(new Event("change", { bubbles: true }));
+      for (const c of ["B", "R"]) { const b = document.querySelector('[data-bu-color="' + c + '"]'); if (b && !b.classList.contains("active")) b.click(); await sleep(300); }
+      const keepTitle = out.title;
+      document.getElementById("buBuildBtn").click();
+      out.layerResultAppeared = await waitFor(() => { const h = document.querySelector(".bu-result h3"); return h && /\+ Sacrifice/.test(h.textContent); }, 120000);
+      const lr = document.querySelector(".bu-result");
+      out.layerTitle = lr ? text(lr.querySelector("h3")) : null;
+      out.layerNote = lr ? text(lr.querySelector(".detail-note")) : null;
+    }
     out.errors = errors.slice();
     done(out);
   } catch (e) { done({ ok: false, error: String(e && e.stack || e), errors }); }
@@ -149,5 +165,8 @@ def main():
     if d.get("commanderBox") is not None or d.get("reliabilityAfterCommander") is not None:
         print("after commander:", d.get("commanderBox"), "|", d.get("reliabilityAfterCommander"))
         print("note after commander:", d.get("noteAfterCommander"))
+    print("layer picker:", d.get("layerPicker"), "| layer build appeared:", d.get("layerResultAppeared"))
+    print("layer title:", d.get("layerTitle"))
+    print("layer summary:", d.get("layerNote"))
 
 main()

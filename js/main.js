@@ -273,6 +273,13 @@ async function regenerateWithMode(mode) {
   await runRegeneration();
 }
 
+// Combo build: the focus is already a finished "a~b~c" string, so set it directly (regenerateWithMode toggles a repeat pick off).
+async function regenerateWithFocus(focus) {
+  if (!currentRunContext) return;
+  setCurrentThemeFocus(focus);
+  await runRegeneration();
+}
+
 async function toggleMinimalBuild() {
   if (!currentRunContext) return;
   setMinimalBuildEnabled(!getMinimalBuildEnabled());
@@ -703,6 +710,20 @@ if (planOptionsWrap) {
     );
     if (!custom) return;
     renderPlanOptions(currentRunContext.planOptions || [], custom);
+  });
+}
+
+// Combo picker: the selects live inside #priorityButtons, which is redrawn on every build, so listen on the wrapper
+// (declared in dom.js).
+if (priorityButtonsWrap) {
+  priorityButtonsWrap.addEventListener("change", (event) => {
+    if (event.target.closest(".combo-select")) refreshComboControls(currentRunContext);
+  });
+  priorityButtonsWrap.addEventListener("click", (event) => {
+    if (!event.target.closest("#comboBuildBtn") || !currentRunContext) return;
+    const picks = Array.from(priorityButtonsWrap.querySelectorAll(".combo-select")).map((select) => select.value);
+    const focus = buildComboFocus(picks);
+    if (focus) regenerateWithFocus(focus);
   });
 }
 

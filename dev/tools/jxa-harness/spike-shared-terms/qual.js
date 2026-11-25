@@ -1,5 +1,5 @@
 const fs=require("fs"),vm=require("vm"),path=require("path");
-const root="/Users/user/xpwd/p_projects/bulk-to-bracket";
+const root=require("path").resolve(__dirname, "../../../..");
 const ctx=vm.createContext({console});
 for(const f of ["js/constants.js","js/utils/text.js","js/utils/cards.js","js/format.js","js/analysis/themes.js","js/analysis/abilities.js","js/analysis/scoring.js","js/analysis/engines.js"])
   vm.runInContext(fs.readFileSync(path.join(root,f),"utf8"),ctx,{filename:f});

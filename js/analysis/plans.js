@@ -22,6 +22,13 @@ const PLAN_OVERLAP_TO_MERGE = 0.10;
 const PLAN_MAX_THEMES = 3;
 const PLAN_MAX_SHARED_THEMES = 1;
 const PLAN_MAX_OPTIONS = 3;
+// A theme that defines the commander has no distinctive cards: every deck plays its cards, so they are the
+// commander's core list and cannot beat it by PLAN_MIN_LIFT (Sai, Master Thopterist: Artifacts, its top theme by
+// 8x, had 0 distinctive cards while Combo had 59, so the default plan was Combo + Historic + Aggro). Among the
+// PLAN_DOMINANT_TOP most-played themes, one whose distinctive cards are under PLAN_DOMINANT_SHARE of what its
+// page recommends is described by everything its page recommends instead.
+const PLAN_DOMINANT_SHARE = 0.25;
+const PLAN_DOMINANT_TOP = 3;
 // Plans with fewer owned plan-specific cards than this are called light.
 // Measured on 27 plans over 14 commanders (2026-10-14): a build holds about as
 // many signature cards as the collection has, up to roughly 10, then levels off.
@@ -61,6 +68,15 @@ function planJaccard(a, b) {
 function buildPlanOptions(themeCardStats, coreCards, isOwned) {
   const core = planWantedCards(coreCards);
   const themes = [];
+  // A theme page's potentialDecks is the number of decks behind it, so the largest value ranks themes by play.
+  const themeDecks = (entries) => (entries || []).reduce((top, e) => Math.max(top, Number(e?.potentialDecks || 0)), 0);
+  const mostPlayed = new Set(
+    Object.entries(themeCardStats || {})
+      .map(([slug, entries]) => [slug, themeDecks(entries)])
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, PLAN_DOMINANT_TOP)
+      .map(([slug]) => slug)
+  );
   for (const [slug, entries] of Object.entries(themeCardStats || {})) {
     const wanted = planWantedCards(entries);
     const distinctive = new Map();
@@ -68,7 +84,12 @@ function buildPlanOptions(themeCardStats, coreCards, isOwned) {
       const lift = v.inc - (core.get(name)?.inc || 0);
       if (lift >= PLAN_MIN_LIFT) distinctive.set(name, v);
     }
-    if (distinctive.size) themes.push({ slug, wanted: distinctive, full: wanted, size: entries.length });
+    const dominant = mostPlayed.has(slug) && wanted.size && distinctive.size < wanted.size * PLAN_DOMINANT_SHARE;
+    if (dominant) {
+      themes.push({ slug, wanted, full: wanted, size: entries.length });
+    } else if (distinctive.size) {
+      themes.push({ slug, wanted: distinctive, full: wanted, size: entries.length });
+    }
   }
   // Theme pages arrive in deck-count order, so keep that as the seed order.
   const coreOwned = Array.from(core.keys()).filter((name) => isOwned(name)).length;
@@ -144,16 +165,15 @@ function buildPlanOptions(themeCardStats, coreCards, isOwned) {
   return top;
 }
 
-// A plan the player names (a tribe or theme). Coverage is every owned,
-// color-legal card whose tags or tribal type match, with no EDHREC input.
-// allOwnedCardData: Map of normalized name -> Scryfall-style card data.
-function buildCustomPlan(text, allOwnedCardData, commanderColors, commanderName = "") {
-  const theme = String(text || "").trim();
-  if (!theme) return null;
-  const aliases = new Set(getThemeAliases(theme).map((alias) => normalizeThemeName(alias)));
-  const tribes = getCommanderTribalThemes([theme]).map((t) => t.replace(" tribal", ""));
+// Names of the owned, color-legal cards whose tags or tribal type match one theme (the matching buildCustomPlan and
+// buildComboPlan share).
+function matchOwnedForTheme(theme, allOwnedCardData, commanderColors, commanderName = "") {
+  const text = String(theme || "").trim();
+  if (!text) return [];
+  const aliases = new Set(getThemeAliases(text).map((alias) => normalizeThemeName(alias)));
+  const tribes = getCommanderTribalThemes([text]).map((t) => t.replace(" tribal", ""));
   // An unrecognised word still works as a creature type or rules-text word.
-  const word = normalizeThemeName(theme);
+  const word = normalizeThemeName(text);
   const looseTribe = tribes.length || word.includes(" ") ? null : word;
   const commanderKey = normalizeCardName(commanderName);
 
@@ -167,6 +187,16 @@ function buildCustomPlan(text, allOwnedCardData, commanderColors, commanderName 
       || (looseTribe && hasTribalType(card, looseTribe));
     if (hit) matches.push(card.name);
   }
+  return matches;
+}
+
+// A plan the player names (a tribe or theme). Coverage is every owned,
+// color-legal card whose tags or tribal type match, with no EDHREC input.
+// allOwnedCardData: Map of normalized name -> Scryfall-style card data.
+function buildCustomPlan(text, allOwnedCardData, commanderColors, commanderName = "") {
+  const theme = String(text || "").trim();
+  if (!theme) return null;
+  const matches = matchOwnedForTheme(theme, allOwnedCardData, commanderColors, commanderName);
   return {
     themes: [theme],
     label: formatThemeLabel(theme),
@@ -174,6 +204,49 @@ function buildCustomPlan(text, allOwnedCardData, commanderColors, commanderName 
     owned: matches.length,
     examples: matches.slice(0, 6),
     custom: true,
+    light: matches.length < PLAN_LIGHT_OWNED,
+    betterPlan: ""
+  };
+}
+
+// Combo builder (the Single / Combo toggle): the player stacks up to PLAN_COMBO_MAX themes. The focus string is the same
+// "a~b~c" a plan uses, so the builder needs nothing new.
+const PLAN_COMBO_MAX = 3;
+
+// Picks in the order given, blanks and repeats dropped, at most PLAN_COMBO_MAX, joined for the theme: mode.
+function buildComboFocus(themes) {
+  const seen = new Set();
+  const kept = [];
+  for (const theme of themes || []) {
+    const text = String(theme || "").trim();
+    const key = normalizeThemeName(text);
+    if (!text || seen.has(key)) continue;
+    seen.add(key);
+    kept.push(text);
+    if (kept.length >= PLAN_COMBO_MAX) break;
+  }
+  return kept.join(PLAN_THEME_SEPARATOR);
+}
+
+// Coverage for a combo: owned cards that match any picked theme, each counted once. Same shape as a custom plan so the
+// plan panel's coverage and "light" wording apply unchanged.
+function buildComboPlan(themes, allOwnedCardData, commanderColors, commanderName = "") {
+  const focus = buildComboFocus(themes);
+  if (!focus) return null;
+  const picked = focus.split(PLAN_THEME_SEPARATOR);
+  const names = new Set();
+  for (const theme of picked) {
+    for (const name of matchOwnedForTheme(theme, allOwnedCardData, commanderColors, commanderName)) names.add(name);
+  }
+  const matches = Array.from(names);
+  return {
+    themes: picked,
+    label: picked.map(formatThemeLabel).join(" + "),
+    wanted: 0,
+    owned: matches.length,
+    examples: matches.slice(0, 6),
+    custom: true,
+    combo: true,
     light: matches.length < PLAN_LIGHT_OWNED,
     betterPlan: ""
   };

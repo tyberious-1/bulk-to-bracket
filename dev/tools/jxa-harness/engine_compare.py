@@ -6,7 +6,7 @@ the commanders whose deck did not change. Creature counts come from the owned
 collection's type lines.
 
 Usage:
-  python3 dev/tools/jxa-harness/engine_compare.py BEFORE.json AFTER.json [--only "A|B"]
+  python3 dev/tools/jxa-harness/engine_compare.py BEFORE.json AFTER.json [--only "A|B"] [--brief]
 """
 import argparse
 import json
@@ -30,6 +30,7 @@ def main():
     parser.add_argument("before")
     parser.add_argument("after")
     parser.add_argument("--only", default="")
+    parser.add_argument("--brief", action="store_true", help="one line per changed build, no card names")
     args = parser.parse_args()
     before = json.load(open(args.before))
     after = json.load(open(args.after))
@@ -46,6 +47,9 @@ def main():
         added, removed = sorted(set(a) - set(b)), sorted(set(b) - set(a))
         if not added and not removed:
             unchanged.append(key)
+            continue
+        if args.brief:
+            print(f"{key}: +{len(added)}/-{len(removed)}, creatures {creatures(b, types)} -> {creatures(a, types)}")
             continue
         print(f"\n== {key}: {len(b)} -> {len(a)} cards, creatures {creatures(b, types)} -> {creatures(a, types)}")
         print(f"   added   ({len(added)}): {', '.join(added)}")

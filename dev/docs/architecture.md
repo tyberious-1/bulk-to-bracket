@@ -1,6 +1,6 @@
 # Bulk to Bracket architecture
 
-Built from the layout and build-pipeline sections of `AGENTS.md`.
+Overview only. The full detail now lives in the project skills under `.claude/skills/` (start from the index in `AGENTS.md`).
 
 ## Data flow
 

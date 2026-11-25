@@ -95,12 +95,14 @@ async function buildForCommander(key, mode) {
     edhrecTags,
     collection,
     allOwnedCardData,
-    commanders.colors
+    commanders.colors,
+    [commanderCard.text, partnerCard?.text]
   );
 
   const strategyProfile = getCommanderStrategyProfile(commanders.primary.name, commanderThemes, commanders.colors);
   const modePrefs = getModePreferences(mode, strategyProfile);
   modePrefs.engineNeeds = applyEventSwitch(parseCommanderNeeds([commanderCard.text, partnerCard?.text]), modePrefs);
+  attachSharedTerms(modePrefs.engineNeeds, [commanderCard.text, partnerCard?.text], allOwnedCardData, modePrefs);
 
   const ownedCandidates = edhrecCards.length
     ? edhrecCards.filter((c) => hasOwnedCard(collection, c.name))
@@ -124,7 +126,8 @@ async function buildForCommander(key, mode) {
       score: scoreCard(card, edhrecCard, commanderThemes, strategyProfile, commanders.colors, modePrefs),
       type: getCardType(card),
       cmc: card.cmc,
-      colors: card.colors
+      colors: card.colors,
+      popularity: popularityOf(card)
     });
   }
 
@@ -153,7 +156,7 @@ async function buildForCommander(key, mode) {
     edhrecData?.typeAverages || null,
     edhrecData?.roleTargets || null,
     edhrecCards,
-    { themeCardNames, deckSize: partnerCard ? 98 : 99, commanderTexts: [commanderCard.text, partnerCard?.text].filter(Boolean) }
+    { themeCardNames, deckSize: partnerCard ? 98 : 99, commanderTexts: [commanderCard.text, partnerCard?.text].filter(Boolean), supportOverhead: typeof SUPPORT_OVERHEAD !== "undefined" ? SUPPORT_OVERHEAD : !edhrecCards.length }
   );
 }
 

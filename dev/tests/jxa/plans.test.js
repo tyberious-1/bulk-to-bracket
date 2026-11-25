@@ -113,6 +113,33 @@ runSuite("plans", {
 
   "planFocusMode: joins themes with the plan separator": function () {
     assertEqual(planFocusMode({ themes: ["auras", "voltron"] }), "auras~voltron");
+  },
+
+  "buildComboFocus: joins picks in order, drops blanks and repeats, keeps at most three": function () {
+    assertEqual(buildComboFocus(["auras", "", "Auras", "voltron"]), "auras~voltron");
+    assertEqual(buildComboFocus(["a", "b", "c", "d"]), "a~b~c");
+    assertEqual(buildComboFocus([]), "");
+    assertEqual(buildComboFocus(undefined), "");
+  },
+
+  "buildComboPlan: counts each owned card once across the combined themes": function () {
+    const owned = new Map([
+      ["coral merfolk", { name: "Coral Merfolk", type_line: "Creature — Merfolk", text: "", colors: ["U"] }],
+      ["quiet seer", { name: "Quiet Seer", type_line: "Creature — Merfolk Wizard", text: "", colors: ["U"] }],
+      ["pond wizard", { name: "Pond Wizard", type_line: "Creature — Wizard", text: "", colors: ["U"] }],
+      ["bear", { name: "Bear", type_line: "Creature — Bear", text: "", colors: ["G"] }]
+    ]);
+    const plan = buildComboPlan(["Merfolk", "Wizard"], owned, ["U", "G"], "Ivy, Gleeful Spellthief");
+    // Quiet Seer is both a Merfolk and a Wizard: three cards, not four.
+    assertEqual(plan.owned, 3);
+    assertEqual(plan.label, "Merfolk + Wizard");
+    assertEqual(planFocusMode(plan), "Merfolk~Wizard");
+    assertTrue(plan.combo);
+    assertEqual(plan.light, true);
+  },
+
+  "buildComboPlan: no themes gives no plan": function () {
+    assertEqual(buildComboPlan([], new Map(), ["U"]), null);
   }
 });
 
@@ -155,5 +182,10 @@ runSuite("plans: distinct options", {
         assertTrue(common <= 1);
       }
     }
+  },
+  "formatThemeLabel: keeps the sign and slash in counter themes": function () {
+    assertEqual(formatThemeLabel(normalizeThemeName("-1/-1 Counters")), "-1/-1 Counters");
+    assertEqual(formatThemeLabel(normalizeThemeName("+1/+1 Counters")), "+1/+1 Counters");
+    assertEqual(formatThemeLabel("go-wide"), "Go Wide");
   }
 });

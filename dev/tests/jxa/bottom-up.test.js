@@ -111,7 +111,7 @@ runSuite("bottom-up", {
     assertTrue(rows.every((r) => r.subtype.tag === "zombies"));
     const rank = { Strong: 0, OK: 1, Thin: 2 };
     for (const archetype of ["aggro", "midrange", "control"]) {
-      const own = rows.filter((r) => r.archetype === archetype);
+      const own = rows.filter((r) => r.archetype === archetype && !r.layered);
       for (let i = 1; i < own.length; i += 1) assertTrue(rank[own[i - 1].rating] <= rank[own[i].rating], `${archetype} not sorted by rating`);
     }
   },
@@ -164,5 +164,17 @@ runSuite("bottom-up", {
 
   "rankBottomUpSuggestions: an empty collection gives no suggestions": () => {
     assertEqual(rankBottomUpSuggestions([], [BUP_ENTRY], BUP_TRIBE_FOR), []);
+  }
+  ,
+  "rankBottomUpSuggestions: a tribe also gets layered plans when the pool has enough cards for a layer, listed after the plain ones": () => {
+    const cards = bupCollection();
+    for (let i = 0; i < 14; i += 1) cards.push(bupCard(`Reaper ${i}`, "enchantment", "whenever another creature you control dies, each opponent loses 1 life.", 3, ["B"]));
+    const rows = rankBottomUpSuggestions(cards, [BUP_ENTRY], BUP_TRIBE_FOR);
+    const layered = rows.filter((r) => r.layered);
+    assertTrue(layered.length >= 3, "layered rows " + layered.length);
+    assertTrue(layered.every((r) => r.subtype.layer && r.subtype.layerLabel), "layer carried on the subtype");
+    assertTrue(rows.findIndex((r) => r.layered) > rows.findIndex((r) => !r.layered), "layered rows come after plain ones");
+    const none = rankBottomUpSuggestions(bupCollection().filter((c) => !/^(Kill|Study)/.test(c.name)), [BUP_ENTRY], BUP_TRIBE_FOR);
+    assertEqual(none.filter((r) => r.layered).length, 0);
   }
 });

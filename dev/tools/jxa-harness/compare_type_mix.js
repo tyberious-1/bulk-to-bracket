@@ -87,7 +87,8 @@ async function buildForCommander(name, mode) {
     edhrecTags,
     collection,
     allOwnedCardData,
-    commanders.colors
+    commanders.colors,
+    [commanderCard.text]
   );
 
   const strategyProfile = getCommanderStrategyProfile(commanders.primary.name, commanderThemes, commanders.colors);
@@ -115,7 +116,8 @@ async function buildForCommander(name, mode) {
       score: scoreCard(card, edhrecCard, commanderThemes, strategyProfile, commanders.colors, modePrefs),
       type: getCardType(card),
       cmc: card.cmc,
-      colors: card.colors
+      colors: card.colors,
+      popularity: popularityOf(card)
     });
   }
 

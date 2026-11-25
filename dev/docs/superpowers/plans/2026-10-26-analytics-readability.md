@@ -1,10 +1,12 @@
 # Collection Analytics Readability Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
+
+**Status: done (2026-10-30).** Tasks 1-3 shipped in `3f4d9d8`, `8d8550d`, `4ff8eea`; the scroll fix in `2cc7040`; AGENTS.md lists the file and suite. Review Focus checked in headless Chrome on the full collection and a sparse 30-card one (see the end of this file). Kept as a record.
 
 **Goal:** Make the Collection Analytics tab readable and useful: a color legend, one merged row per subtype, a top-30 subtype list, a "what your collection is good for" summary (strongest tribes, color depth, support roles against deck targets).
 
-**Architecture:** Pure data functions go in a new `js/analysis/collection-summary.js` (testable under JXA, no DOM). `js/ui/collection-analytics.js` only renders what they return. CSS goes in `style.css`. The first fix (clipped scrolling in `.type-detail-panel` / `.section-content`) is already done and uncommitted.
+**Architecture:** Pure data functions go in a new `js/analysis/collection-summary.js` (testable under JXA, no DOM). `js/ui/collection-analytics.js` only renders what they return. CSS goes in `style.css`. The first fix (clipped scrolling in `.type-detail-panel` / `.section-content`) is committed (`2cc7040`).
 
 **Tech Stack:** Plain global-scope JS, JXA test suites, no build step.
 
@@ -46,7 +48,7 @@
   - `buildTribeSummary(byTypeSubtype) -> same row shape`, creatures only, `count >= 2`, first `TRIBE_SUMMARY_N`.
   - `buildRoleCoverage(bySupportRole) -> [{ role, total, target, status, byColor: {W,U,B,R,G} }]` for ramp, draw, removal, wipe in that order. `status` is `"missing"` (total 0), `"thin"` (< target), `"ok"` (>= target), `"deep"` (>= 2 x target). `byColor[c]` = cards castable in a mono-`c` deck: colorless plus mono-`c`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```js
 function csEntry(type, colorId, count) {
@@ -120,14 +122,14 @@ runSuite("collection-summary", {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 bash -c 'files=(js/constants.js js/utils/text.js js/utils/cards.js js/format.js js/analysis/discovery.js js/utils/deck-stats.js js/analysis/collection-summary.js); dev/tests/jxa/run.sh "${files[@]}" dev/tests/jxa/collection-summary.test.js'
 ```
 Expected: FAIL (`Can't find variable: colorBucket` or the file is missing). If the failure is a different missing variable, add the missing dependency from `build_harness.sh` ahead of it; the full list always works.
 
-- [ ] **Step 3: Implement `js/analysis/collection-summary.js`**
+- [x] **Step 3: Implement `js/analysis/collection-summary.js`**
 
 ```js
 // Pure summaries behind the Collection Analytics tab: merged subtype rows, the
@@ -191,11 +193,11 @@ function buildRoleCoverage(bySupportRole) {
 }
 ```
 
-- [ ] **Step 4: Add the script to all three places, then run the test**
+- [x] **Step 4: Add the script to all three places, then run the test**
 
 Add `<script src="js/analysis/collection-summary.js"></script>` after the `discovery.js` line in `index.html` and `pauper.html`, and `  js/analysis/collection-summary.js` after `js/analysis/discovery.js` in `build_harness.sh`. Re-run the Step 2 command. Expected: all pass.
 
-- [ ] **Step 5: Run the whole suite set for regressions, then commit**
+- [x] **Step 5: Run the whole suite set for regressions, then commit**
 
 ```bash
 bash dev/tests/jxa/run_all.sh
@@ -215,17 +217,17 @@ git commit -m "Add pure summary functions for the analytics tab"
 - Consumes: `aggregateSubtypes`, `SUBTYPE_TOP_N` from Task 1.
 - Produces: `renderColorLegend() -> html string` and `renderColorBar(colors, total) -> html string`, reused by Task 3. `COLOR_SEGMENTS`: ordered list `[{key,label,bg,fg}]` for W, U, B, R, G, C (Colorless), M (Multicolor, gold `#f59e0b`).
 
-- [ ] **Step 1: Replace the three Legendary / Other / Artifact sections** in `buildTypeDetailPanel` with one list built from `aggregateSubtypes(Array.from(byTypeSubtype.values()), typeKey)`. Row: name, total, a `★ n` badge when `legendary > 0`, `renderColorBar`. Rows past index `SUBTYPE_TOP_N` get class `subtype-row extra`; when there are more than `SUBTYPE_TOP_N` rows, add `<button class="show-all-btn" type="button">Show all N</button>`. Put the overlap note (`detail-note`) above the list for every type that can have several subtypes, not only creatures. Show `renderColorLegend()` once under the header.
-- [ ] **Step 2: Delete the dead code**: the `.section-title` toggle handler branch (~862-877), `isArtifactCreatureTypeLine` use here, and the `.section-content`/`.section-toggle-icon` CSS added for it (keep `.collapsible-*`, which other sections use). Check with `grep -n "section-content\|section-title\|section-toggle" js style.css` that nothing else uses them.
-- [ ] **Step 3: Handle the button** in the click handler: toggle class `show-all` on `.detail-content`, flip the label between `Show all N` and `Show top 30`. CSS: `.detail-content:not(.show-all) .subtype-row.extra { display: none; }`.
-- [ ] **Step 4: Color bar and legend CSS.** Each segment gets inline `background` and `color` from `COLOR_SEGMENTS` (white text on Black). Legend is a flex-wrap row of swatch + label. Every segment keeps a `title` ("White: 12 cards").
-- [ ] **Step 5: Verify in a browser**
+- [x] **Step 1: Replace the three Legendary / Other / Artifact sections** in `buildTypeDetailPanel` with one list built from `aggregateSubtypes(Array.from(byTypeSubtype.values()), typeKey)`. Row: name, total, a `★ n` badge when `legendary > 0`, `renderColorBar`. Rows past index `SUBTYPE_TOP_N` get class `subtype-row extra`; when there are more than `SUBTYPE_TOP_N` rows, add `<button class="show-all-btn" type="button">Show all N</button>`. Put the overlap note (`detail-note`) above the list for every type that can have several subtypes, not only creatures. Show `renderColorLegend()` once under the header.
+- [x] **Step 2: Delete the dead code**: the `.section-title` toggle handler branch (~862-877), `isArtifactCreatureTypeLine` use here, and the `.section-content`/`.section-toggle-icon` CSS added for it (keep `.collapsible-*`, which other sections use). Check with `grep -n "section-content\|section-title\|section-toggle" js style.css` that nothing else uses them.
+- [x] **Step 3: Handle the button** in the click handler: toggle class `show-all` on `.detail-content`, flip the label between `Show all N` and `Show top 30`. CSS: `.detail-content:not(.show-all) .subtype-row.extra { display: none; }`.
+- [x] **Step 4: Color bar and legend CSS.** Each segment gets inline `background` and `color` from `COLOR_SEGMENTS` (white text on Black). Legend is a flex-wrap row of swatch + label. Every segment keeps a `title` ("White: 12 cards").
+- [x] **Step 5: Verify in a browser**
 
 ```bash
 python3 dev/tools/jxa-harness/browser_smoke.py --help
 ```
 Use `browser_smoke.py` (or open `index.html` with the sample CSV) to confirm no JS errors, then open Collection Analytics, click Creature: the list ends at 30 rows, "Show all" reveals the rest and scrolls to the true end, colorless rows are grey, multicolor rows gold.
-- [ ] **Step 6: Commit** `git add js/ui/collection-analytics.js style.css` with message "Merge subtype rows, add a color legend and a top-30 limit".
+- [x] **Step 6: Commit** `git add js/ui/collection-analytics.js style.css` with message "Merge subtype rows, add a color legend and a top-30 limit".
 
 ---
 
@@ -239,26 +241,38 @@ Use `browser_smoke.py` (or open `index.html` with the sample CSV) to confirm no 
 - Consumes: `buildTribeSummary`, `buildRoleCoverage`, `renderColorBar`, `renderColorLegend`, `buildMonoColorDistribution` (existing, returns Map color -> count, `"C"` for colorless).
 - Produces: `renderCollectionSummary(byTypeSubtype, bySupportRole, monoColorDist) -> html`.
 
-- [ ] **Step 1:** In `renderAnalyticsPanel`, put the summary first, always visible (not collapsible), before the Color Identity section. Three blocks:
+- [x] **Step 1:** In `renderAnalyticsPanel`, put the summary first, always visible (not collapsible), before the Color Identity section. Three blocks:
   1. **Strongest tribes**: ordered list of the top 10 from `buildTribeSummary`: name, count, `★ n legendary`, color bar.
   2. **Color depth**: one line per WUBRG color plus colorless using `monoColorDist` counts, with the text "mono-color cards only; multicolor cards are in the charts below".
   3. **Support roles vs a typical deck**: one row per `buildRoleCoverage` result: `Removal 6 / 8  Thin`, a status chip (`missing` red, `thin` amber, `ok` green, `deep` green with "plenty"), then the five `byColor` counts labeled "castable in a mono-W deck: 9". Add one sentence: "Targets are typical EDHREC averages (ramp 10, draw 10, removal 8, wipes 3)."
-- [ ] **Step 2:** Role sections below the summary keep their card lists but their titles now read `Removal (6 of ~8)`; show them even when empty (remove the `if (!entries.length) return;` skip, render "No cards found").
-- [ ] **Step 3:** CSS for `.collection-summary`, `.tribe-row`, `.role-row`, `.status-chip.{missing,thin,ok,deep}`. Reuse the existing dark palette (`#374151`, `#f3f4f6`, `#fbbf24`).
-- [ ] **Step 4: Verify** with the friend's collection locally (testing only, never commit) and the user's: the sparse collection must show "Missing"/"Thin" honestly and no JS errors in `browser_smoke.py`. Check at narrow width that rows wrap rather than scroll the page.
-- [ ] **Step 5: Run `bash dev/tests/jxa/run_all.sh`, then commit** `git add js/ui/collection-analytics.js style.css` with message "Add a collection summary: strongest tribes, color depth, role coverage".
+- [x] **Step 2:** Role sections below the summary keep their card lists but their titles now read `Removal (6 of ~8)`; show them even when empty (remove the `if (!entries.length) return;` skip, render "No cards found").
+- [x] **Step 3:** CSS for `.collection-summary`, `.tribe-row`, `.role-row`, `.status-chip.{missing,thin,ok,deep}`. Reuse the existing dark palette (`#374151`, `#f3f4f6`, `#fbbf24`).
+- [x] **Step 4: Verify** with the friend's collection locally (testing only, never commit) and the user's: the sparse collection must show "Missing"/"Thin" honestly and no JS errors in `browser_smoke.py`. Check at narrow width that rows wrap rather than scroll the page.
+- [x] **Step 5: Run `bash dev/tests/jxa/run_all.sh`, then commit** `git add js/ui/collection-analytics.js style.css` with message "Add a collection summary: strongest tribes, color depth, role coverage".
 
 ---
 
 ### Task 4: Wrap-up
 
-- [ ] Commit the earlier scroll fix if not already included: `git add style.css` (message "Stop clipping the analytics detail panel").
-- [ ] Update `AGENTS.md`: add `js/analysis/collection-summary.js` to the Architecture list and the `collection-summary` suite to the Suites line.
-- [ ] Final `bash dev/tests/jxa/run_all.sh`; report any failure with its output.
+- [x] Commit the earlier scroll fix if not already included: `git add style.css` (message "Stop clipping the analytics detail panel").
+- [x] Update `AGENTS.md`: add `js/analysis/collection-summary.js` to the Architecture list and the `collection-summary` suite to the Suites line.
+- [x] Final `bash dev/tests/jxa/run_all.sh`; report any failure with its output.
 
 ## Self-Review
 
 - **Coverage:** legend (T2), merged subtypes (T2), top 30 (T2), summary with tribes top 10 / color depth / role targets (T1, T3). Each is mapped.
 - **Placeholders:** none; Task 2 and 3 describe rendering in prose because the markup is straightforward string building around the Task 1 data. Say so if you want the full markup written out.
 - **Types:** `aggregateSubtypes`, `buildTribeSummary`, `buildRoleCoverage`, `renderColorBar`, `renderColorLegend` names match across tasks.
-- **Assumption to confirm:** "strongest tribe should be more" was read as showing more tribes (10), not a different ranking.
+- **Assumption (unconfirmed):** "strongest tribe should be more" was read as showing more tribes (10), not a different ranking.
+
+## Verification (2026-10-30)
+
+Headless Chrome, `index.html`, collection built from `owned_raw.json` (full, then the first 30 non-land cards). No JavaScript errors in either run.
+
+- Colorless is its own grey segment and multicolor its own gold one: confirmed (creature, artifact, instant, land rows).
+- "No subtype" row: shows on enchantment, instant, sorcery and land; creature has none in this collection, so the creature case rests on the unit test.
+- Zero-card role: the 30-card collection shows Board wipes `0 of ~3 Missing`, ramp, draw and removal `Thin`.
+- Overlap note present on every type panel.
+- Top 30: full collection creature list shows 30 of 259 rows, `Show all 259`, then 259 rows and `Show top 30`. Every panel under 30 rows (15, 9, 6, 5, 18, 12, 1, and 24 in the sparse run) has no button.
+- Legendary badge shown on tribe rows (`★ n`); one-card tribes are dropped from the summary.
+- Not checked: phone width (headless Chrome has a minimum window width), the friend's collection, and the empty-role section lists ("No cards found").

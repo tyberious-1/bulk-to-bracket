@@ -51,6 +51,37 @@ function renderPlanOptions(plans, customPlan = null) {
   updatePlanOptions();
 }
 
+// Combo picker (Single / Combo toggle in the theme panel): keep the three selects from picking the same theme twice, show how
+// many owned cards the stack matches, and enable the build button once two themes are picked. `context` is the run context
+// (collection card data and commanders); without one, only the selects and button are refreshed.
+function refreshComboControls(context) {
+  const selects = Array.from(document.querySelectorAll("#priorityButtons .combo-select"));
+  if (!selects.length) return;
+  const ctx = context || (typeof currentRunContext !== "undefined" ? currentRunContext : null);
+  const picks = selects.map((select) => select.value).filter(Boolean);
+  selects.forEach((select) => {
+    Array.from(select.options).forEach((opt) => {
+      if (!opt.value) return;
+      opt.disabled = opt.dataset.unsupported === "1" || (picks.includes(opt.value) && select.value !== opt.value);
+    });
+  });
+  const button = document.getElementById("comboBuildBtn");
+  if (button) button.disabled = picks.length < 2;
+  const coverage = document.getElementById("comboCoverage");
+  if (!coverage) return;
+  if (!picks.length) {
+    coverage.textContent = "Pick two or three themes to stack.";
+    return;
+  }
+  const plan = ctx ? buildComboPlan(picks, ctx.allOwnedCardData, ctx.commanders.colors, ctx.commanders.primary.name) : null;
+  if (!plan) {
+    coverage.textContent = "";
+    return;
+  }
+  const caveat = describePlanCaveat(plan);
+  coverage.textContent = `${describePlanCoverage(plan)}${caveat ? ` ${caveat}` : ""}`;
+}
+
 function updatePlanOptions() {
   const focus = getCurrentThemeFocus();
   document.querySelectorAll("#planOptions .plan-card").forEach((card) => {

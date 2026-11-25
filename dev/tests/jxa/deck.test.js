@@ -253,7 +253,8 @@ function buildThemeSeedFixture() {
 // fixture gives the theme tier far more creatures than the deck has slots for,
 // and puts every instant in the generic tier, so the only thing that can seat
 // an instant is a pass that fills each bucket's shortfall tier by tier.
-function buildTypeTargetFixture(instantText, roleTargets) {
+function buildTypeTargetFixture(instantText, roleTargets, genericType, popularityOrder) {
+  const typeName = genericType || "instant";
   const commanderCard = makeCard(TEST_COMMANDER_NAME, "legendary creature — treefolk", "", 4, ["G"]);
   const themeCreatures = [];
   for (let i = 0; i < 70; i++) {
@@ -261,7 +262,10 @@ function buildTypeTargetFixture(instantText, roleTargets) {
   }
   const genericInstants = [];
   for (let i = 0; i < 6; i++) {
-    genericInstants.push(makeCard("Test Generic Instant " + i, "instant", instantText || "", 1 + (i % 4), ["G"]));
+    genericInstants.push(makeCard("Test Generic Instant " + i, typeName, instantText || "", popularityOrder ? 3 : 1 + (i % 4), ["G"]));
+    // popularityOrder: one mana value, so every score ties, and the alphabet runs against popularity
+    // (instant 5 is the most played, instant 0 the least).
+    if (popularityOrder) genericInstants[i].raw = { edhrec_rank: 600 - i * 100 };
   }
   const ownedCards = [...themeCreatures, ...genericInstants];
 
@@ -286,7 +290,7 @@ function buildTypeTargetFixture(instantText, roleTargets) {
     commanderThemes,
     TEST_COMMANDER_NAME,
     modePrefs,
-    { Land: 38, Creature: 10, Instant: 5 },
+    { Land: 38, Creature: 10, [typeName.charAt(0).toUpperCase() + typeName.slice(1)]: 5 },
     roleTargets || { ramp: 0, draw: 0, removal: 0, wipe: 0 },
     [],
     { deckSize: 99, themeCardNames }
@@ -335,6 +339,61 @@ function buildEffectiveCostFixture(mode) {
     { deckSize: 99, themeCardNames: new Map(), commanderTexts: [commanderCard.rawText] }
   );
 }
+
+runSuite("deck:supportRoleFit", {
+  "a mana rock beats a creature that only touches ramp, and a cheap spell beats an expensive one": function () {
+    const rock = makeCard("Fit Rock", "artifact", "{t}: add {g}.", 2, []);
+    const treasureCreature = makeCard("Fit Treasure Creature", "creature — ogre", "when this creature enters, create a treasure token.", 3, ["R"]);
+    assertEqual(supportRoleFit(rock, "ramp") > supportRoleFit(treasureCreature, "ramp"), true);
+    const cheap = makeCard("Fit Cheap Kill", "instant", "destroy target creature.", 2, ["B"]);
+    const dear = makeCard("Fit Dear Kill", "instant", "destroy target creature.", 6, ["B"]);
+    assertEqual(supportRoleFit(cheap, "removal") > supportRoleFit(dear, "removal"), true);
+  },
+  "a land-fetching spell counts as ramp, and a missing card is neutral": function () {
+    const fetch = makeCard("Fit Fetch", "sorcery", "search your library for a basic land card, put it onto the battlefield tapped, then shuffle.", 2, ["G"]);
+    const plain = makeCard("Fit Plain Spell", "sorcery", "draw a card.", 2, ["G"]);
+    assertEqual(supportRoleFit(fetch, "ramp") > supportRoleFit(plain, "ramp"), true);
+    assertEqual(supportRoleFit(null, "ramp"), 0);
+  }
+});
+
+runSuite("deck:pickRoleCandidate", {
+  "with no plan links the highest adjusted score wins and the first of equal scores keeps its place": function () {
+    const entries = [
+      { card: { name: "A" }, adjusted: 10 },
+      { card: { name: "B" }, adjusted: 10 },
+      { card: { name: "C" }, adjusted: 12 }
+    ];
+    assertEqual(pickRoleCandidate(entries).name, "C");
+    assertEqual(pickRoleCandidate(entries.slice(0, 2)).name, "A");
+    assertEqual(pickRoleCandidate([]), null);
+  },
+
+  "a role card with a plan link wins a close call over a higher-scored card with none": function () {
+    const entries = [
+      { card: { name: "Plain removal", centerWeight: 0 }, adjusted: 12 },
+      { card: { name: "Linked removal", centerWeight: 4 }, adjusted: 12 - ROLE_PLAN_TIE_MARGIN }
+    ];
+    assertEqual(pickRoleCandidate(entries).name, "Linked removal");
+  },
+
+  "a plan link does not overcome a clearly higher score": function () {
+    const entries = [
+      { card: { name: "Plain removal", centerWeight: 0 }, adjusted: 12 },
+      { card: { name: "Linked removal", centerWeight: 20 }, adjusted: 12 - ROLE_PLAN_TIE_MARGIN - 1 }
+    ];
+    assertEqual(pickRoleCandidate(entries).name, "Plain removal");
+  },
+
+  "among close calls the stronger plan link wins, then the higher score": function () {
+    const entries = [
+      { card: { name: "Weak link", centerWeight: 4 }, adjusted: 12 },
+      { card: { name: "Strong link", centerWeight: 10 }, adjusted: 11 },
+      { card: { name: "Strong link, lower score", centerWeight: 10 }, adjusted: 10 }
+    ];
+    assertEqual(pickRoleCandidate(entries).name, "Strong link");
+  }
+});
 
 runSuite("deck:pickCheapThemeSeeds", {
   "claims only up to the configured per-band limit, highest score first": function () {
@@ -402,6 +461,52 @@ runSuite("deck", {
     const finalDeck = buildTypeTargetFixture();
     const instants = finalDeck.filter((c) => c.role !== "land" && /instant/.test(c.type || ""));
     assertEqual(instants.length, 6);
+  },
+  "buildDeckFromScoredPool: an artifact bucket is not padded from the generic tier when the theme tier has none": function () {
+    // Instants may reach the generic tier (above); an artifact bucket may not, since a card
+    // with no tie to the plan was padding builds while on-plan cards of other types waited.
+    // Phase 1 still seats the one-card type minimum from any tier, so exactly one artifact
+    // is expected, not the five more the bucket target (5) would once have pulled in.
+    const finalDeck = buildTypeTargetFixture("", null, "artifact");
+    const artifacts = finalDeck.filter((c) => c.role !== "land" && /artifact/.test(c.type || ""));
+    assertEqual(artifacts.length, 1);
+  },
+  "buildDeckFromScoredPool: generic cards with equal scores are taken most-played first, not alphabetically": function () {
+    // Six identical generic instants: the order they join the deck is the pick order, so the most
+    // played (Test Generic Instant 5) comes first and the least played (instant 0, which the
+    // alphabet would have taken first) last.
+    const finalDeck = buildTypeTargetFixture("", null, "instant", true);
+    const names = finalDeck.filter((c) => c.role !== "land" && /instant/.test(c.type || "")).map((c) => c.name);
+    assertEqual(names.length, 6);
+    assertEqual(names[0], "Test Generic Instant 5");
+    assertEqual(names[5], "Test Generic Instant 0");
+  },
+  "buildDeckFromScoredPool: equal-scored cards in the main pool (the collection fallback) are taken most-played first": function () {
+    // With no EDHREC page the whole collection is the scored pool, and thousands of cards tie. The pool arrives
+    // in collection order (instant 0 first); popularity, not that order, must decide which is taken first.
+    const commanderCard = makeCard(TEST_COMMANDER_NAME, "legendary creature — treefolk", "", 4, ["G"]);
+    const cards = [];
+    for (let i = 0; i < 6; i++) {
+      const card = makeCard("Test Pool Instant " + i, "instant", "", 3, ["G"]);
+      card.raw = { edhrec_rank: 600 - i * 100 };
+      cards.push(card);
+    }
+    const allOwnedCardData = new Map();
+    allOwnedCardData.set(normalizeCardName(commanderCard.name), commanderCard);
+    for (const card of cards) allOwnedCardData.set(normalizeCardName(card.name), card);
+    const scored = cards.map((card) => ({
+      name: card.name, score: 30, type: card.type, cmc: card.cmc, colors: card.colors, popularity: card.raw.edhrec_rank
+    }));
+    const strategyProfile = getCommanderStrategyProfile(TEST_COMMANDER_NAME, [], ["G"]);
+    const finalDeck = buildDeckFromScoredPool(
+      scored, ["G"], { entries: [] }, allOwnedCardData, [], TEST_COMMANDER_NAME,
+      getModePreferences("", strategyProfile), { Land: 38, Instant: 6 },
+      { ramp: 0, draw: 0, removal: 0, wipe: 0 }, [], { deckSize: 99, themeCardNames: new Map() }
+    );
+    const names = finalDeck.filter((c) => c.role !== "land" && /instant/.test(c.type || "")).map((c) => c.name);
+    assertEqual(names.length, 6);
+    assertEqual(names[0], "Test Pool Instant 5");
+    assertEqual(names[5], "Test Pool Instant 0");
   },
   "buildDeckFromScoredPool: filling a type bucket never spends past a support role's target": function () {
     // Every generic instant draws a card and the draw target is 2 (a target

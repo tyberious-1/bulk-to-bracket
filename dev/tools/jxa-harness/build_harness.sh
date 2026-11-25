@@ -13,7 +13,9 @@ scripts=(
   js/analysis/pairing.js
   js/collection/csv.js
   js/analysis/themes.js
-  js/analysis/abilities.js
+  js/analysis/mechanics-data.js
+  js/analysis/catalog-data.js
+ js/analysis/abilities.js
   js/analysis/scoring.js
   js/analysis/engines.js
   js/api/http.js
@@ -28,6 +30,8 @@ scripts=(
   js/analysis/commander-match.js
   js/analysis/plans.js
   js/analysis/discovery.js
+  js/analysis/role-reading.js
+  js/analysis/connections.js
   js/analysis/collection-summary.js
   js/analysis/terms.js
   js/analysis/archetypes.js

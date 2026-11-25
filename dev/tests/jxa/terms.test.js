@@ -97,5 +97,13 @@ runSuite("terms", {
     const wizard = tCard("Pool Wizard 2", "creature — human wizard", "", 2, ["U"]);
     assertTrue(cardMakesAny(wizard, new Set(["wizard", "insect"]), T_VOCAB));
     assertTrue(!cardMakesAny(wizard, new Set(["insect", "vehicle"]), T_VOCAB));
+  },
+
+  "a trigger on one kind of counter does not need the generic counter a +1/+1 plan makes": () => {
+    const tools = tCard("Tool Sample", "artifact", "whenever one or more -1/-1 counters are put on a creature, put a charge counter on this artifact.\n{t}: add one mana of any color.", 3);
+    assertTrue(hasClause(tools, "-1/-1 counter"), "names the kind");
+    assertTrue(!termsOf(tools).clauses.some((cl) => cl.has("counter") || cl.has("ev:counter")), "no generic counter need");
+    const plus = tCard("Plus Sample", "enchantment", "whenever one or more +1/+1 counters are put on a creature you control, draw a card.", 3);
+    assertTrue(hasClause(plus, "+1/+1 counter"), "+1/+1 keeps its need");
   }
 });

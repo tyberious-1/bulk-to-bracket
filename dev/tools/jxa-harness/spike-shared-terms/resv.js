@@ -3,7 +3,7 @@ const fs = require("fs");
 const { vm, ctx } = require("./setup.js");
 const S = require("./spike.js");
 const q = require("./qual.js");
-const root = "/Users/user/xpwd/p_projects/bulk-to-bracket";
+const root = require("path").resolve(__dirname, "../../../..");
 // prototype copy of the builder with a payoff reservation after the role loop, before the creature fill
 let src = fs.readFileSync(root + "/js/build/bottom-up-deck.js", "utf8");
 const anchor = "  // Creatures up to the archetype's count, then theme cards of any type";

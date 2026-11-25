@@ -65,5 +65,13 @@ runSuite("format", {
     assertTrue(canBeActiveCommander({ type: "creature — elf", rarity: "uncommon" }));
     assertTrue(!canBeActiveCommander({ type: "legendary creature — elf wizard", rarity: "rare" }));
     setActiveFormat("commander");
+  },
+  "legalForCommander: a plane, scheme or token is never legal, a planeswalker still is": function () {
+    const colorless = [];
+    assertTrue(!legalForCommander(colorless, ["W", "G"], { name: "No Way Out", type: "plane — duskmourn" }), "plane");
+    assertTrue(!legalForCommander(colorless, ["W", "G"], { name: "Sample", type: "ongoing scheme" }), "scheme");
+    assertTrue(!legalForCommander(colorless, ["W", "G"], { name: "Sample", type: "token creature — soldier" }), "token");
+    assertTrue(legalForCommander(colorless, ["W", "G"], { name: "Sample", type: "legendary planeswalker — sample" }), "planeswalker");
+    assertTrue(legalForCommander(["W"], ["W", "G"], { name: "No Way Out", type: "instant" }), "the Midnight Hunt instant");
   }
 });

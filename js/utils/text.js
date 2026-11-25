@@ -44,7 +44,12 @@ function formatThemeLabel(theme) {
   if (!theme) return "";
   return String(theme)
     .replace(/([a-z])([A-Z])/g, "$1 $2")
+    // normalizeThemeName turns "-1/-1 counters" into "-1 -1 counters": rejoin the pair, and keep
+    // a hyphen that is a sign (before a digit, at the start or after a space or slash).
+    .replace(/(^|\s)([+-]\d+)\s([+-]\d+)(?=\s|$)/g, "$1$2/$3")
+    .replace(/(^|[\s\/])-(?=\d)/g, "$1\u0001")
     .replace(/[_-]/g, " ")
+    .replace(/\u0001/g, "-")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/\b\w/g, (char) => char.toUpperCase());
@@ -54,7 +59,10 @@ function normalizeThemeName(theme) {
   return String(theme || "")
     .toLowerCase()
     .replace(/[’']/g, "'")
+    // a sign before a digit ("-1/-1 counters") is part of the name; "go-wide" is not
+    .replace(/(^|[\s\/])-(?=\d)/g, "$1\u0001")
     .replace(/[\/_-]/g, " ")
+    .replace(/\u0001/g, "-")
     .replace(/\s+/g, " ")
     .trim();
 }

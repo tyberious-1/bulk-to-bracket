@@ -566,4 +566,49 @@ runSuite("archetypes", {
     assertEqual(scaled.creature, 14);
     assertEqual(scaleSlots(ARCHETYPES.control.slots, 31).creature, 7);
   }
+  ,
+  "a roles plan: outlets and mill make the events, death triggers want them, a card with both is an engine": function () {
+    const plan = { kind: "roles", tag: "sac-death-mill", label: "Sacrifice, death, mill", roles: ["outlet", "death", "mill"] };
+    const outlet = { name: "Altar Test", type: "artifact", text: "{t}, sacrifice a creature: add {b}{b}." };
+    const miller = { name: "Digger Test", type: "creature — zombie", text: "when this creature enters, mill three cards." };
+    const payoff = { name: "Reaper Test", type: "creature — zombie", text: "whenever another creature you control dies, draw a card." };
+    const both = { name: "Cultist Test", type: "creature — human", text: "{1}, sacrifice another creature: scry 1.\nwhen this creature dies, each opponent loses 1 life." };
+    const plain = { name: "Bear Test", type: "creature — bear", text: "vigilance" };
+    assertEqual(subtypeStanding(outlet, plan), "member");
+    assertEqual(subtypeStanding(miller, plan), "member");
+    assertEqual(subtypeStanding(payoff, plan), "payoff");
+    assertEqual(subtypeStanding(plain, plan), "none");
+    assertTrue(isRolesEngine(both, plan), "outlet + death trigger is an engine");
+    assertTrue(!isRolesEngine(outlet, plan), "an outlet alone is not");
+  }
+  ,
+  "tribal payoffs: a type list before 'you control', 'Vampire creatures you control', and tribe-favoring auras and equipment": function () {
+    const vamp = { kind: "tribal", tag: "vampires", label: "Vampire", tribe: "vampire" };
+    const wiz = { kind: "tribal", tag: "wizards", label: "Wizard", tribe: "wizard" };
+    const stand = (text, plan, type) => subtypeStanding({ name: "Test Card", type: type || "creature", text }, plan);
+    assertEqual(stand("skeletons, vampires, and zombies you control get +1/+1.", vamp), "payoff");
+    assertEqual(stand("vampire creatures you control get +2/+0 and gain first strike until end of turn.", vamp, "instant"), "payoff");
+    assertEqual(stand("enchant creature\nenchanted creature gets +2/+2 as long as it's a vampire. otherwise, it gets -2/-2.", vamp, "enchantment — aura"), "payoff");
+    assertEqual(stand("whenever equipped creature deals combat damage to a player, you draw that many cards.\nequip {4}\nequip shaman, warlock, or wizard {1}", wiz, "artifact — equipment"), "payoff");
+    assertEqual(stand("equipped creature can't be blocked by vampires or zombies.", vamp, "artifact — equipment"), "mention");
+  },
+  "pair layers: landfall wants and makers count, a lifelink maker does not, and direction gates the offer": function () {
+    const land = { kind: "pair", pair: "landfall" };
+    const life = { kind: "pair", pair: "lifegain" };
+    const blood = { kind: "pair", pair: "blood" };
+    const wants = buCard("Fall Scout", "creature \u2014 insect", "landfall \u2014 whenever a land you control enters, put a +1/+1 counter on fall scout.", 2, ["G"]);
+    const makes = buCard("Dig Deeper", "sorcery", "search your library for a basic land card, put it onto the battlefield tapped, then shuffle.", 2, ["G"]);
+    const lifelinker = buCard("Leech Test", "creature \u2014 vampire", "lifelink", 2, ["B"]);
+    const gainTrigger = buCard("Sip Test", "creature \u2014 vampire", "whenever you gain life, each opponent loses 1 life.", 3, ["B"]);
+    const bloodMaker = buCard("Bleed Test", "creature \u2014 vampire", "when bleed test enters, create a blood token.", 2, ["B"]);
+    assertEqual(layerStanding(wants, land), "payoff");
+    assertEqual(layerStanding(makes, land), "member");
+    assertEqual(layerStanding(lifelinker, life), "none", "lifelink alone is not a lifegain payoff");
+    assertEqual(layerStanding(gainTrigger, life), "payoff");
+    assertEqual(layerStanding(bloodMaker, blood), "member");
+    const vampires = [lifelinker, lifelinker, gainTrigger, bloodMaker];
+    assertTrue(pairFitsTribe(vampires, life), "lifelink members make the output");
+    assertTrue(!pairFitsTribe([wants, wants, wants, makes], blood), "insects make no Blood");
+    assertTrue(pairFitsTribe([wants, wants, wants, makes], land), "a tribe that wants landfall fits it");
+  }
 });

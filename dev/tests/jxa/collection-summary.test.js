@@ -1,5 +1,6 @@
-function csEntry(type, colorId, count) {
-  return { type, colorId, count, cards: [] };
+// `count` is copies owned; `unique` is different cards (defaults to one).
+function csEntry(type, colorId, count, unique) {
+  return { type, colorId, count, unique: unique === undefined ? 1 : unique, cards: [] };
 }
 
 runSuite("collection-summary", {
@@ -11,8 +12,8 @@ runSuite("collection-summary", {
 
   "aggregateSubtypes: a Human Warrior counts under both, legendary tallied": () => {
     const rows = aggregateSubtypes([
-      csEntry("creature — human warrior", "W", 2),
-      csEntry("legendary creature — human", "WU", 1)
+      csEntry("creature — human warrior", "W", 5, 2),
+      csEntry("legendary creature — human", "WU", 3, 1)
     ], "creature");
     const human = rows.find((r) => r.name === "Human");
     assertEqual(human.count, 3);
@@ -23,7 +24,7 @@ runSuite("collection-summary", {
   },
 
   "aggregateSubtypes: colorless goes in C, not M": () => {
-    const rows = aggregateSubtypes([csEntry("artifact creature — golem", "", 3)], "creature");
+    const rows = aggregateSubtypes([csEntry("artifact creature — golem", "", 6, 3)], "creature");
     assertEqual(rows[0].colors.C, 3);
     assertEqual(rows[0].colors.M, 0);
   },
@@ -34,13 +35,13 @@ runSuite("collection-summary", {
   },
 
   "aggregateSubtypes: ignores other primary types": () => {
-    const rows = aggregateSubtypes([csEntry("instant", "U", 4)], "creature");
+    const rows = aggregateSubtypes([csEntry("instant", "U", 4, 4)], "creature");
     assertEqual(rows.length, 0);
   },
 
   "buildTribeSummary: drops one-card tribes and caps at ten": () => {
     const m = new Map();
-    for (let i = 0; i < 12; i += 1) m.set("t" + i, csEntry("creature — tribe" + i, "G", 5 + i));
+    for (let i = 0; i < 12; i += 1) m.set("t" + i, csEntry("creature — tribe" + i, "G", 9, 5 + i));
     m.set("solo", csEntry("creature — loner", "G", 1));
     const rows = buildTribeSummary(m);
     assertEqual(rows.length, 10);
@@ -57,13 +58,26 @@ runSuite("collection-summary", {
 
   "buildRoleCoverage: status thresholds and castable-by-color": () => {
     const m = new Map();
-    m.set("removal|", { role: "removal", colorId: "", count: 3, cards: [] });
-    m.set("removal|R", { role: "removal", colorId: "R", count: 6, cards: [] });
-    m.set("removal|RG", { role: "removal", colorId: "RG", count: 20, cards: [] });
+    m.set("removal|", { role: "removal", colorId: "", count: 3, unique: 3, cards: [] });
+    m.set("removal|R", { role: "removal", colorId: "R", count: 6, unique: 6, cards: [] });
+    m.set("removal|RG", { role: "removal", colorId: "RG", count: 20, unique: 20, cards: [] });
     const removal = buildRoleCoverage(m).find((r) => r.role === "removal");
     assertEqual(removal.total, 29);
+    assertEqual(removal.unique, 29);
     assertEqual(removal.status, "deep");
     assertEqual(removal.byColor.R, 9);
     assertEqual(removal.byColor.W, 3);
+  },
+
+  "buildRoleCoverage: status reads different cards, totals and colors read copies": () => {
+    const m = new Map();
+    m.set("ramp|", { role: "ramp", colorId: "", count: 12, unique: 2, cards: [] });
+    m.set("ramp|W", { role: "ramp", colorId: "W", count: 4, unique: 1, cards: [] });
+    const ramp = buildRoleCoverage(m).find((r) => r.role === "ramp");
+    assertEqual(ramp.unique, 3);
+    assertEqual(ramp.total, 16);
+    assertEqual(ramp.status, "thin");
+    assertEqual(ramp.byColor.W, 16);
+    assertEqual(ramp.byColor.U, 12);
   }
 });

@@ -7,6 +7,8 @@ Usage: python3 dev/tools/jxa-harness/browser_smoke.py index.html "Greasefang, Ok
        python3 dev/tools/jxa-harness/browser_smoke.py index.html "Omnath, Locus of Rage" --toggle   (also clicks the Event Engines switch)
        python3 dev/tools/jxa-harness/browser_smoke.py pauper.html "<an uncommon creature you own>"
 
+       python3 dev/tools/jxa-harness/browser_smoke.py index.html "Kaza, Roil Chaser" --combo   (also drives the Single / Combo theme picker)
+
 Prints: whether the build finished, any JavaScript errors, how many export lines it made, and the
 "Engine enablers ..." report line as the page rendered it. Needs Google Chrome in /Applications.
 The commander must be a card in the fixtures (owned_raw.json or prefetch_data.json commanderCards).
@@ -74,6 +76,7 @@ INJECT = r"""
       engineNote: (document.querySelector(".build-breakdown-note") || {}).innerText || null,
       notes: [...document.querySelectorAll(".build-breakdown-note")].map((n) => n.innerText)
     };
+    if (!exportText.trim()) first.pageText = "toast=[" + toast.textContent + "] progress=[" + ((document.getElementById("progressText")||{}).textContent) + "] generateDisabled=" + generateBtn.disabled + " commanderValue=" + commanderInput.value + " csvFiles=" + (csvFileInput.files ? csvFileInput.files.length : "?") + " :: " + document.body.innerText.replace(/\n+/g, " | ").slice(0, 1200);
     if (window.__SMOKE_TOGGLE) {
       const toggle = document.getElementById("eventEnginesToggle");
       first.toggleFound = Boolean(toggle);
@@ -84,6 +87,40 @@ INJECT = r"""
       first.notesAfterToggle = [...document.querySelectorAll(".build-breakdown-note")].map((n) => n.innerText);
       first.errorsAfterToggle = errors.slice();
     }
+    if (window.__SMOKE_COMBO) {
+      const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+      const c = { focusBefore: getCurrentThemeFocus(), singleDropdownBefore: Boolean(document.getElementById("themeDropdown")) };
+      const comboBtn = document.querySelector('.pick-mode-btn[data-pick-mode="combo"]');
+      c.comboToggleFound = Boolean(comboBtn);
+      if (comboBtn) comboBtn.click();
+      await pause(500);
+      const selects = [...document.querySelectorAll("#priorityButtons .combo-select")];
+      c.selectCount = selects.length;
+      c.optionCount = selects[0] ? selects[0].options.length - 1 : 0;
+      c.buildDisabledAtStart = (document.getElementById("comboBuildBtn") || {}).disabled;
+      c.coverageAtStart = (document.getElementById("comboCoverage") || {}).textContent;
+      c.singleSectionsGone = !document.getElementById("themeDropdown") && !document.querySelector(".priority-section-buttons .priority-btn");
+      c.panelHtmlHead = (document.getElementById("priorityButtons") || {}).innerHTML.slice(0, 600);
+      if (!selects.length) { c.errors = errors.slice(); first.combo = c; done(first); return; }
+      const pickOne = async (select) => {
+        const v = [...select.options].find((o) => o.value && !o.disabled);
+        if (v) { select.value = v.value; select.dispatchEvent(new Event("change", { bubbles: true })); await pause(300); }
+        return v ? v.value : null;
+      };
+      c.picks = [await pickOne(selects[0]), await pickOne(selects[1])];
+      c.duplicateBlocked = selects[1] ? [...selects[1].options].some((o) => o.value === c.picks[0] && o.disabled) : null;
+      c.buildDisabledAfterTwo = (document.getElementById("comboBuildBtn") || {}).disabled;
+      c.coverageAfterTwo = (document.getElementById("comboCoverage") || {}).textContent;
+      const go = document.getElementById("comboBuildBtn");
+      if (go && !go.disabled) go.click();
+      await pause(15000);
+      c.focusAfter = getCurrentThemeFocus();
+      c.modeStillCombo = Boolean(document.querySelector(".combo-select"));
+      c.selectValuesAfter = [...document.querySelectorAll("#priorityButtons .combo-select")].map((x) => x.value);
+      c.exportLinesAfter = document.getElementById("moxfieldExport").value.split("\n").filter(Boolean).length;
+      c.errors = errors.slice();
+      first.combo = c;
+    }
     done(first);
   } catch (e) { done({ ok: false, error: String(e && e.stack || e), errors }); }
 })();
@@ -92,7 +129,8 @@ INJECT = r"""
 
 def main():
     toggle = "--toggle" in sys.argv
-    args = [a for a in sys.argv[1:] if a != "--toggle"]
+    combo = "--combo" in sys.argv
+    args = [a for a in sys.argv[1:] if a not in ("--toggle", "--combo")]
     if len(args) != 2:
         sys.exit(__doc__)
     page, commander = args
@@ -101,6 +139,8 @@ def main():
     inject = INJECT.replace("ROOT", root).replace("COMMANDER", commander.replace('"', ""))
     if toggle:
         inject = "<script>window.__SMOKE_TOGGLE = true;</script>" + inject
+    if combo:
+        inject = "<script>window.__SMOKE_COMBO = true;</script>" + inject
     page_html = page_html.replace("<head>", '<head><base href="file://%s">' % root, 1).replace("</body>", inject + "</body>", 1)
     with tempfile.TemporaryDirectory() as tmp:
         test = os.path.join(tmp, "smoke.html")
@@ -120,6 +160,11 @@ def main():
         print("Event Engines switch found:", d.get("toggleFound"), "| on before:", d.get("toggleActiveBefore"), "| on after the click:", d.get("toggleActiveAfter"))
         print("report notes after the click:", [n[:120] for n in d.get("notesAfterToggle") or []])
         print("JavaScript errors after the click:", d.get("errorsAfterToggle"))
+    if d.get("pageText"):
+        print("the export was empty; page text:", d["pageText"])
+    if combo:
+        for k, v in (d.get("combo") or {}).items():
+            print("combo.%s: %s" % (k, v))
     if not d.get("ok"):
         print("failure:", d.get("error"))
         sys.exit(1)

@@ -1,5 +1,5 @@
 const fs=require("fs"),vm=require("vm"),path=require("path");
-const root="/Users/user/xpwd/p_projects/bulk-to-bracket";
+const root=require("path").resolve(__dirname, "../../../..");
 const store={};const ctx=vm.createContext({console,localStorage:{getItem:k=>k in store?store[k]:null,setItem:(k,v)=>{store[k]=String(v)},removeItem:k=>{delete store[k]}},setTimeout,clearTimeout,fetch:()=>Promise.reject(new Error("no net")),AbortController});
 for(const f of fs.readFileSync(root+"/dev/tools/jxa-harness/build_harness.sh","utf8").match(/js\/[\w\/.-]+\.js/g))vm.runInContext(fs.readFileSync(path.join(root,f),"utf8"),ctx,{filename:f});
 const owned=JSON.parse(fs.readFileSync(root+"/dev/tools/jxa-harness/owned_raw.json","utf8"));

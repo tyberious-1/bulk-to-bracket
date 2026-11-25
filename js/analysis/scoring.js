@@ -156,6 +156,8 @@ const ROLE_TEXT_PATTERNS = {
   ramp: [
     "add {", "create a treasure", "create treasure", "search your library for",
     "play an additional land", "play two additional lands",
+    "land card from your hand onto the battlefield", "land cards from your hand onto the battlefield",
+    "lands from your hand onto the battlefield",
     "less to cast", "convoke", "affinity for"
   ],
   draw: ["draw a card", "draw two cards", "draw three cards", "whenever you draw"],
@@ -574,6 +576,36 @@ function matchesRoleWording(role, text) {
   return false;
 }
 
+// A Treasure counts as acceleration only when the card makes it on its own timing (when it enters, at your
+// upkeep, as an activated ability). One that waits for combat damage, a death or another "whenever" trigger
+// (Goldvein Pick, Prying Blade) is not reliable mana, and a Treasure riding on a draw spell (Deadly Dispute)
+// is a draw card first. Measured 2026-11-19 on a Shelob build: its "ramp" slots held Goldvein Pick and
+// Collector's Vault, which were cast in none of 60 games.
+const TREASURE_CONDITIONAL = /\b(?:whenever|dies|deals (?:combat )?damage|attacks|leaves the battlefield|is put into a graveyard)\b/;
+
+// Red is the Treasure colour and its creatures attack early, so a red card's attack or combat-damage Treasure
+// is real acceleration there (the user, 2026-11-19); the same trigger on a card outside red is a bonus.
+const TREASURE_CONDITIONAL_RED = /\b(?:dies|leaves the battlefield|is put into a graveyard)\b/;
+
+function treasureIsRamp(text, pattern, card) {
+  const conditional = card && Array.isArray(card.colors) && card.colors.includes("R") ? TREASURE_CONDITIONAL_RED : TREASURE_CONDITIONAL;
+  if (drawsByWording(text)) return false;
+
+  let from = 0;
+
+  for (;;) {
+    const at = text.indexOf(pattern, from);
+    if (at === -1) return false;
+
+    const start = text.lastIndexOf(".", at) + 1;
+    const end = text.indexOf(".", at);
+    const sentence = text.slice(start, end === -1 ? text.length : end);
+    if (!conditional.test(sentence)) return true;
+
+    from = at + pattern.length;
+  }
+}
+
 function cardMatchesRole(card, role, isTribalDeck = false) {
   if (!isTribalDeck && isFlexibleTribalPayoff(card)) return false;
 
@@ -590,6 +622,9 @@ function cardMatchesRole(card, role, isTribalDeck = false) {
     }
     if (role === "ramp" && pattern === "less to cast") {
       return costReductionIsGeneral(text, pattern);
+    }
+    if (role === "ramp" && (pattern === "create a treasure" || pattern === "create treasure")) {
+      return text.includes(pattern) && treasureIsRamp(text, pattern, card);
     }
     // Threaten effects (Act of Treason) borrow the creature for a turn; that
     // is a combat trick, not an answer.

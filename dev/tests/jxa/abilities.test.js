@@ -153,4 +153,48 @@ runSuite("abilities", {
     assertEqual(kind("put a first strike counter on target creature."), "other");
     assertEqual(kind("this artifact enters with a charge counter on it."), "other");
   }
+  ,
+  "look-at-the-top effects that put cards into the graveyard read as mill, dredge does not": function () {
+    const has = (card, label) => getCardAbilities(card).some((a) => a.effects.some((e) => e.label === label));
+    assertTrue(has({ name: "Dig One", type: "sorcery", text: "look at the top three cards of your library. put one of them into your hand and the rest into your graveyard." }, "mill-self"), "dig");
+    assertTrue(has({ name: "Dig Two", type: "creature", text: "when this creature enters, reveal the top four cards of your library. you may put a land card from among them into your hand. put the rest into your graveyard." }, "mill-self"), "etb dig");
+    assertTrue(!has({ name: "Dredger", type: "creature", text: "dredge 4 (if you would draw a card, you may mill four cards instead.)" }, "mill-self"), "dredge is recursion, not mill");
+    assertTrue(has({ name: "Dig Opp", type: "creature", text: "when this creature enters, look at the top card of target player's library. you may put that card into their graveyard." }, "mill-other"), "other player");
+    assertTrue(!has({ name: "Peek", type: "sorcery", text: "look at the top three cards of your library. put one into your hand and the rest on the bottom of your library." }, "mill-self"), "no graveyard, no mill");
+  },
+  "a non-creature permanent going to the graveyard, and death keywords, are death triggers": function () {
+    const dies = (card) => getCardAbilities(card).some((a) => a.trigger.includes("dies"));
+    assertTrue(dies({ name: "Trinket", type: "artifact", text: "{2}, {t}, sacrifice this artifact: draw a card.\nwhen this artifact is put into a graveyard from the battlefield, draw a card." }), "artifact");
+    assertTrue(dies({ name: "Phoenix", type: "creature", text: "flying\nafterlife 1 (when this creature dies, create a 1/1 spirit.)" }), "afterlife");
+    assertTrue(dies({ name: "Bot", type: "artifact creature", text: "modular 2 (this creature enters with two +1/+1 counters on it.)" }), "modular");
+    assertTrue(!dies({ name: "Dig Plain", type: "creature", text: "when this creature enters, draw a card." }), "etb is not a death trigger");
+  },
+  "an optional or additional-cost sacrifice reads as a sacrifice outlet of a kind": function () {
+    const spell = getCardAbilities({ name: "Blood Spell", type: "sorcery", text: "as an additional cost to cast this spell, sacrifice a creature.\ndraw three cards." });
+    assertTrue(spell[0].cost.includes("sacrifice-additional"), "additional cost");
+    const upkeep = getCardAbilities({ name: "Artist", type: "creature", text: "at the beginning of your upkeep, you may sacrifice a creature. when you do, deal 2 damage to target opponent." });
+    assertTrue(upkeep[0].effects.some((e) => e.label === "sacrifice-choice"), "may sacrifice");
+    const kw = getCardAbilities({ name: "Spawner", type: "creature", text: "casualty 1 (as you cast this spell, you may sacrifice a creature with power 1 or greater.)" });
+    assertTrue(kw[0].effects.some((e) => e.label === "sacrifice-choice"), "casualty");
+    const plain = getCardAbilities({ name: "Pawn", type: "creature", text: "when this creature enters, each player sacrifices a creature." });
+    assertTrue(!plain[0].effects.some((e) => e.label === "sacrifice-choice"), "edict is not a choice");
+  },
+  "a recent mechanic is read from its own reminder text (mechanics-data.js)": function () {
+    if (typeof MECHANIC_REMINDERS === "undefined") return;
+    const labels = (text) => getCardAbilities({ name: "Test Card", type: "creature", text }).flatMap((a) => a.effects.map((e) => e.label));
+    assertTrue(labels("job select").includes("keyword:job select") && labels("job select").includes("create-token"), "job select makes a token");
+    assertTrue(labels("basic landcycling {1}").includes("keyword:basic landcycling") || labels("landcycling {2}").includes("keyword:landcycling"), "landcycling is a keyword line");
+    assertEqual(mechanicKeywordOf("warp {1}{r}"), "warp", "a keyword with a cost");
+    assertEqual(mechanicKeywordOf("warpath of the bold"), null, "a longer word is not the keyword");
+    assertEqual(mechanicKeywordOf("mill three cards"), null, "a spell that starts with an action verb is never a keyword line");
+    assertEqual(mechanicKeywordOf("job select and then some words"), null, "words after the keyword make it a different line");
+  },
+  "a keyword line carries its spell trigger: prowess anywhere in the list": function () {
+    const card = { name: "Test Hero", type: "legendary creature \u2014 god", text: "Flying, vigilance, prowess, prowess (Whenever you cast a noncreature spell, this creature gets +1/+1 until end of turn twice.)" };
+    const ab = getCardAbilities(card)[0];
+    assertEqual(ab.kind, "keyword", "still a keyword line");
+    assertTrue(ab.trigger.includes("cast-noncreature"), "the spell trigger is carried");
+    assertTrue(ab.effects.some((e) => e.label === "keyword:flying") && ab.effects.some((e) => e.label === "keyword:prowess"), "both keywords labeled");
+    assertEqual(getCardAbilities({ name: "Test Flyer", type: "creature", text: "Flying, vigilance" })[0].trigger.length, 0, "plain keywords carry no trigger");
+  }
 });

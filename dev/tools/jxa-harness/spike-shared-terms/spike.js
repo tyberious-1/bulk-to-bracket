@@ -3,7 +3,7 @@
 const log = process.env.QUIET ? () => {} : console.log;
 const fs = require("fs");
 const q = require("./qual.js");
-const root = "/Users/user/xpwd/p_projects/bulk-to-bracket";
+const root = require("path").resolve(__dirname, "../../../..");
 const ownedRaw = JSON.parse(fs.readFileSync(root + "/dev/tools/jxa-harness/owned_raw.json", "utf8"));
 const precons = JSON.parse(fs.readFileSync("precon_full.json", "utf8")).filter((d) => !/Collector/.test(d.name));
 

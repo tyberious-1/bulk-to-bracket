@@ -1208,7 +1208,7 @@ Expected: every suite `SUITE OK`. Record the passing counts in the commit messag
 Run (about 2 minutes):
 
 ```bash
-SP=/private/tmp/claude-502/-Users-user-xpwd-p-projects-bulk-to-bracket/9941358e-5bc4-47a7-9492-d43a0f7aafe3/scratchpad
+SP=/tmp/btb-scratch; mkdir -p $SP
 bash dev/tools/jxa-harness/build_harness.sh $SP/combined.js
 cat $SP/combined.js dev/tools/jxa-harness/dump_decks.js | osascript -l JavaScript | grep '^DECKS ' | sed 's/^DECKS //' > dev/tools/jxa-harness/baselines/2026-10-15-after-labels-phase1.json
 node -e "console.log(Object.keys(require('./dev/tools/jxa-harness/baselines/2026-10-15-after-labels-phase1.json')).length + ' entries')"
@@ -1234,7 +1234,7 @@ Write what moved, per commander, in a short list. Unexplained moves are findings
 Run (this reproduces the build where Street Sweeper appeared):
 
 ```bash
-SP=/private/tmp/claude-502/-Users-user-xpwd-p-projects-bulk-to-bracket/9941358e-5bc4-47a7-9492-d43a0f7aafe3/scratchpad
+SP=/tmp/btb-scratch; mkdir -p $SP
 { printf 'const ONLY_COMMANDERS = ["Callaphe, Beloved of the Sea"];\nconst MODE_OVERRIDE = "theme:auras~voltron~devotion";\n'; cat $SP/combined.js dev/tools/jxa-harness/dump_decks.js; } > $SP/run_callaphe.js
 osascript -l JavaScript $SP/run_callaphe.js | grep '^DECKS ' | sed 's/^DECKS //' > $SP/callaphe_after.json
 node -e "const l=require('$SP/callaphe_after.json')['Callaphe, Beloved of the Sea'].current; for (const n of ['Street Sweeper','Disarm','Enchantment Alteration','Stolen Uniform']) console.log(n, l.includes(n) ? 'IN' : 'out');"

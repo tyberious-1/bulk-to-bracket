@@ -152,6 +152,13 @@ function linkOf(card, knownTypes) {
   // "Vehicles you control have hexproof" and the like name a type outside any labeled ability.
   const named = /\b(artifact|enchantment|vehicle|mount|equipment|aura|saga)s? you control\b/.exec(text);
   if (named) wants.add("type:" + named[1]);
+  // Energy: "you get {E}" supplies it; paying or counting it needs it. The ability labels flatten {E} to
+  // {m}, so this reads the raw text.
+  if (/\byou get [^.\n]*\{e\}/.test(text)) gives.add("energy");
+  if (/\b(?:pay|spend) [^.\n]*\{e\}|\beach \{e\}|\{e\} you have/.test(text)) wants.add("energy");
+  // X spells: a card with {X} in its cost supplies one; a watcher of "spells with {X} in their mana cost" needs one.
+  if (!front.includes("land") && /\{x\}/i.test(String(card.manaCost ?? card.mana_cost ?? ""))) gives.add("x-spell");
+  if (/\{x\} in (?:its|their) mana costs?|spells? with \{x\}|with \{x\} in/.test(text)) wants.add("x-spell");
   return { gives, wants };
 }
 

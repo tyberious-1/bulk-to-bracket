@@ -217,7 +217,11 @@ function isFalseRamp(card) {
 }
 
 function bottomUpRole(card) {
-  const base = detectRole(card, true);
+  let base = detectRole(card, true);
+  // The shared role no longer counts a Treasure that waits for a trigger or rides on a draw spell as ramp
+  // (commander-first fix, 2026-11-19). Bottom-up keeps counting every Treasure maker as one-shot ramp: rampKind
+  // below tells reliable from one-shot, and its tests expect Shambling Ghast to stay ramp.
+  if ((base === "draw" || base === "synergy") && /create (?:a )?treasure/.test(getCardText(card))) base = "ramp";
   if (base === "wipe" && isEdict(getCardText(card))) return "removal";
   const fallbackRole = (skip) => getRoleContributions(card, true).find((role) => role !== skip) || "synergy";
   if (base !== "removal" && base !== "wipe" && (isUpToExileRemoval(getCardText(card)) || isExtraRemoval(getCardText(card)) || isNarrowCounterSpell(getCardText(card)))) return "removal";

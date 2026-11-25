@@ -1,0 +1,13 @@
+.DS_Store
+dev/tools/jxa-harness/precon_full.json
+dev/card inventory.csv
+ManaBox_Collection*.csv
+dev/tools/jxa-harness/otags.json
+dev/tools/jxa-harness/rules/
+
+# Project skills are tracked; the global ignore hides .claude by default
+!.claude/
+.claude/*
+!.claude/skills/
+dev/tools/jxa-harness/expert_lists/
+dev/tools/forge-sim/work/

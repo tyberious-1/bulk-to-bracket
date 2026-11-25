@@ -444,4 +444,46 @@ runSuite("bottom-up-deck", {
     const text = bottomUpDecklistText([{ name: "Swamp" }, { name: "Swamp" }, { name: "Island" }]);
     assertEqual(text, "2 Swamp\n1 Island");
   }
+  ,
+  "a roles plan reserves a minimum of each role and caps cards that only mill": function () {
+    const pool = budPool();
+    for (let i = 0; i < 20; i += 1) pool.push(budCard(`Digger ${i}`, "sorcery", "mill four cards.", 2));
+    for (let i = 0; i < 12; i += 1) pool.push(budCard(`Altar ${i}`, "artifact", "{1}, sacrifice a creature: scry 1.", 2, []));
+    for (let i = 0; i < 12; i += 1) pool.push(budCard(`Reaper ${i}`, "enchantment", "whenever another creature you control dies, each opponent loses 1 life.", 3));
+    const plan = { kind: "roles", tag: "sac-death-mill", label: "Sacrifice, death, mill", roles: ["outlet", "death", "mill"] };
+    const { deck, report } = buildDeckBottomUp(pool, { archetype: "midrange", subtype: plan, colors: ["B"] });
+    const count = (role) => deck.filter((c) => cardEngineRoles(c)[role]).length;
+    assertTrue(count("death") >= 10, "death triggers " + count("death"));
+    assertTrue(count("outlet") >= 8, "outlets " + count("outlet"));
+    const pureMill = deck.filter((c) => { const r = cardEngineRoles(c); return r.mill && !r.outlet && !r.death; }).length;
+    assertTrue(pureMill <= 8, "pure mill " + pureMill);
+    assertTrue(report.rolesReservation.death.minimum === 10, "reservation reported");
+  }
+  ,
+  "a tribal plan with a roles layer takes layer cards up to the cap and keeps the tribe as the body": function () {
+    const pool = budPool();
+    for (let i = 0; i < 12; i += 1) pool.push(budCard(`Altar ${i}`, "artifact", "{1}, sacrifice a creature: scry 1.", 2, []));
+    for (let i = 0; i < 12; i += 1) pool.push(budCard(`Reaper ${i}`, "enchantment", "whenever another creature you control dies, each opponent loses 1 life.", 3));
+    const plan = { ...BUD_ZOMBIE, layer: { kind: "roles", roles: ["outlet", "death"] } };
+    const layered = buildDeckBottomUp(pool, { archetype: "midrange", subtype: plan, colors: ["B"], layerMax: 6 });
+    const plain = buildDeckBottomUp(pool, { archetype: "midrange", subtype: BUD_ZOMBIE, colors: ["B"] });
+    const layerCards = (d) => d.deck.filter((c) => /^(Altar|Reaper) /.test(c.name)).length;
+    assertEqual(layerCards(plain), 0);
+    assertTrue(layerCards(layered) >= 1 && layerCards(layered) <= 6, "layer cards " + layerCards(layered));
+    assertTrue(layered.report.members >= 15, "the tribe stays the body: " + layered.report.members);
+  }
+  ,
+  "the land rule: untapped lands, tapped only for the plan, no choose-a-color or pay-one-for-any-color lands": function () {
+    const land = (text) => ({ name: "Test Land", type: "land", text });
+    const tribe = { kind: "tribal", tag: "vampires", label: "Vampire", tribe: "vampire" };
+    assertTrue(bottomUpLandAllowed(land("{t}: add {b} or {r}."), tribe), "untapped dual");
+    assertTrue(bottomUpLandAllowed(land("this land enters tapped unless you control a swamp or a mountain.\n{t}: add {b} or {r}."), tribe), "tapped unless can come down untapped");
+    assertTrue(!bottomUpLandAllowed(land("this land enters tapped.\n{t}: add {b} or {r}."), tribe), "plain tapped dual");
+    assertTrue(!bottomUpLandAllowed(land("this land enters tapped.\nwhen this land enters, you gain 1 life.\n{t}: add {b} or {r}."), tribe), "gain land");
+    assertTrue(bottomUpLandAllowed(land("this land enters tapped.\nwhen this land enters, surveil 1.\n{t}: add {b} or {r}."), tribe), "tapped surveil land");
+    assertTrue(bottomUpLandAllowed(land("this land enters tapped.\n{t}: add {b}.\n{2}{b}, {t}: return target creature card from your graveyard to your hand."), tribe), "tapped recursion land");
+    assertTrue(bottomUpLandAllowed(land("this land enters tapped.\n{t}: add {r}.\n{3}{r}: this land becomes a 3/1 red elemental creature until end of turn. it's still a land."), tribe), "tapped manland");
+    assertTrue(!bottomUpLandAllowed(land("this land enters tapped.\nas this land enters, choose a color other than white.\n{t}: add {w} or one mana of the chosen color."), tribe), "choose a color, enters tapped");
+    assertTrue(!bottomUpLandAllowed(land("{t}: add {c}.\n{1}, {t}: add one mana of any color."), tribe), "pay one for any color");
+  }
 });

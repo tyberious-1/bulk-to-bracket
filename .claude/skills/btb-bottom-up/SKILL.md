@@ -1,0 +1,46 @@
+---
+name: btb-bottom-up
+description: Use when editing js/analysis/archetypes.js, terms.js, bottom-up.js, commander-fit.js, reliability.js, js/build/bottom-up-deck.js or the Bottom-Up tab in the bulk-to-bracket repo.
+---
+
+# Bottom-up build (tribes, themes, layers)
+
+> **Summary:** The second entry point that builds from a tribe, theme or roles plan (Aggro/Midrange/Control), payoff reservation, vehicle plans, layers and pairs, and the shared-term reading. Separate tab, not the default flow.
+> **STOP here unless** you are changing a bottom-up plan, layer, pair, archetype mix or the shared-term reader.
+> Everything below is detail moved verbatim from the old AGENTS.md; skip it if the summary answers your question.
+
+- Bottom-up build (a second entry point beside commander-first; nothing in the commander-first path reads these, but the bottom-up builder does read `getCrewPower` and `getPayloadTypes` from `engines.js`, so a change there needs both checks):
+  `js/analysis/archetypes.js` (Aggro/Midrange/Control slot mix and curve target; `bottomUpLandCount` (aggro one fewer land, control one more, 35-38); `bottomUpRole` corrects
+  `detectRole` locally -- edicts are removal, cost reducers and one-shot sacrifices are not ramp; `subtypeStanding`
+  splits tribe members, payoffs and mere mentions; `sparesSubtype` reads "except/non-X"), `js/build/bottom-up-deck.js`
+  (`buildDeckBottomUp`, pure; role caps, draw covers up to 4 missing removal/wipe slots, mention cap 6; slots left once creatures reach the typal cap take ramp/draw/removal up to `BOTTOM_UP_ROLE_OVERFLOW` (3) past each role cap before no-signal filler, never wipes; `cardKeywords`/`keywordScore` (flying, first/double strike, menace...) order a plan's own creatures, scaled by archetype, and skip creatures that are only here for a role; `removalFinesse` (instant, flexible target, extra cost, narrow target) orders same-kind removal; `isNarrowCounterSpell` reads Negate/Essence Scatter as counters (locally, `scoring.js` is untouched); a tribal deck's wipe must score over `wipeFloor`, so a sweeper that kills the tribe is left out; ties break on EDHREC budget inclusion, then Scryfall `raw.edhrec_rank` (`popularityRank`), then name; plus
+  `buildBottomUpManaBase`), `js/analysis/bottom-up.js` (suggestions: tribes and themes ranked apart, rating
+  Strong/OK/Thin), `js/analysis/commander-fit.js` (owned and not-owned commanders ranked by forced cuts),
+  `js/analysis/reliability.js` (`deckReliability`: hypergeometric odds for lands, ramp, draw, removal, color sources and subtype density, rated good/OK/weak, shown on the result; pure; with wipes it adds a rebuild line from `rebuildKind` -- token makers, tribe boosts, mass recursion -- and notes which wipes hit your own tribe), `js/ui/bottom-up-tab.js` (the Bottom-Up Build tab; fetches EDHREC budget-page inclusion per subtype and passes it as `options.budgetInclusion`, which only breaks score ties). Spec `dev/docs/superpowers/specs/2026-10-26-bottom-up-build-design.md`;
+  plan `dev/docs/superpowers/plans/2026-10-26-bottom-up-build.md`. It stays a separate tab and is not the default flow (decided 2026-10-30).
+  A subtype is `{kind: "tribal"|"theme"|"roles", tag, label, tribe?, roles?}` (a `roles` plan, e.g. `roles: ["outlet", "death", "mill"]`, is built on what cards do: outlet and mill cards are members, death-trigger cards payoffs, a card with both an engine; `cardEngineRoles` in `archetypes.js`; not yet offered in the UI); a theme tag joins several themes with `~`
+  (`infect~deathtouch`). After the role loop (ramp, draw, removal, wipe) and before the creature fill, the builder reserves `PLAN_PAYOFF_MIN` (5) payoff cards if the collection owns them (`options.payoffMin` overrides; `report.payoffReservation`); the role fills themselves are not reserved for plan cards. A plan's
+  own creatures may fill past the role caps up to `BOTTOM_UP_PLAN_CREATURES_MAX` (36). **Vehicle plans:**
+  vehicles are held to about `BOTTOM_UP_CREATURES_PER_VEHICLE` (1.25) creatures each and must be crewable
+  by pairs (`BOTTOM_UP_CREWERS_MIN` creatures whose power covers half the crew number, read through
+  `getCrewPower` so toughness-crew and "as though power were 2 greater" count); Pilot-token makers
+  count as members and Roads lands (`bottomUpLandNeeds`, `includePlanLands`, up to `BOTTOM_UP_PLAN_LANDS_MAX`)
+  join the mana base for vehicle and Mount plans. Scryfall otags
+  were measured against our reading of the engine roles (sacrifice outlet, death trigger, mill) and the text
+  reading was kept and widened (`abilities.js`, 2026-10-30: outlet recall 86%, death 90%, mill 56%, precision 99-100%;
+  the mill gap is mostly surveil/explore, which otags lump in, and dredge stays recursion). A `roles` plan builds on
+  those three roles (BG, 0 placeholders) reserves `ROLES_PLAN_MIN` (death 10, outlet 8, mill 6; `options.roleMin` overrides; `report.rolesReservation`)
+  and lets in at most `ROLES_PURE_MILL_MAX` (8) cards that only mill (BG midrange: 31 outlets, 22 death, 19 mill) but the Bottom-Up tab
+  and scan do not offer it (the roles layer under a tribe is offered). A tribal plan is the tribe plus a theme (agreed 2026-10-28, confirmed 2026-10-30): payoffs reward what the tribe does (Vampire: Blood, lifelink, sacrifice; Insect: landfall, mill, sacrifice, death; Wizard: spellslinger), not cards that name the tribe; the placeholders are missing non-creature plan cards, not missing members (builds stop at the 36 creature cap). A tribal subtype can carry `layer: {kind: "roles", roles: [...]}` (archetypes.js `subtypeStanding`): layer cards that are not tribe members or payoffs count as payoffs, `ROLES_LAYER_MIN` (death 6, outlet 4, mill 3) are reserved and `ROLES_LAYER_MAX` (20, `options.layerMax`) cap them; a layer is a roles plan or a theme tag (`layerStanding`; `BOTTOM_UP_LAYERS` lists the six offered: sacrifice and death, mill + sacrifice + death, instants and sorceries, and three `pair` layers: Blood tokens, lifegain payoffs, landfall). A pair (`BOTTOM_UP_PAIRS` in `archetypes.js`) is one output matched to one input read from card text: a `wants` card always counts as a payoff, a `makes` card counts only when `makersCount` (Blood and landfall yes, lifelink no); `pairFitsTribe` gates the scan by direction (at least 25% of the tribe makes the output, or 3 of its own cards want it), so Insects get landfall and never Blood. Measured 2026-10-30: BR Vampire gains only 2-3 cards from Blood or lifegain (the pool holds few), so aristocrats stays the Vampire layer; BG Insect + landfall reads 24 payoffs, 28 members, 0 placeholders the suggestion scan adds up to `SUGGESTION_ROWS_PER_ARCHETYPE.layered` (4) layered rows per archetype for the top `SUGGESTION_LAYERED_TRIBES` (5) tribes, for any layer with at least `SUGGESTION_LAYER_MIN_CARDS` (10) layer-only cards in the colors, listed after the plain plans, and the Bottom-Up tab's "Second layer" select applies one to a hand-picked tribe (`bottom_up_smoke.py` builds Vampire + sacrifice and death). Vampire BR midrange with outlet+death: members 35 -> 25, payoffs 6 -> 26, outlets 4 -> 13, death triggers 5 -> 11, placeholders 6 -> 4; Wizard UR + the spells layer: instants/sorceries 10 -> 23, placeholders 3 -> 0, Wizards 35 -> 30; placeholders did not fall for Insect (4 -> 6), so they are not a quality measure here (the 36 creature cap binds, not card supply). The annotation cache key includes the layer. The tribal payoff pattern now reads a type list before "you control", "Vampire creatures you control", tribe-favoring auras and equipment, and cards that become or make a tribe member (2026-10-30: payoffs in the Vampire, Insect and Wizard builds 3/3/6 -> 6/5/9, placeholders unchanged at 6/5/3). Equipment/auras that buff a tribe's creatures should count as plan parts. Not built yet:
+  Old Rutstein himself as a commander build and a Council of Four build (Knight WU, Goblin BR and Wizard UR plans already build as tribal plans).
+- `js/analysis/terms.js` -- the shared-term reading the bottom-up builder uses for theme plans (loaded before `archetypes.js`;
+  independent of the audit's own reader in `shared_terms.js`). `getCardTerms(card, vocab)` gives what a card makes (types, subtypes,
+  keywords, counters, token and event terms) and what it needs (condition clauses only: trigger subjects, "if you control", "for each X
+  you control", "X spells you cast"; never effect targets, opponent clauses or self triggers). `createTermSupply` says whether a need
+  clause is rare enough to count (weight ln(nonland / (1 + suppliers)) >= `TERM_CLAUSE_MIN` 1.5, pool of at least `TERM_MIN_POOL` 200).
+  `archetypes.js` `withPlanTerms(subtype, cards)` derives a theme plan's terms (terms >= 40% of its tagged members make, plus
+  `THEME_PLAN_TERM_OVERRIDES` such as proliferate feeding poison); `subtypeStanding` then returns payoff for a card that needs a plan
+  term and does not make it, member with the `engine` flag (amplifier) when it needs and makes it, mention when the need is not rare
+  enough to count. A theme payoff scores `member + engine` so the many sources do not crowd it out. Tribal plans pass through unchanged
+  (tribal payoffs also read conditional wording: "if you control a Wizard", "for each Wizard you control", "Wizard spells you cast").
+

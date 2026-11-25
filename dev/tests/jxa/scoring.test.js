@@ -1,4 +1,10 @@
 runSuite("scoring", {
+  "detectRole: exiling only your own creatures is not a wipe": function () {
+    const own = { type: "Enchantment", text: "When this enchantment enters, exile all creatures you control. Then create that many 5/5 red dragon creature tokens with flying." };
+    assertTrue(detectRole(own, false) !== "wipe", "Day of the Dragons");
+    const wrath = { type: "Sorcery", text: "Exile all creatures." };
+    assertEqual(detectRole(wrath, false), "wipe");
+  },
   "detectRole: a pacifism-style aura counts as removal": function () {
     const card = { type: "Enchantment — Aura", text: "Enchant creature. Enchanted creature can't attack or block." };
     assertEqual(detectRole(card, false), "removal");
@@ -55,6 +61,33 @@ runSuite("scoring", {
     const card = { type: "Artifact", text: "{T}: Add {C}{C}." };
     assertEqual(detectRole(card, false), "ramp");
     assertEqual(detectRole(card, true), "ramp");
+  },
+  "detectRole: a Treasure that only appears after combat damage is not ramp (Goldvein Pick, Prying Blade)": function () {
+    const pick = { type: "Artifact \u2014 Equipment", text: "Equipped creature gets +1/+1. Whenever equipped creature deals combat damage to a player, create a Treasure token. Equip {1}" };
+    const blade = { type: "Artifact \u2014 Equipment", text: "Equipped creature gets +1/+0. Whenever equipped creature deals combat damage to a player, create a Treasure token. Equip {2}" };
+    assertTrue(detectRole(pick, false) !== "ramp", "Goldvein Pick");
+    assertTrue(detectRole(blade, false) !== "ramp", "Prying Blade");
+  },
+  "detectRole: a red card's attack-trigger Treasure is ramp, the same text on a colorless card is not": function () {
+    const text = "Whenever this creature attacks, create a Treasure token.";
+    assertEqual(detectRole({ type: "Creature \u2014 Goblin", text: text, colors: ["R"] }, false), "ramp");
+    assertTrue(detectRole({ type: "Creature \u2014 Construct", text: text, colors: [] }, false) !== "ramp", "colorless");
+  },
+  "detectRole: a red card's Treasure that waits for its own death is still not ramp": function () {
+    const card = { type: "Creature \u2014 Goblin", text: "When this creature dies, create a Treasure token.", colors: ["R"] };
+    assertTrue(detectRole(card, false) !== "ramp", "dies trigger");
+  },
+  "detectRole: a draw spell with a Treasure rider is draw, not ramp (Deadly Dispute)": function () {
+    const card = { type: "Instant", text: "As an additional cost to cast this spell, sacrifice an artifact or creature. Draw two cards and create a Treasure token." };
+    assertEqual(detectRole(card, false), "draw");
+  },
+  "detectRole: a Treasure made when the card enters is still ramp": function () {
+    const card = { type: "Artifact \u2014 Equipment", text: "When this Equipment enters, create a Treasure token. Equipped creature gets +1/+0. Equip {2}" };
+    assertEqual(detectRole(card, false), "ramp");
+  },
+  "detectRole: putting a land from your hand onto the battlefield is ramp": function () {
+    const card = { type: "Instant", text: "Target creature gets +2/+2 until end of turn. You may put a land card from your hand onto the battlefield." };
+    assertEqual(detectRole(card, false), "ramp");
   },
   "getRoleContributions: Kindred Discovery's draw trigger is suppressed outside a tribal deck": function () {
     const card = {
@@ -162,5 +195,33 @@ runSuite("scoring", {
     assertEqual(role("Swords-shaped", "instant", "exile target creature. its controller gains life equal to its power."), "removal");
     assertEqual(role("Comma-shaped", "sorcery", "exile target creature, then return target creature card from your graveyard to the battlefield."), "removal");
     assertEqual(role("Both-shaped", "creature — spirit", "when this creature enters, exile target creature an opponent controls.\n{2}: exile target card from a graveyard."), "removal");
+  },
+  "cardMatchesRole: draw in reminder text counts only when the card really draws": function () {
+    const draw = (text) => cardMatchesRole({ name: "Sample", type: "Creature", text: text, cmc: 3 }, "draw", false);
+    assertTrue(!draw("When this creature enters, create a Blood token. (It's an artifact with \"{1}, {T}, discard a card, sacrifice this artifact: Draw a card.\")"), "Blood token");
+    assertTrue(!draw("Dredge 2 (If you would draw a card, you may mill two cards instead. If you do, return this card from your graveyard to your hand.)"), "dredge");
+    assertTrue(!draw("When this creature enters, learn. (You may reveal a Lesson card you own from outside the game and put it into your hand, or discard a card to draw a card.)"), "learn");
+    assertTrue(!draw("Gift a card (You may promise an opponent a gift as you cast this spell. If you do, they draw a card before its other effects.)"), "gift");
+    assertTrue(draw("When this creature enters, investigate. (Create a Clue token. It's an artifact with \"{2}, sacrifice this artifact: Draw a card.\")"), "Clue stays");
+    assertTrue(draw("When this creature enters, create a Blood token. (It's an artifact with \"{1}, {T}, discard a card, sacrifice this artifact: Draw a card.\")\nWhenever this creature attacks, draw a card."), "real draw beside a Blood token");
+  },
+  "cardMatchesRole: draw and removal wordings the literal lists could not hold (Scryfall-tag check, 2026-11-03)": function () {
+    const has = (role, text) => cardMatchesRole({ name: "Sample", type: "Instant", text: text, cmc: 3 }, role, false);
+    assertTrue(has("draw", "Target player draws two cards."), "target player draws two");
+    assertTrue(has("draw", "Draw X cards, where X is the number of card types among cards in your graveyard."), "draw X cards");
+    assertTrue(has("draw", "Draw cards equal to the greatest mana value among permanents you control."), "draw cards equal to");
+    assertTrue(!has("draw", "Discard up to two cards, then draw that many cards."), "a rummage is not net draw");
+    assertTrue(!has("draw", "Exile target nonland permanent. Its controller draws a card."), "the opponent drawing is not draw");
+    assertTrue(!has("draw", "Each player discards their hand, then draws seven cards."), "a symmetrical wheel is not draw");
+    assertTrue(has("removal", "Plasma Bolt deals 2 damage to any target."), "burn of 2 to any target");
+    assertTrue(has("removal", "Explosive Apparatus deals X damage to any target."), "X damage to any target");
+    assertTrue(!has("removal", "When this creature enters, it deals 1 damage to any target."), "a 1-damage ping is not removal");
+    assertTrue(has("removal", "When this enchantment enters, exile up to one other target nonland permanent until this enchantment leaves the battlefield."), "exile up to one target");
+    assertTrue(!has("removal", "Exile up to one target creature. Return it to the battlefield under its owner's control at the beginning of the next end step."), "a flicker is not removal");
+    assertTrue(has("removal", "Put target creature into its owner's library second from the top."), "tuck into the library");
+    assertTrue(has("removal", "Target creature's owner puts it on their choice of the top or bottom of their library."), "owner puts it on the library");
+    assertTrue(has("removal", "Return up to two target creatures to their owners' hands."), "bounce up to two");
+    assertTrue(!has("removal", "Return target creature you control to its owner's hand."), "bouncing your own creature is not removal");
+    assertTrue(has("removal", "Enchant permanent. Enchanted permanent doesn't untap during its controller's untap step."), "aura that keeps a permanent tapped");
   }
 });
