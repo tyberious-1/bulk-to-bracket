@@ -37,8 +37,26 @@ function tokenMakerPaysOff(card, themeSignals) {
   return [...themeSignals].some((t) => t.includes(m[1]) || (m[1] === "instant" || m[1] === "sorcery") && t.includes("spellslinger"));
 }
 
+// Scope words (2026-11-25): a broad tag word aimed only at other players is not this deck's plan. An edict (Barter in
+// Blood, annihilator's "defending player sacrifices") is removal, exiling a card from a graveyard (Crossroads
+// Candleguide) is graveyard hate, a token given to a removed creature's controller (Generous Gift) is theirs, and
+// "can't gain life" (Skullcrack) is denial. Those clauses are dropped before the broad word tags read the text.
+const OTHER_PLAYER_CLAUSES = [
+  /\b(?:each (?:other )?(?:player|opponent)|target (?:player|opponent)|that player|defending player) sacrifices?\b[^.]*/g,
+  /\bexile [^.]*?\b(?:cards? )?from (?:target player's|a|any|all|each opponent's|an opponent's|target opponent's) graveyards?[^.]*/g,
+  /\b(?:destroy|exile) (?:target|all|each|up to \w+ target) [^.]*?\btokens?\b[^.]*/g,
+  /\b(?:its|their) controller creates?\b[^.]*|\b(?:target|each) (?:player|opponent) creates?\b[^.]*|\bthat player creates?\b[^.]*/g,
+  /\b(?:can't|cannot) gain life\b[^.]*|\b(?:target|each) (?:player|opponent)'s life total\b[^.]*|\btarget opponent's life total\b[^.]*/g
+];
+
+function getOwnScopeText(text) {
+  // A death payoff that makes others sacrifice (Grave Pact) still wants your creatures dying: keep it whole.
+  if (/\b(?:creatures? you control|another creature you control) dies?\b|\bwhenever you sacrifice\b/.test(text)) return text;
+  return OTHER_PLAYER_CLAUSES.reduce((t, re) => t.replace(re, ""), text);
+}
+
 function isSacrificeCard(card) {
-  return getCardText(card).includes("sacrifice");
+  return getOwnScopeText(getCardText(card)).includes("sacrifice");
 }
 
 function isSynergisticMonoColorLand(card, commanderColors, profile) {
@@ -757,8 +775,9 @@ function detectCardTags(card) {
   const type = getCardType(card);
   const combined = `${type} ${text}`;
 
-  if (text.includes("graveyard")) tags.push("graveyard");
-  if (text.includes("token")) {
+  const own = getOwnScopeText(text);
+  if (own.includes("graveyard")) tags.push("graveyard");
+  if (own.includes("token")) {
     tags.push("tokens");
     tags.push("gowide");
   }
@@ -783,14 +802,14 @@ function detectCardTags(card) {
     /put (?:a|up to (?:one|two)) (?:basic )?land cards? from your hand onto the battlefield/.test(text)
   ) tags.push("lands");
   if (type.includes("instant") || type.includes("sorcery")) tags.push("spellslinger");
-  if (text.includes("sacrifice")) tags.push("sacrifice");
+  if (own.includes("sacrifice")) tags.push("sacrifice");
 
   if (text.includes("+1/+1 counter") || text.includes("put a counter on") || text.includes("put counters on")) {
     tags.push("counters");
     tags.push("countersmatter");
   }
 
-  if (text.includes("gain life") || text.includes("life total")) tags.push("lifegain");
+  if (own.includes("gain life") || own.includes("life total")) tags.push("lifegain");
   if (text.includes("return target creature card from your graveyard")) tags.push("reanimator");
 
   if (
