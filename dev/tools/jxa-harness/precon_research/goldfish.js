@@ -58,12 +58,14 @@ function info(raw, link) {
 
 function mulberry32(a) { return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
-// deck = { commander: info, lands: n, cards: [info, nonland] }
+// deck = { commander: info, lands: n, cards: [info, nonland], landfall: bool }
+// Landfall (2026-11-25): when the commander triggers on lands entering, a land is a plan card. Each land that enters
+// (played or fetched) while the commander is in play counts as a linked play, so Omnath's 5/5 per land shows in plan6/8.
 function simulate(deck, games, seed) {
   const rng = mulberry32(seed);
   const land = { name: "Land", isLand: true, mana: 0, cmc: 0, link: 0 };
   const cmdTurn = [], planTurn = {}, effSum = new Array(TURNS + 1).fill(0), effN = new Array(TURNS + 1).fill(0);
-  let screw3 = 0, linkedBy = { 4: 0, 6: 0, 8: 0 }, planBy = { 4: 0, 6: 0, 8: 0 }, cmdBy = { 4: 0, 5: 0, 6: 0, 8: 0 };
+  let landfallBy8 = 0, screw3 = 0, linkedBy = { 4: 0, 6: 0, 8: 0 }, planBy = { 4: 0, 6: 0, 8: 0 }, cmdBy = { 4: 0, 5: 0, 6: 0, 8: 0 };
   for (let g = 0; g < games; g++) {
     const lib0 = [];
     for (let i = 0; i < deck.lands; i++) lib0.push(land);
@@ -84,12 +86,15 @@ function simulate(deck, games, seed) {
       }
     }
     let lands = 0, rocks = 0, dorksReady = 0, dorksNew = 0, cmdOn = false, cmdAt = 0, linkedCast = 0, strongCast = 0;
-    let screwed = false;
+    let screwed = false, landfallHits = 0;
     for (let turn = 1; turn <= TURNS; turn++) {
       if (lib.length) hand.push(lib.shift());
       dorksReady += dorksNew; dorksNew = 0;
       const li = hand.findIndex((c) => c.isLand);
-      if (li >= 0) { hand.splice(li, 1); lands++; }
+      // A landfall deck casts its commander before the land drop when it can (play Omnath, then the land).
+      let landPending = li >= 0;
+      if (landPending) hand.splice(li, 1);
+      if (landPending && !(deck.landfall && !cmdOn && deck.commander.cmc <= lands + rocks + dorksReady)) { lands++; landPending = false; if (deck.landfall && cmdOn) { linkedCast++; landfallHits++; } }
       if (turn === 3 && lands < 3) screwed = true;
       let avail = lands + rocks + dorksReady, total = avail;
       // cast: commander, then cheap ramp early, then linked cards, then the dearest spell that fits
@@ -106,16 +111,18 @@ function simulate(deck, games, seed) {
           if (pri > bestPri) { bestPri = pri; best = i; }
         }
         if (best === null) break;
-        if (best === "cmd") { avail -= deck.commander.cmc; cmdOn = true; cmdAt = turn; continue; }
+        if (best === "cmd") { avail -= deck.commander.cmc; cmdOn = true; cmdAt = turn; if (landPending) { lands++; avail++; total++; landPending = false; linkedCast++; landfallHits++; } continue; }
         const c = hand.splice(best, 1)[0];
         avail -= c.cmc;
         if (c.mana) { if (c.sick) dorksNew += c.mana; else { rocks += c.mana; avail += c.mana; total += c.mana; } }
-        for (let k = 0; k < c.fetchLand; k++) { const j = lib.findIndex((x) => x.isLand); if (j >= 0) { lib.splice(j, 1); lands++; } }
+        for (let k = 0; k < c.fetchLand; k++) { const j = lib.findIndex((x) => x.isLand); if (j >= 0) { lib.splice(j, 1); lands++; if (deck.landfall && cmdOn) { linkedCast++; landfallHits++; } } }
         for (let k = 0; k < c.draw; k++) if (lib.length) hand.push(lib.shift());
         if (c.link >= LINKED) linkedCast++;
         if (c.link >= STRONG) strongCast++;
       }
+      if (landPending) { lands++; landPending = false; }
       if (turn <= 6) { effSum[turn] += total ? (total - avail) / total : 1; effN[turn]++; }
+      if (turn === 8) landfallBy8 += landfallHits;
       for (const T of [4, 6, 8]) if (turn === T) { linkedBy[T] += linkedCast; if (cmdOn && linkedCast >= 3) planBy[T]++; }
       for (const T of [4, 5, 6, 8]) if (turn === T && cmdOn) cmdBy[T]++;
     }
@@ -128,7 +135,7 @@ function simulate(deck, games, seed) {
     cmdMedian: cmdTurn[Math.floor(cmdTurn.length / 2)],
     cmdT4: cmdBy[4] / games, cmdT6: cmdBy[6] / games, cmdT8: cmdBy[8] / games,
     linked4: linkedBy[4] / games, linked6: linkedBy[6] / games, linked8: linkedBy[8] / games,
-    plan6: planBy[6] / games, plan8: planBy[8] / games,
+    plan6: planBy[6] / games, plan8: planBy[8] / games, landfall8: landfallBy8 / games,
     screw3: screw3 / games, eff: eff.reduce((a, b) => a + b, 0) / 6
   };
 }
@@ -154,7 +161,9 @@ function evaluate(label, cmdRaws, lands, nonlandRaws, seed) {
   const links = linkScores(texts, nonlandRaws);
   const cards = nonlandRaws.map((r, i) => info(r, links[i]));
   const cmd = info(cmdRaws[0], 0);
-  const sim = simulate({ commander: cmd, lands, cards }, GAMES, seed);
+  const landfall = typeof ctx.getCommanderEvents === "function" && ctx.getCommanderEvents(texts).some((e) => e.event === "landfall");
+  const sim = simulate({ commander: cmd, lands, cards, landfall }, GAMES, seed);
+  sim.landfall = landfall;
   return {
     label, n: cards.length, linked: cards.filter((c) => c.link >= LINKED).length, strong: cards.filter((c) => c.link >= STRONG).length,
     unlinked: cards.filter((c) => c.link === 0).length, avgCmc: cards.reduce((s, c) => s + c.cmc, 0) / cards.length,
@@ -167,7 +176,7 @@ function show(r) {
     + "  cmc " + f1(r.avgCmc) + " ramp " + f1(r.ramp) + " draw " + f1(r.draw)
     + " | cmd med T" + r.cmdMedian + " by4 " + pct(r.cmdT4) + " by6 " + pct(r.cmdT6)
     + " | linked cast by6 " + f1(r.linked6) + " plan6 " + pct(r.plan6) + " plan8 " + pct(r.plan8)
-    + " | screw3 " + pct(r.screw3) + " mana used " + pct(r.eff));
+    + " | screw3 " + pct(r.screw3) + " mana used " + pct(r.eff) + (r.landfall ? " | landfall by8 " + f1(r.landfall8) : ""));
 }
 
 console.log("columns: n nonland | link = cards linked(>=" + LINKED + ") / strong(>=" + STRONG + ") | none = no link | cmc, ramp, draw counts | commander median turn, cast by T4, T6 | linked cards cast by T6, plan online (commander + 3 linked cards) by T6, T8 | <3 lands on T3 | mana spent T1-6");
