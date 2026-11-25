@@ -148,6 +148,17 @@ const LAND_RAMP_SHORT_EXTRA = 2;
 const LAND_COUNT_MAX = 40;
 const LAND_CURVE_STEP_1 = 3.0;
 const LAND_CURVE_STEP_2 = 3.4;
+// Landfall needs more lands than normal (user, 2026-11-25): each land is a plan card, not only mana. EDHREC average
+// decks agree: twelve landfall commanders run 37-40 lands (mean 39), twelve others 30-36 (mean 35). A deck whose
+// commander triggers on lands entering, or whose plan is landfall / lands matter, plays LANDFALL_EXTRA more, up to
+// LANDFALL_LAND_MAX (our 38 floor sits 3 over EDHREC's normal; 39 + 3 = 42).
+const LANDFALL_EXTRA = 2;
+const LANDFALL_LAND_MAX = 42;
+function isLandfallPlan(modePrefs) {
+  const events = (modePrefs && modePrefs.engineNeeds && modePrefs.engineNeeds.events) || [];
+  if (events.some((e) => e && e.event === "landfall")) return true;
+  return ((modePrefs && modePrefs.focusedThemeSignals) || []).some((t) => t === "landfall" || t === "lands matter" || t === "lands");
+}
 function isLandRamp(card) {
   const text = getCardText(card);
   return /onto the battlefield/.test(text)
@@ -945,14 +956,22 @@ function buildDeckFromScoredPool(
     const averageCmc = nonlandCmcs.length ? nonlandCmcs.reduce((sum, v) => sum + v, 0) / nonlandCmcs.length : 0;
     const removableRamp = rampInDeck > 0 && landRampInDeck < LAND_RAMP_MIN ? 1 : 0;
     const curveNeed = (averageCmc >= LAND_CURVE_STEP_1 ? 1 : 0) + (averageCmc >= LAND_CURVE_STEP_2 ? 1 : 0);
-    let extra = Math.min(LAND_RAMP_SHORT_EXTRA, removableRamp + curveNeed, LAND_COUNT_MAX - targetLandCount);
+    const landfall = isLandfallPlan(modePrefs);
+    const landfallExtra = landfall ? LANDFALL_EXTRA : 0;
+    let extra = Math.min(LAND_RAMP_SHORT_EXTRA + landfallExtra, removableRamp + curveNeed + landfallExtra,
+      (landfall ? LANDFALL_LAND_MAX : LAND_COUNT_MAX) - targetLandCount);
     while (extra > 0) {
       let victimIndex = -1;
-      for (let i = 0; i < deck.length; i += 1) {
-        const entry = deck[i];
-        if (entry.source === "fun-pick" || isPlanCard(entry)) continue;
-        if (["ramp", "draw", "removal", "wipe"].includes(entry.role)) continue;
-        if (victimIndex < 0 || Number(entry.score || 0) < Number(deck[victimIndex].score || 0)) victimIndex = i;
+      // In a landfall deck a land is itself a plan card, so once the off-plan cards are gone the weakest plan card
+      // makes room (Omnath had one off-plan card, Swiftfoot Boots, and stopped at 41 lands). Role cards stay.
+      for (const allowPlan of landfall ? [false, true] : [false]) {
+        for (let i = 0; i < deck.length; i += 1) {
+          const entry = deck[i];
+          if (entry.source === "fun-pick" || (!allowPlan && isPlanCard(entry))) continue;
+          if (["ramp", "draw", "removal", "wipe"].includes(entry.role)) continue;
+          if (victimIndex < 0 || Number(entry.score || 0) < Number(deck[victimIndex].score || 0)) victimIndex = i;
+        }
+        if (victimIndex >= 0) break;
       }
       if (victimIndex < 0) break;
       releaseDeckPick(deck[victimIndex]);
