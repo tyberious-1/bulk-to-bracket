@@ -653,6 +653,14 @@ function isNoncreatureVehicle(card) {
   return type.includes("vehicle") && !type.split("—")[0].includes("creature");
 }
 
+// A commander made cheaper by creature power (both Ghaltas) wants creatures: an uncrewed vehicle is not one, so
+// it does nothing for the discount. A commander that names vehicles keeps them.
+function commanderCostScalesWithCreaturePower(commanderTexts) {
+  const text = (commanderTexts || []).filter(Boolean).join("\n").toLowerCase();
+  if (text.includes("vehicle")) return false;
+  return /costs \{x\} less to cast, where x is the (total power of|greatest power among) creatures you control/.test(text);
+}
+
 // When a commander's payload includes Vehicles: lifts the creature bucket to the plan minimum and returns
 // how many vehicles the creature target can crew (0 when there is no vehicle payload). The build then
 // picks vehicles as usual and drops the rest from its pools once it holds that many, so the cap trims

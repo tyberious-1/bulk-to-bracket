@@ -1165,4 +1165,11 @@ runSuite("engines", {
     assertTrue(links("Firebending 2", { name: "Test Trick", type: "instant", text: "target creature gets +3/+0 until end of turn.", cmc: 1, manaCost: "{r}" }).includes("combat-sink"), "a pump instant spends combat mana");
     assertEqual(links("Firebending 2", { name: "Test Counter", type: "instant", text: "counter target spell.", cmc: 2, manaCost: "{u}{u}" }).includes("combat-sink"), false, "a counterspell does not");
   },
+  "commanderCostScalesWithCreaturePower: both Ghaltas yes, a vehicle commander or a plain power reader no": function () {
+    const yes = (t) => commanderCostScalesWithCreaturePower([t]);
+    assertTrue(yes("This spell costs {X} less to cast, where X is the greatest power among creatures you control."), "Ghalta the Unstoppable");
+    assertTrue(yes("This spell costs {X} less to cast, where X is the total power of creatures you control."), "Ghalta, Primal Hunger");
+    assertEqual(yes("{T}: Add an amount of {R} equal to the greatest power among creatures you control."), false, "not a cost reduction");
+    assertEqual(yes("Vehicles you control have trample. This spell costs {X} less to cast, where X is the total power of creatures you control."), false, "names vehicles");
+  },
 });

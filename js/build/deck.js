@@ -424,6 +424,7 @@ function buildDeckFromScoredPool(
   const vehicleCeiling = planPayloadVehicles(typePlan.buckets.Creature, modePrefs.engineNeeds, typePlan.buckets.Artifact);
   const vehiclePools = [scoredNonlands, themeFallbackPool, genericFallbackPool];
   let vehiclesPicked = 0;
+  if (commanderCostScalesWithCreaturePower(options.commanderTexts)) dropSpareVehicles(vehiclePools);
 
   // Curve First derives its shares from the land-drop odds instead (its ramp
   // cap is already baked into that shape, so only the strategy nudge applies).

@@ -104,7 +104,7 @@ async function generateDeck() {
     if (!isPauperFormat()) {
       updateProgress(18, "Fetching EDHREC synergy data...");
       logMessage("Loading commander recommendations from EDHREC.");
-      edhrecData = await getEDHREC(commanders.names);
+      edhrecData = await getEDHREC(commanders.names, [commanders.primary?.text, commanders.partner?.text]);
       if (edhrecData?.unavailable) {
         logMessage("EDHREC could not be reached. Continuing with Scryfall + collection-based build logic.");
       }

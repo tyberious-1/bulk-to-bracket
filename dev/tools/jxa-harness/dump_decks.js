@@ -63,7 +63,7 @@ async function buildForCommander(key, mode) {
     colors: sortColorsWubrg(Array.from(colorSet))
   };
 
-  const edhrecData = await getEDHREC(commanders.names);
+  const edhrecData = await getEDHREC(commanders.names, [commanderCard.text, partnerCard?.text]);
   const edhrecCards = Array.isArray(edhrecData?.cards) ? edhrecData.cards : [];
   const edhrecTags = Array.isArray(edhrecData?.tags) ? edhrecData.tags : [];
 
