@@ -768,6 +768,21 @@ function detectCardTags(card) {
 
   if (String(card.manaCost || "").includes("{X}")) tags.push("x spells");
 
+  // Creature stats (2026-11-25). Doran-style decks want creatures whose toughness is greater than their power, and the
+  // theme had no reader, so its build could only find cards on EDHREC's own list. A creature's printed shape counts;
+  // so does text that reads toughness or defender. Power matters reads text only: a big body alone is not a payoff.
+  const raw = card.raw || {};
+  const power = parseInt(raw.power, 10);
+  const toughness = parseInt(raw.toughness, 10);
+  const shapedForToughness = type.includes("creature") && Number.isFinite(power) && Number.isFinite(toughness) && toughness > power;
+  if (/\bdefender\b/.test(text)) tags.push("defenders");
+  if (shapedForToughness || /\bdefender\b/.test(text) || /\btoughness\b(?! (?:can't|cannot))/.test(text.replace(/\bpower and toughness\b/g, ""))) {
+    tags.push("toughness matters");
+  }
+  if (/\b(?:greatest|total) power\b|\bpower (?:\d+|x) or (?:greater|more)\b|\bequal to (?:its|that creature's|the sacrificed creature's|the) power\b|\bwith power\b/.test(text)) {
+    tags.push("power matters");
+  }
+
   if (
     text.includes("damage to any target") ||
     text.includes("damage to target player") ||

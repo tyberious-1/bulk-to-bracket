@@ -187,18 +187,26 @@ function getThemeAliases(theme) {
     "burn": ["burn"],
     "discard": ["discard"],
     "etb": ["etb"],
-    "clones": ["clones"]
+    "clones": ["clones"],
+    "toughness matters": ["toughness matters"],
+    "defenders": ["defenders", "toughness matters"],
+    "power matters": ["power matters"],
+    "power": ["power matters"]
   };
 
-  if (directAliases[normalized]) {
-    for (const alias of directAliases[normalized]) aliases.add(alias);
+  // Keys are written the way EDHREC prints a theme ("+1/+1 counters"), but the lookup uses the normalized name, which
+  // turns "/" into a space ("+1 +1 counters"). Normalize the keys too, or those themes never reach their aliases.
+  const direct = directAliases[normalized]
+    || Object.entries(directAliases).find(([key]) => normalizeThemeName(key) === normalized)?.[1];
+  if (direct) {
+    for (const alias of direct) aliases.add(alias);
   }
 
   if (TRIBAL_PLURAL_ALIASES[normalized]) aliases.add(TRIBAL_PLURAL_ALIASES[normalized]);
   if (normalized.endsWith(" tribal")) aliases.add(normalized);
   // A creature type the fixed tables lack (Minotaurs): EDHREC names it as a plural and the commander reader finds it, so the
   // tribal machinery must accept it. A theme with a direct alias keeps its own meaning ("clones" is a plan, not Clone cards).
-  if (!directAliases[normalized] && !TRIBAL_PLURAL_ALIASES[normalized]) {
+  if (!direct && !TRIBAL_PLURAL_ALIASES[normalized]) {
     const type = creatureTypeFromThemeWord(normalized);
     if (type) aliases.add(`${type} tribal`);
   }
