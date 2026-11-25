@@ -237,6 +237,9 @@ function getCommanderCenter(commanderTexts) {
         const sacM = /\bsacrifice (?:up to (?:\w+) |another |an? |one or more |x |any number of )(creature|artifact|permanent|enchantment|land|food|treasure|clue|equipment)s?\b/.exec(bare);
         if (sacM && !/sacrifice (?:this|it)\b/.test(bare.slice(sacM.index, sacM.index + 14))) add({ kind: "exchange", pays: sacM[1], count: 1, gets: "value" });
         if ((a.kind === "triggered" && a.trigger.includes("becomes-tapped")) || /\buntap (?:target|another|up to|two|all)\b/.test(bare) && a.kind !== "triggered") add({ kind: "tap" });
+        // Station (2026-11-25, Spacecraft): tap another creature you control for charge counters equal to its power, so
+        // creature power is fuel and an untapper is a second use.
+        if (/\bstation\b/.test(line) && /charge counters equal to its power|\bstation\b(?! only)/.test(line)) add({ kind: "station" });
         if (a.kind !== "keyword") for (const tm of readCenterTerms(bare)) add(tm === "counters" ? { kind: "term", term: tm, thin: true } : { kind: "term", term: tm });
         let m = /costs \{[xm]\} less to cast, where x is the (total|greatest) power (?:of|among) creatures you control/.exec(line);
         if (m) add({ kind: "quantity", measure: m[1] + "-power", uses: "cost-reduction" });
@@ -755,7 +758,7 @@ const CENTER_LINK_WEIGHTS = {
   "counts-type": 5, "boosts-type": 8, "reads-count": 8, "mech-same": 8, "fight-source": 6, "fight-body": 4, "ladder-step": 2, "ladder-etb": 6, "small-evasion": 2, "haste-body": 4, "mana-token": 4, "ninja-enabler": 6, "tap-untap": 5, "tap-haste": 4, "copy-target": 6, "pillow-piece": 8, "draw-for-hand": 5, "kw-member": 5, "big-toughness": 10, "supplies-toughness": 6, "land-matters": 6, "combat-sink": 4, "bend-fodder": 6, "story-member": 5, "life-loss": 8, "enter-member": 5, "enter-maker": 6, "scry-source": 6, "discard-source": 6, "discard-payoff": 6, "big-spell": 5, "cheap-spell": 3, "spell-copy": 8, "double-strike": 6, "extra-combat": 10, "attack-payoff": 6, "haste-giver": 4, "blink": 10, "etb-doubler": 12, "bounce-own": 6, "etb-body": 3, "attach-member": 5, "attach-helper": 8, "attach-tutor": 6, "attach-payoff": 6, "top-setup": 6, "free-cast": 6, "mana-sink": 6, "mana-doubler": 10, "untaps": 8, "tap-payoff": 6, "term-link": 6, "term-link-common": 2, "term-doubler": 10, "type-member": 5, "type-payoff": 8, "type-lord": 8, "type-maker": 6,
   "makes-event": 6, "makes-event-once": 2, "makes-type": 6, "makes-type-weak": 3, "event-payoff": 10, "cheaper-casts": 8,
   "landwalk": 14, "makes-land-type": 10, "discount-target": 4, "draw-payoff-all": 14, "draw-payoff": 8, "group-draw": 6, "hand-room": 4, "makes-tokens-burst": 14, "makes-tokens-repeat": 10, "makes-token": 4, "doubles-tokens": 14, "token-payoff": 4,
-  fodder: 2, "fodder-dies": 3, "graveyard-leave-payoff": 8, outlet: 6, "death-payoff": 6, "return-target": 6, "return-target-small": 3, reanimates: 8, "comes-back": 4, "graveyard-fill": 6, "power-fodder": 6, "kills-many": 8, "kills-one": 5
+  fodder: 2, "fodder-dies": 3, "graveyard-leave-payoff": 8, outlet: 6, "death-payoff": 6, "return-target": 6, "return-target-small": 3, reanimates: 8, "comes-back": 4, "graveyard-fill": 6, "power-fodder": 6, "kills-many": 8, "kills-one": 5, "station-fuel": 6, "station-fuel-small": 3
 };
 
 function centerTypeHas(card, type) {
@@ -901,6 +904,11 @@ function getCenterLinks(card, needs) {
     if (c.kind === "mana-scale") {
       if (/\{x\}/.test(String(card.manaCost || card.mana_cost || "").toLowerCase() + text) || cmc >= 7) add("mana-sink", "spends big mana");
       if (/untap (?:target|all|up to \w+) lands?|add (?:an additional|twice)|doubles? (?:the )?mana/.test(text)) add("mana-doubler", "adds more mana");
+    }
+    if (c.kind === "station") {
+      if (isCreature && power >= 4) add("station-fuel", "power " + power + " fuels station");
+      else if (isCreature && power === 3) add("station-fuel-small", "power 3 fuels station");
+      if (/untap (?:target|another|all|up to|each) (?:creature|creatures)/.test(text)) add("untaps", "untaps a creature to station again");
     }
     if (c.kind === "tap") {
       if (/untap (?:target|another|all|up to|two|each)/.test(text)) add("untaps", "untaps");
