@@ -7,7 +7,7 @@
 // answers the second for one commander at a time, since that needs its
 // recommendation pool.
 //
-// Depends on: cards.js, csv.js, deck-stats.js, edhrec.js, manabase.js,
+// Depends on: cards.js, csv.js, deck-stats.js, edhrec.js, manabase.js, pairing.js,
 //   scryfall.js, text.js, themes.js, type-plan.js
 
 // EDHREC writes a partner pair as "A // B", the very separator a two-faced
@@ -95,6 +95,55 @@ function findOwnedUnrankedCommanders(collection, cardData, rankedCommanders) {
   // No deck count to rank these by, so name order is the only one that means
   // anything.
   return unranked.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// Every owned pairing: each owned commander that takes a second commander (Partner, Friends forever, Choose a
+// Background, a Doctor or a Doctor's companion), with every owned card it can legally pair with. EDHREC's color pages
+// rank only the most-played pairs, so this reads the collection's own card data instead. A Partner pair shows under
+// both of its cards, since a player browses by the card they want to lead with.
+// rankedCommanders (findOwnedRankedCommanders' list, may be empty) supplies a pair's EDHREC deck count when it has one.
+// Returns [{ name, colors, label, mates: [{ name, colors, decks, text, names, isPair }] }], leads by name, mates
+// most-played first, then by name.
+function findOwnedCommanderPairings(collection, cardData, rankedCommanders) {
+  const pairDecks = new Map();
+  for (const commander of rankedCommanders || []) {
+    if (!commander.isPair || !commander.names || commander.names.length !== 2) continue;
+    const key = commander.names.map((name) => normalizeCardName(getPrimaryCardName(name))).sort().join("|");
+    pairDecks.set(key, commander.decks || 0);
+  }
+
+  const owned = [];
+  const seen = new Set();
+  for (const entry of getCollectionEntries(collection)) {
+    const card = cardData.get(entry.normalizedName)
+      || cardData.get(normalizeCardName(getPrimaryCardName(entry.normalizedName)));
+    if (!card || seen.has(normalizeCardName(card.name))) continue;
+    seen.add(normalizeCardName(card.name));
+    if (canHaveCommanderPartner(card)) owned.push(card);
+  }
+
+  const groups = [];
+  for (const lead of owned) {
+    if (isBackgroundCard(lead) || !canBeActiveCommander(lead)) continue;
+    const mates = [];
+    for (const mate of owned) {
+      if (!isLegalCommanderPair(lead, mate)) continue;
+      if (!isBackgroundCard(mate) && !canBeActiveCommander(mate)) continue;
+      const key = [lead.name, mate.name].map((name) => normalizeCardName(getPrimaryCardName(name))).sort().join("|");
+      mates.push({
+        name: mate.name,
+        colors: sortColorsWubrg([...new Set([...(lead.colors || []), ...(mate.colors || [])])]),
+        decks: pairDecks.get(key) || 0,
+        text: String(mate.rawText || "").replace(/\s*\n\s*/g, " "),
+        names: [lead.name, mate.name],
+        isPair: true
+      });
+    }
+    if (!mates.length) continue;
+    mates.sort((a, b) => b.decks - a.decks || a.name.localeCompare(b.name));
+    groups.push({ name: lead.name, colors: lead.colors || [], label: getCommanderPartnerLabel(lead), mates });
+  }
+  return groups.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // Every card of this commander's pool the collection can actually play: owned,

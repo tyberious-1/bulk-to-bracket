@@ -1164,6 +1164,37 @@ button:disabled {
   font-size: 11px;
 }
 
+/* Commanders tab, pairings view: one collapsible group per commander that takes a partner or Background. */
+.pairing-group {
+  border-bottom: 1px solid #374151;
+  padding: 6px 0;
+}
+
+.pairing-group summary {
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px;
+}
+
+.pairing-group .pairing-count {
+  margin-left: auto;
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.pairing-group .commanders-table {
+  margin-top: 6px;
+}
+
+.pairing-text {
+  color: #cbd5e1;
+  font-size: 12px;
+  max-width: 420px;
+}
+
 .match-value {
   font-size: 16px;
   font-weight: 700;

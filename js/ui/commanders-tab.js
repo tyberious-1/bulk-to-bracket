@@ -18,6 +18,9 @@ let unrankedScanDone = false;
 let commanderMatches = new Map();
 let commanderSortMode = "decks";
 let commanderScanBusy = false;
+// Owned pairings (findOwnedCommanderPairings), read on demand, and which view the tab shows: "list" or "pairings".
+let commanderPairings = null;
+let commanderView = "list";
 
 // Empty means no filter. "C" stands in for the colorless identity, which is the
 // empty set of colors and so has no pip of its own to toggle.
@@ -51,6 +54,8 @@ function resetCommanderScan() {
   unrankedCommanders = [];
   unrankedScanDone = false;
   commanderMatches = new Map();
+  commanderPairings = null;
+  commanderView = "list";
   resetAnalyticsCache();
   if (typeof resetThemeTabSupport === "function") resetThemeTabSupport();
   if (typeof resetBottomUpTab === "function") resetBottomUpTab();
@@ -217,6 +222,12 @@ function renderCommandersTab() {
   const pauper = isPauperFormat();
   const scanned = pauper ? unrankedScanDone : ownedCommanders.length > 0;
 
+  if (!pauper && commanderView === "pairings" && commanderPairings) {
+    panel.innerHTML = renderPairingsView();
+    if (commanderScanBusy) setCommanderScanBusy(true);
+    return;
+  }
+
   if (!scanned) {
     panel.innerHTML = pauper
       ? `
@@ -232,6 +243,8 @@ function renderCommandersTab() {
         <p>Rank the commanders in your collection against EDHREC's most-played
         lists. This reads 32 pages once and caches them for a week.</p>
         <button id="rankCommandersBtn" type="button">Rank my commanders</button>
+        <p>Or see every Partner and Background pairing you own.</p>
+        <button id="findPairingsBtn" type="button">Show my pairings</button>
       </div>
     `;
     return;
@@ -244,36 +257,7 @@ function renderCommandersTab() {
   const canScanUnranked = pauper ? false : filtered && !unrankedScanDone;
 
   panel.innerHTML = `
-    <div class="color-filter">
-      ${["C", "W", "U", "B", "R", "G"].map((color) => `
-        <button
-          class="color-pip pip-${color} color-pip-btn ${commanderColorFilter.has(color) ? "active" : ""}"
-          type="button"
-          data-filter-color="${color}"
-          title="${color === "C" ? "Colorless commanders" : `Commanders whose identity is exactly this${commanderColorFilter.size ? " combination" : ""}`}"
-        >${color}</button>
-      `).join("")}
-      ${filtered ? `<button id="clearColorFilterBtn" class="clear-filter-btn" type="button">Clear</button>` : ""}
-    </div>
-
-    <div class="color-count-filter">
-      ${[
-        { count: 0, label: "Colorless" },
-        { count: 1, label: "Mono" },
-        { count: 2, label: "Dual" },
-        { count: 3, label: "Tri" },
-        { count: 4, label: "4-Color" },
-        { count: 5, label: "5-Color" }
-      ].map(({ count, label }) => `
-        <button
-          class="color-count-btn ${commanderColorCountFilter.has(count) ? "active" : ""}"
-          type="button"
-          data-filter-count="${count}"
-          title="${label}-color commanders"
-        >${label}</button>
-      `).join("")}
-      ${commanderColorCountFilter.size > 0 ? `<button id="clearColorCountFilterBtn" class="clear-filter-btn" type="button">Clear</button>` : ""}
-    </div>
+    ${renderCommanderColorFilters()}
 
     <div class="commanders-toolbar">
       <div class="commanders-count">
@@ -282,6 +266,7 @@ function renderCommandersTab() {
           : `${rows.length} commanders owned`} &middot; ${checkedCount} checked
       </div>
       <div class="commanders-actions">
+        ${pauper ? "" : `<button id="findPairingsBtn" type="button">Pairings</button>`}
         ${canScanUnranked ? `<button id="findUnrankedBtn" type="button">Find unranked commanders</button>` : ""}
         <button id="sortCommandersBtn" type="button">
           Sort by ${commanderSortMode === "match" ? "EDHREC decks" : "match"}
@@ -324,6 +309,131 @@ function renderCommandersTab() {
   `;
 
   if (commanderScanBusy) setCommanderScanBusy(true);
+}
+
+// The color and color-count filter rows, shared by the commander list and the pairings view (which filters on the
+// pair's combined identity).
+function renderCommanderColorFilters() {
+  const filtered = commanderColorFilter.size > 0;
+  return `
+    <div class="color-filter">
+      ${["C", "W", "U", "B", "R", "G"].map((color) => `
+        <button
+          class="color-pip pip-${color} color-pip-btn ${commanderColorFilter.has(color) ? "active" : ""}"
+          type="button"
+          data-filter-color="${color}"
+          title="${color === "C" ? "Colorless commanders" : `Commanders whose identity is exactly this${commanderColorFilter.size ? " combination" : ""}`}"
+        >${color}</button>
+      `).join("")}
+      ${filtered ? `<button id="clearColorFilterBtn" class="clear-filter-btn" type="button">Clear</button>` : ""}
+    </div>
+
+    <div class="color-count-filter">
+      ${[
+        { count: 0, label: "Colorless" },
+        { count: 1, label: "Mono" },
+        { count: 2, label: "Dual" },
+        { count: 3, label: "Tri" },
+        { count: 4, label: "4-Color" },
+        { count: 5, label: "5-Color" }
+      ].map(({ count, label }) => `
+        <button
+          class="color-count-btn ${commanderColorCountFilter.has(count) ? "active" : ""}"
+          type="button"
+          data-filter-count="${count}"
+          title="${label}-color commanders"
+        >${label}</button>
+      `).join("")}
+      ${commanderColorCountFilter.size > 0 ? `<button id="clearColorCountFilterBtn" class="clear-filter-btn" type="button">Clear</button>` : ""}
+    </div>
+
+  `;
+}
+
+// Pairings view: every owned commander that takes a second commander, each with the owned cards it can pair with. The
+// color filters apply to the pair's combined identity. A pair's EDHREC deck count shows only when EDHREC's color pages
+// rank that pair (most pairs are not ranked).
+function renderPairingsView() {
+  const groups = (commanderPairings || [])
+    .map((group) => ({ ...group, mates: group.mates.filter((mate) => matchesColorFilter(mate)) }))
+    .filter((group) => group.mates.length);
+  const pairCount = groups.reduce((sum, group) => sum + group.mates.length, 0);
+
+  return `
+    ${renderCommanderColorFilters()}
+
+    <div class="commanders-toolbar">
+      <div class="commanders-count">${groups.length} commanders with a partner or Background &middot; ${pairCount} owned pairings</div>
+      <div class="commanders-actions">
+        <button id="showCommandersBtn" type="button">Back to commanders</button>
+      </div>
+    </div>
+
+    ${groups.length ? "" : `<p class="commanders-empty">No owned pairing has that color identity.</p>`}
+    ${groups.map((group) => `
+      <details class="pairing-group">
+        <summary>
+          <span class="commander-name">${escapeHtml(group.name)}</span>
+          <span class="col-colors">${renderCommanderPips(group.colors)}</span>
+          <span class="commander-tag">${escapeHtml(group.label || "pair")}</span>
+          <span class="pairing-count">${group.mates.length} owned</span>
+        </summary>
+        <table class="commanders-table">
+          <thead>
+            <tr><th>${escapeHtml(group.label || "Pair")}</th><th class="col-colors">Pair colors</th><th class="col-decks">EDHREC decks</th><th>What it adds</th><th class="col-build"></th></tr>
+          </thead>
+          <tbody>
+            ${group.mates.map((mate) => `
+              <tr>
+                <td><span class="commander-name">${escapeHtml(mate.name)}</span></td>
+                <td class="col-colors">${renderCommanderPips(mate.colors)}</td>
+                <td class="col-decks">${mate.decks ? mate.decks.toLocaleString() : `<span class="match-empty">&mdash;</span>`}</td>
+                <td class="pairing-text">${escapeHtml(mate.text.length > 160 ? mate.text.slice(0, 157) + "..." : mate.text)}</td>
+                <td class="col-build">
+                  <button class="build-btn" type="button" data-pair-lead="${escapeHtml(group.name)}" data-pair-mate="${escapeHtml(mate.name)}">Build</button>
+                </td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </details>
+    `).join("")}
+  `;
+}
+
+// Pairings need every owned card's data (which cards take a partner, which are Backgrounds). That is the same
+// collection read Find unranked commanders does: about 84 Scryfall requests cold, free after a build.
+async function findOwnedPairings() {
+  const collection = getOwnedCollection();
+  if (!collection || commanderScanBusy) return;
+  if (commanderPairings) {
+    commanderView = "pairings";
+    renderCommandersTab();
+    return;
+  }
+
+  setCommanderScanBusy(true);
+  try {
+    updateProgress(5, "Reading your collection...");
+    const cardData = await fetchCardDataBatchWithProgress(
+      collection.uniqueRawNames,
+      (done, total) => {
+        updateProgress(5 + Math.floor((done / Math.max(total, 1)) * 90), "Reading your collection...", `${done} / ${total}`);
+      }
+    );
+    commanderPairings = findOwnedCommanderPairings(collection, cardData, ownedCommanders);
+    commanderView = "pairings";
+    const pairCount = commanderPairings.reduce((sum, group) => sum + group.mates.length, 0);
+    updateProgress(100, "Pairings found", `${commanderPairings.length} commanders, ${pairCount} pairings`);
+    if (!commanderPairings.length) showToast("No owned commander with Partner or a Background pairing was found.");
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || "Unable to read the collection for pairings.");
+    updateProgress(0, "Error");
+  } finally {
+    setCommanderScanBusy(false);
+    renderCommandersTab();
+  }
 }
 
 async function rankOwnedCommanders() {
@@ -517,6 +627,24 @@ function bindCommandersTab() {
   panel.addEventListener("click", (event) => {
     if (event.target.id === "rankCommandersBtn") {
       rankOwnedCommanders();
+      return;
+    }
+
+    if (event.target.id === "findPairingsBtn") {
+      findOwnedPairings();
+      return;
+    }
+
+    if (event.target.id === "showCommandersBtn") {
+      commanderView = "list";
+      renderCommandersTab();
+      return;
+    }
+
+    const pairLead = event.target.dataset?.pairLead;
+    if (pairLead) {
+      const mate = event.target.dataset.pairMate;
+      buildFromCommander({ name: `${pairLead} + ${mate}`, names: [pairLead, mate], isPair: true });
       return;
     }
 
