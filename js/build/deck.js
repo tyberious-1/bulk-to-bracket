@@ -138,6 +138,20 @@ function supportRoleFit(source, role) {
 // plan: on six builder-vs-YouTube pairs the role counts were alike, but the YouTube lists' role cards were creatures
 // far more often (Doran 17 of 23 against the builder's 8 of 24). A role candidate that is on the plan (a theme card or
 // one linked to the commander's center) gets this much on top, and both pools compete on one scale.
+// Lands are the reliable mana (user, 2026-11-25): removal rarely targets a land, while mana creatures and rocks die to
+// wipes and artifact removal. Ramp that puts a land onto the battlefield leaves a land behind, so it ranks above other
+// ramp by LAND_RAMP_BONUS, and a deck whose pool holds fewer than LAND_RAMP_MIN such cards plays LAND_RAMP_SHORT_EXTRA
+// more lands (up to LAND_COUNT_MAX).
+const LAND_RAMP_BONUS = 8;
+const LAND_RAMP_MIN = 5;
+const LAND_RAMP_SHORT_EXTRA = 2;
+const LAND_COUNT_MAX = 40;
+function isLandRamp(card) {
+  const text = getCardText(card);
+  return /onto the battlefield/.test(text)
+    && /search your library for [^.]*\b(?:lands?|forests?|plains|islands?|swamps?|mountains?|deserts?)\b[^.]*onto the battlefield|put (?:a|up to (?:one|two)|that|those) (?:basic )?land cards? [^.]*onto the battlefield|put (?:it|them|that card|those cards) onto the battlefield[^.]*\bif (?:it's|they're) a land/.test(text);
+}
+
 const PLAN_ROLE_BONUS = 12;
 function isPlanCard(card) {
   return Boolean(card && (card.themeMatch || card.planTagged || Number(card.centerWeight || 0) >= CENTER_LINK_KEEP));
@@ -448,7 +462,7 @@ function buildDeckFromScoredPool(
   const recommendedLandCount = recommendLandCount(commanderColors);
   const combinedPool = [...themeFallbackPool, ...genericFallbackPool];
   const pipEstimate = estimateLandCount(combinedPool, commanderColors, roleTargets, modePrefs) || recommendedLandCount;
-  const targetLandCount = resolveLandCount(pipEstimate, edhrecTypeAverages);
+  let targetLandCount = resolveLandCount(pipEstimate, edhrecTypeAverages);
   const targetNonlandCount = deckSize - targetLandCount;
 
   const plan = buildRoleTargetPlan(edhrecTypeAverages, strategyProfile, targetLandCount, roleTargets, commanderThemes, deckSize, modePrefs);
@@ -597,6 +611,10 @@ function buildDeckFromScoredPool(
       // No plan tie: the score is mostly noise (spells score ~5 below creatures for no reason), so rank by job fit.
       if (isSupportOnly(card)) adjusted = supportRoleFit(getRedundancySource(card), role) * 2 + adjusted / 10;
       else if (isPlanCard(card)) adjusted += PLAN_ROLE_BONUS;
+      if (role === "ramp" && !isSupportOnly(card)) {
+        const source = getRedundancySource(card);
+        if (source && isLandRamp(source)) adjusted += LAND_RAMP_BONUS;
+      }
 
       const bucket = getDeckTypeBucket(card.type || card.type_line || "");
       const typeRule = typePlan?.buckets?.[bucket];
@@ -890,6 +908,33 @@ function buildDeckFromScoredPool(
         addCard(cand, source || getFallbackSource(cand));
         swaps++;
       }
+    }
+  }
+
+  // Lands for a deck short on land ramp (2026-11-25): counted in the finished deck, not the pool (a pool can hold Lander
+  // makers the deck never took). The weakest cards with no role, no plan tie and no fun-pick status make room.
+  // Only a Commander-sized mana base (30+ lands): small fixture decks have no ramp at all.
+  if (!modePrefs.minimalBuild && targetLandCount >= 30) {
+    const landRampInDeck = deck.filter((entry) => { const src = getRedundancySource(entry); return src && isLandRamp(src); }).length;
+    // The deck ramps, but mostly with what removal can take (rocks, mana creatures, Treasure): red, blue, white and black
+    // have little else (user, 2026-11-25). A deck with no ramp at all is left alone.
+    const rampInDeck = deck.filter((entry) => entry.role === "ramp" || (entry.roles || []).includes("ramp")).length;
+    let extra = rampInDeck > 0 && landRampInDeck < LAND_RAMP_MIN ? Math.min(LAND_RAMP_SHORT_EXTRA, LAND_COUNT_MAX - targetLandCount) : 0;
+    while (extra > 0) {
+      let victimIndex = -1;
+      for (let i = 0; i < deck.length; i += 1) {
+        const entry = deck[i];
+        if (entry.source === "fun-pick" || isPlanCard(entry)) continue;
+        if (["ramp", "draw", "removal", "wipe"].includes(entry.role)) continue;
+        if (victimIndex < 0 || Number(entry.score || 0) < Number(deck[victimIndex].score || 0)) victimIndex = i;
+      }
+      if (victimIndex < 0) break;
+      releaseDeckPick(deck[victimIndex]);
+      adjustRedundancy(deck[victimIndex], -1);
+      usedNames.delete(normalizeCardName(deck[victimIndex].name));
+      deck.splice(victimIndex, 1);
+      targetLandCount += 1;
+      extra -= 1;
     }
   }
 
