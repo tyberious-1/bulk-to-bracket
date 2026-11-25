@@ -292,6 +292,11 @@ function detectTribalThemes(cards) {
 const DERIVED_THEME_MAX = 5;
 const DERIVED_THEME_MIN_OWNED = 5;
 
+// Tags that only say the commander itself has a keyword, or that duplicate a broader tag (see deriveCommanderThemes).
+// No "artifact": every deck has artifacts, so it is never a theme (fallback-themes test, Thorin).
+const CENTER_CARD_TYPE_THEMES = { enchantment: "enchantments", instant: "spellslinger", sorcery: "spellslinger", saga: "sagas", shrine: "shrines", lesson: "lessons", vehicle: "vehicles", equipment: "voltron", aura: "voltron" };
+const COMMANDER_SELF_KEYWORD_TAGS = new Set(["flying", "deathtouch", "haste", "flash", "defenders", "gowide", "countersmatter", "opponent draw", "legends"]);
+
 function deriveCommanderThemes(commanderTexts, collectionData, allOwnedCardData, commanderColors) {
   const texts = (commanderTexts || []).filter(Boolean);
   if (!texts.length) return [];
@@ -309,18 +314,50 @@ function deriveCommanderThemes(commanderTexts, collectionData, allOwnedCardData,
     else if (rec.kind === "term" && rec.term && !rec.thin) terms.push(rec.term);
     else if (rec.kind === "exchange" && /^(?:creatures?|tokens?|permanents?|artifacts? or creatures?|creatures? or artifacts?)$/.test(String(rec.pays || ""))) plays.push("sacrifice");
     else if (rec.kind === "event" && rec.event === "token-created") plays.push("tokens");
+    // A card type the commander names that is not a creature type ("artifact spells", "instant or sorcery").
+    else if (rec.kind === "type" && CENTER_CARD_TYPE_THEMES[rec.type]) plays.push(CENTER_CARD_TYPE_THEMES[rec.type]);
+    else if (rec.kind === "attach") plays.push("voltron");
+    else if (rec.kind === "mechanic" && /^(?:earth|fire|water|air)bend/.test(String(rec.name || ""))) plays.push(String(rec.name).replace(/bend(?:ing)?$/, "bending"));
   }
   const lowered = texts.join("\n").toLowerCase();
   // "Tokens", not "Go Wide": the local matcher reads a theme by its words on cards, and no card says "go wide".
   if (/\b(?:other )?creatures you control get \+\d+\/\+\d+/.test(lowered)) plays.push("tokens");
   const out = [];
   const seen = new Set();
-  for (const group of [types, keywords, terms, plays]) {
+  // Last resort, when the center reader found no plan: what the theme readers see in the commander's own words
+  // (detectCardTags on its text alone, not its type line or stats). Measured 2026-11-25 over 700 owned commanders: 510
+  // derived no theme, so a new card with no EDHREC themes (Sarcophagus) fell back to counting the pool. A keyword the
+  // commander merely has (flying, haste) is not a plan for the 99.
+  const read = [];
+  for (const text of texts) {
+    for (const tag of detectCardTags({ text, type: "", raw: {} })) {
+      if (!COMMANDER_SELF_KEYWORD_TAGS.has(tag)) read.push(tag);
+    }
+  }
+  // Support is counted by words on the cards and by theme tags: no card prints "voltron" or "spellslinger".
+  let ownedTags = null;
+  const supportFor = (theme) => {
+    const names = findLocalThemeMatches(theme, collectionData, allOwnedCardData, commanderColors);
+    if (!ownedTags) {
+      ownedTags = [];
+      for (const entry of getCollectionEntries(collectionData)) {
+        const card = allOwnedCardData.get(entry.normalizedName);
+        if (!card || getCardType(card).includes("land") || !legalForCommander(card.colors, commanderColors, card)) continue;
+        ownedTags.push([entry.normalizedName, new Set(detectCardTags(card).map(normalizeThemeName))]);
+      }
+    }
+    const aliases = getThemeAliases(theme).map(normalizeThemeName);
+    for (const [name, tags] of ownedTags) if (aliases.some((alias) => tags.has(alias))) names.add(name);
+    return names.size;
+  };
+  for (const group of [types, keywords, terms, plays, read]) {
+    // The text reading is a last resort: only when the center reader's themes found no support.
+    if (group === read && out.length) break;
     const supported = [];
     for (const theme of group) {
       if (seen.has(theme)) continue;
       seen.add(theme);
-      const owned = findLocalThemeMatches(theme, collectionData, allOwnedCardData, commanderColors).size;
+      const owned = supportFor(theme);
       if (owned >= DERIVED_THEME_MIN_OWNED) supported.push({ theme, owned });
     }
     supported.sort((a, b) => b.owned - a.owned);

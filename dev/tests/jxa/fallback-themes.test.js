@@ -75,9 +75,11 @@ runSuite("fallback-themes", {
     assertTrue(!themes.includes("humans"), "a type the commander does not name is never a theme");
   },
 
-  "deriveCommanderThemes: a type the collection barely owns is left out, so the caller can fall back": function () {
+  "deriveCommanderThemes: a type the collection barely owns is left out": function () {
+    // Since 2026-11-25 the commander's text is read by the theme readers when nothing else is supported, so the result
+    // need not be empty (the pool-count fallback it used to leave room for gave every such commander the same tribes).
     const { collection, data } = ownedFixture([...many(3, minotaur), ...many(20, human)]);
-    assertEqual(deriveCommanderThemes(SETHRON, collection, data, ["R"]), []);
+    assertTrue(!deriveCommanderThemes(SETHRON, collection, data, ["R"]).includes("minotaurs"), "three Minotaurs are not a theme");
   },
 
   "deriveCommanderThemes: a commander the reader cannot read yields nothing": function () {
