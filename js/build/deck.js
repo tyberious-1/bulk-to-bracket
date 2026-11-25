@@ -146,6 +146,8 @@ const LAND_RAMP_BONUS = 8;
 const LAND_RAMP_MIN = 5;
 const LAND_RAMP_SHORT_EXTRA = 2;
 const LAND_COUNT_MAX = 40;
+const LAND_CURVE_STEP_1 = 3.0;
+const LAND_CURVE_STEP_2 = 3.4;
 function isLandRamp(card) {
   const text = getCardText(card);
   return /onto the battlefield/.test(text)
@@ -931,12 +933,19 @@ function buildDeckFromScoredPool(
   // Lands for a deck short on land ramp (2026-11-25): counted in the finished deck, not the pool (a pool can hold Lander
   // makers the deck never took). The weakest cards with no role, no plan tie and no fun-pick status make room.
   // Only a Commander-sized mana base (30+ lands): small fixture decks have no ramp at all.
-  if (!modePrefs.minimalBuild && targetLandCount >= 30) {
+  // and only when every spell slot was filled: a short deck already gets lands for the gap.
+  if (!modePrefs.minimalBuild && targetLandCount >= 30 && deck.length >= targetNonlandCount) {
     const landRampInDeck = deck.filter((entry) => { const src = getRedundancySource(entry); return src && isLandRamp(src); }).length;
     // The deck ramps, but mostly with what removal can take (rocks, mana creatures, Treasure): red, blue, white and black
     // have little else (user, 2026-11-25). A deck with no ramp at all is left alone.
     const rampInDeck = deck.filter((entry) => entry.role === "ramp" || (entry.roles || []).includes("ramp")).length;
-    let extra = rampInDeck > 0 && landRampInDeck < LAND_RAMP_MIN ? Math.min(LAND_RAMP_SHORT_EXTRA, LAND_COUNT_MAX - targetLandCount) : 0;
+    // One land for ramp that removal can take, and one or two more as the deck's own curve rises (a 2.3-mana deck needs
+    // fewer lands than a 3.4-mana one; Fynn went to 40 on the ramp rule alone).
+    const nonlandCmcs = deck.map((entry) => Number(curveCmcOf(entry)) || 0);
+    const averageCmc = nonlandCmcs.length ? nonlandCmcs.reduce((sum, v) => sum + v, 0) / nonlandCmcs.length : 0;
+    const removableRamp = rampInDeck > 0 && landRampInDeck < LAND_RAMP_MIN ? 1 : 0;
+    const curveNeed = (averageCmc >= LAND_CURVE_STEP_1 ? 1 : 0) + (averageCmc >= LAND_CURVE_STEP_2 ? 1 : 0);
+    let extra = Math.min(LAND_RAMP_SHORT_EXTRA, removableRamp + curveNeed, LAND_COUNT_MAX - targetLandCount);
     while (extra > 0) {
       let victimIndex = -1;
       for (let i = 0; i < deck.length; i += 1) {
