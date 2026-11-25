@@ -645,6 +645,8 @@ function describeEventProducers(deck, allOwnedCardData, needs, limit) {
 }
 
 // "Crew 3" -> 3. Vehicles with a low crew number are easier to use.
+const PAYLOAD_BODY_BONUS_CAP = 5;
+
 function getCrewCost(card) {
   const match = getCardText(card).match(/\bcrew (\d+)\b/);
   return match ? Number(match[1]) : null;
@@ -1146,6 +1148,12 @@ function getEngineBonus(card, needs) {
     else if (crew !== null && crew <= 3) bonus += 2;
     else if (crew !== null && crew >= 5) bonus -= Math.min(3, crew - 4);  // a nudge, not a cap: crew is met by several creatures
     if (/when(?:ever)? [^.]*(?:enters|attacks)/.test(getCardText(card))) bonus += 2;
+    // A payload the commander returns from the graveyard is put into play, never cast (2026-11-25): what it does there
+    // is its value, so a bigger body counts (Thundersteel Colossus, 7/7, scored below cheap vehicles on cost alone).
+    if (needs.returnsFromGraveyard) {
+      const body = parseInt((card.raw || {}).power, 10);
+      if (Number.isFinite(body) && body >= 4) bonus += Math.min(PAYLOAD_BODY_BONUS_CAP, body - 3);
+    }
   }
 
   // Devotion counts permanents only: an instant or sorcery is never on the battlefield.
