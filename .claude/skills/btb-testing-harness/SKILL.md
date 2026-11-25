@@ -11,11 +11,11 @@ description: Use when running or writing JXA test suites (dev/tests/jxa), choosi
 
 ## Testing
 
-Tests live in `dev/tests/jxa/*.test.js` and run under `osascript -l JavaScript`
-(JXA) via `dev/tests/jxa/run.sh`, which concatenates `helpers.js` + source files
-+ test file and runs the result — this is wired up regardless of Node being
-available on this machine, so keep using it rather than switching the test
-runner to `node`:
+Tests live in `dev/tests/jxa/*.test.js` and run via `dev/tests/jxa/run.sh`, which concatenates `helpers.js` + source files
++ test file and runs the result under `osascript -l JavaScript` on macOS. On Linux (no osascript) it falls back to
+`node dev/tests/jxa/run-node.js` with the same files: the node path replaces helpers.js's JXA-only `jxaPrint` with a
+`process.stdout` one, runs the files in `vm`, and exits 1 on `SUITE FAILED` or a thrown error. Keep the JXA path as the
+macOS default; `run_all.sh` prints `CRASHED (exit N)` for a suite that exits nonzero without a SUITE line:
 ```bash
 dev/tests/jxa/run.sh js/constants.js js/utils/text.js js/utils/cards.js js/format.js js/analysis/themes.js js/analysis/abilities.js js/analysis/scoring.js js/analysis/engines.js dev/tests/jxa/scoring.test.js
 ```
@@ -71,7 +71,7 @@ wordings). The `2026-10-15-*` files are the older 56-build set on the old collec
 engine classes over the owned collection for pattern tuning. `ability_eval.js` prints
 label coverage over the owned collection (`coverage`, `vocab`), how single cards read
 (`case`), and the graveyard-veto list (`vetoes`). `event_producers.js` prints a commander's events and the owned cards that produce
-each one (the lists the player reads before event scoring is written). `bottom_up_measure.js` (archetype separation and thin-collection coverage) and `bottom_up_compare.js` (bottom-up midrange vs a commander-first baseline) run like `dump_decks.js`. `browser_smoke.py` builds one deck through the real `index.html` or `pauper.html` in headless Chrome with the network served from the harness fixtures, and prints any JavaScript errors and the rendered engine report line. `bottom_up_smoke.py` does the same for the Bottom-Up tab: it clicks the suggestion scan, builds a Control deck, reads the Reliability panel and the result notes, and uses an owned commander (EDHREC budget pages are mocked from owned cards).
+each one (the lists the player reads before event scoring is written). `bottom_up_measure.js` (archetype separation and thin-collection coverage) and `bottom_up_compare.js` (bottom-up midrange vs a commander-first baseline) run like `dump_decks.js`. `browser_smoke.py` builds one deck through the real `index.html` or `pauper.html` in headless Firefox (Linux, on PATH; Google Chrome on macOS if Firefox is absent) with the network served from the harness fixtures, and prints any JavaScript errors and the rendered engine report line. `bottom_up_smoke.py` does the same for the Bottom-Up tab (both use `smoke_browser.py`: a 127.0.0.1 http server with an allowlist of app files and the two fixtures, a throwaway profile, and the page POSTs its result back): it clicks the suggestion scan, builds a Control deck, reads the Reliability panel and the result notes, and uses an owned commander (EDHREC budget pages are mocked from owned cards).
 
 `expert_recall.js` (2026-11-17) reads a commander with the reader and reports which of an expert-built list's picks link and which do not (usage in its header; lists in git-ignored `expert_lists/decks.js`; findings in `dev/docs/superpowers/specs/2026-11-17-expert-list-blindspots.md`). Trap: any ad-hoc node `vm` loader must take its file list from `build_harness.sh` up to `engines.js`, never by hand. Leaving out `js/analysis/catalog-data.js` (it defines `CATALOG_CREATURE_TYPES`) makes tribe lines like "Other Bears you control get +2/+2" read as nothing, silently; `ability_eval.js` still has a hand-written list.
 

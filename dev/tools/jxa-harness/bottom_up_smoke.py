@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Browser smoke test for the Bottom-Up Build tab: loads index.html in headless Chrome with a stand-in
+"""Browser smoke test for the Bottom-Up Build tab: loads index.html in headless Firefox with a stand-in
 collection made from dev/tools/jxa-harness/owned_raw.json (nothing leaves this machine, your CSV is not
 read), clicks through the tab, and prints what the page rendered.
 
@@ -9,33 +9,32 @@ Steps it takes: open the Bottom-Up tab, "Suggest decks from my collection", buil
 read the Reliability panel and result notes, "Use as commander" on the first owned fit, then a hand-picked Vampire + sacrifice and death layer build. Every
 EDHREC budget page is answered with a made-up list of owned cards of the subtype's tribe (so the budget
 tiebreak path runs); Scryfall and everything else comes from the fixtures. Prints any JavaScript errors.
-Needs Google Chrome in /Applications.
+Needs headless Firefox on PATH (or Google Chrome in /Applications on macOS).
 """
-import html as htmlmod, json, os, re, subprocess, sys, tempfile
+import json, os, re, sys
+from smoke_browser import run_page
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 INJECT = r"""
 <script>
 (async () => {
-  const R = document.createElement("pre"); R.id = "__result"; document.body.appendChild(R);
   const errors = [];
   window.addEventListener("error", (e) => errors.push(String(e.message)));
   window.addEventListener("unhandledrejection", (e) => errors.push("rejection: " + String(e.reason && e.reason.message || e.reason)));
-  const done = (obj) => { R.textContent = JSON.stringify(obj); };
+  const post = window.fetch.bind(window);
+  const done = (obj) => { post("/__result", { method: "POST", body: JSON.stringify(obj) }); };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const waitFor = async (test, ms) => { const t = Date.now(); while (Date.now() - t < ms) { if (test()) return true; await sleep(500); } return false; };
   // textContent, not innerText: a collapsed <details> renders nothing, and the panel starts collapsed.
   const text = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : null);
   try {
-    const base = "file://ROOT";
+    const base = "";
     const owned = await (await fetch(base + "dev/tools/jxa-harness/owned_raw.json")).json();
     const prefetch = await (await fetch(base + "dev/tools/jxa-harness/prefetch_data.json")).json();
     const realFetch = window.fetch.bind(window);
     const budgetRequests = [];
     window.fetch = function (url, opts) {
       const u = String(url);
-      if (u.startsWith("file:")) return realFetch(url, opts);
+      if (new URL(u, location.href).origin === location.origin) return realFetch(url, opts);
       const budget = u.match(/\/pages\/tags\/([^/]+)\/budget\.json/);
       if (budget) {
         budgetRequests.push(budget[1]);
@@ -130,20 +129,9 @@ INJECT = r"""
 
 def main():
     page = sys.argv[1] if len(sys.argv) > 1 else "index.html"
-    root = ROOT + "/"
-    page_html = open(root + page).read()
-    inject = INJECT.replace("ROOT", root)
-    page_html = page_html.replace("<head>", '<head><base href="file://%s">' % root, 1).replace("</body>", inject + "</body>", 1)
-    with tempfile.TemporaryDirectory() as tmp:
-        test = os.path.join(tmp, "smoke.html")
-        open(test, "w").write(page_html)
-        out = subprocess.run([CHROME, "--headless=new", "--disable-gpu", "--no-first-run", "--user-data-dir=" + os.path.join(tmp, "profile"),
-                              "--allow-file-access-from-files", "--virtual-time-budget=400000", "--dump-dom", "file://" + test],
-                             capture_output=True, text=True, timeout=900).stdout
-    m = re.search(r'<pre id="__result">(.*?)</pre>', out, re.S)
-    if not m:
-        sys.exit("no result: the page did not finish (is Google Chrome installed?)")
-    d = json.loads(htmlmod.unescape(m.group(1)))
+    d = run_page(page, INJECT, 900)
+    if d is None:
+        sys.exit("no result: the page did not finish (is Firefox installed?)")
     if not d.get("ok"):
         print("failure:", d.get("error"), "| errors:", d.get("errors"))
         sys.exit(1)

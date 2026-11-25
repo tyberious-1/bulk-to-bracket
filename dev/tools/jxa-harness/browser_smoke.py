@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Browser smoke test: builds one deck through the real page (index.html or pauper.html) in headless
-Chrome, with every network call served from the harness fixtures (nothing leaves this machine, and your
+Firefox, with every network call served from the harness fixtures (nothing leaves this machine, and your
 CSV is not read; a stand-in collection is made from dev/tools/jxa-harness/owned_raw.json).
 
 Usage: python3 dev/tools/jxa-harness/browser_smoke.py index.html "Greasefang, Okiba Boss"
@@ -10,23 +10,22 @@ Usage: python3 dev/tools/jxa-harness/browser_smoke.py index.html "Greasefang, Ok
        python3 dev/tools/jxa-harness/browser_smoke.py index.html "Kaza, Roil Chaser" --combo   (also drives the Single / Combo theme picker)
 
 Prints: whether the build finished, any JavaScript errors, how many export lines it made, and the
-"Engine enablers ..." report line as the page rendered it. Needs Google Chrome in /Applications.
+"Engine enablers ..." report line as the page rendered it. Needs headless Firefox on PATH (or Google Chrome in /Applications on macOS).
 The commander must be a card in the fixtures (owned_raw.json or prefetch_data.json commanderCards).
 """
-import html as htmlmod, json, os, re, subprocess, sys, tempfile
+import json, os, re, sys
+from smoke_browser import run_page
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 INJECT = r"""
 <script>
 (async () => {
-  const R = document.createElement("pre"); R.id = "__result"; document.body.appendChild(R);
   const errors = [];
   window.addEventListener("error", (e) => errors.push(String(e.message)));
   window.addEventListener("unhandledrejection", (e) => errors.push("rejection: " + String(e.reason && e.reason.message || e.reason)));
-  const done = (obj) => { R.textContent = JSON.stringify(obj); };
+  const post = window.fetch.bind(window);
+  const done = (obj) => { post("/__result", { method: "POST", body: JSON.stringify(obj) }); };
   try {
-    const base = "file://ROOT";
+    const base = "";
     const owned = await (await fetch(base + "dev/tools/jxa-harness/owned_raw.json")).json();
     const prefetch = await (await fetch(base + "dev/tools/jxa-harness/prefetch_data.json")).json();
     const realFetch = window.fetch.bind(window);
@@ -35,7 +34,7 @@ INJECT = r"""
     for (const r of Object.values(prefetch.commanderCards)) byName.set(r.name.toLowerCase(), r);
     window.fetch = function (url, opts) {
       const u = String(url);
-      if (u.startsWith("file:")) return realFetch(url, opts);
+      if (new URL(u, location.href).origin === location.origin) return realFetch(url, opts);
       const page = prefetch.edhrecPages[u];
       if (page !== undefined) return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(page) });
       if (u.includes("api.scryfall.com/cards/named")) {
@@ -134,24 +133,14 @@ def main():
     if len(args) != 2:
         sys.exit(__doc__)
     page, commander = args
-    root = ROOT + "/"
-    page_html = open(root + page).read()
-    inject = INJECT.replace("ROOT", root).replace("COMMANDER", commander.replace('"', ""))
+    inject = INJECT.replace("COMMANDER", commander.replace('"', ""))
     if toggle:
         inject = "<script>window.__SMOKE_TOGGLE = true;</script>" + inject
     if combo:
         inject = "<script>window.__SMOKE_COMBO = true;</script>" + inject
-    page_html = page_html.replace("<head>", '<head><base href="file://%s">' % root, 1).replace("</body>", inject + "</body>", 1)
-    with tempfile.TemporaryDirectory() as tmp:
-        test = os.path.join(tmp, "smoke.html")
-        open(test, "w").write(page_html)
-        out = subprocess.run([CHROME, "--headless=new", "--disable-gpu", "--no-first-run", "--user-data-dir=" + os.path.join(tmp, "profile"),
-                              "--allow-file-access-from-files", "--virtual-time-budget=240000", "--dump-dom", "file://" + test],
-                             capture_output=True, text=True, timeout=600).stdout
-    m = re.search(r'<pre id="__result">(.*?)</pre>', out, re.S)
-    if not m:
-        sys.exit("no result: the page did not finish (is Google Chrome installed?)")
-    d = json.loads(htmlmod.unescape(m.group(1)))
+    d = run_page(page, inject, 600)
+    if d is None:
+        sys.exit("no result: the page did not finish (is Firefox installed?)")
     print("build finished:", d.get("ok"), "| JavaScript errors:", d.get("errors"), "| export lines:", d.get("exportLines"))
     print("engine line:", d.get("engineNote") or "none (this commander has no engine need)")
     for note in d.get("notes") or []:
