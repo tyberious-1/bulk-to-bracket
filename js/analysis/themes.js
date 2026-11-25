@@ -191,7 +191,10 @@ function getThemeAliases(theme) {
     "toughness matters": ["toughness matters"],
     "defenders": ["defenders", "toughness matters"],
     "power matters": ["power matters"],
-    "power": ["power matters"]
+    "power": ["power matters"],
+    "go wide": ["gowide", "tokens"],
+    "prison": ["hatebears"],
+    "counterspells": ["counterspells", "control"]
   };
 
   // Keys are written the way EDHREC prints a theme ("+1/+1 counters"), but the lookup uses the normalized name, which

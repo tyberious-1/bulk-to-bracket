@@ -60,7 +60,8 @@ function getThemeFitBonus(match) {
 // none of 23 backfilled slots going to a dragon out of the 35 legal ones owned.
 // Accidental sameness is what this penalty is for.
 function getCardRedundancyKeys(card, exemptTraits) {
-  const keys = new Set([...detectCardTags(card), ...getCardSubtypes(card)]);
+  // Theme-reader tags (keywords like flying) steer theme matching only; charging for them would penalize ordinary decks.
+  const keys = new Set([...detectCardTags(card).filter((tag) => !THEME_TEXT_READER_TAGS.has(tag)), ...getCardSubtypes(card)]);
   if (exemptTraits) {
     for (const trait of exemptTraits) keys.delete(trait);
   }

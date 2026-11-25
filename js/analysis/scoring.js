@@ -676,6 +676,81 @@ function getRoleContributions(card, isTribalDeck = false) {
   return SUPPORT_ROLES.filter((role) => cardMatchesRole(card, role, isTribalDeck));
 }
 
+// EDHREC themes that are a card's own words: a keyword, a mechanic or a kind of effect (2026-11-25). Each tag is the
+// theme's normalized name, so getThemeAliases finds it with no alias entry. Before this table, 224 of EDHREC's 421 themes
+// matched no owned card at all, and a commander whose plan named one (Flying, Exile, Anthems) could only take the cards
+// on EDHREC's own list. A pattern is tested against "type text", so a type word (Snow, Curse) reads too; a function gets (type, text).
+// These tags steer theme matching only; getCardRedundancyKeys leaves them out, so a deck's fifth flier is not "repeated".
+const THEME_TEXT_READERS = [
+  ["flying", /\bflying\b/],
+  ["deathtouch", /\bdeathtouch\b/],
+  ["haste", /\bhaste\b/],
+  ["flash", /\bflash\b/],
+  ["prowess", /\bprowess\b|\bwhenever you cast a noncreature spell\b/],
+  ["legends", /\blegendary\b/],
+  // Not the word alone: "target creature or planeswalker" is removal text on hundreds of cards.
+  ["planeswalkers", (type, text) => type.includes("planeswalker") || /\bloyalty\b|\bplaneswalkers? you control\b|\bplaneswalker spells? you cast\b|\bplaneswalker card\b/.test(text)],
+  ["commander matters", /\byour commanders?\b|\bcommander you own\b/],
+  ["multicolor matters", /\bmulticolored\b/],
+  ["lifedrain", /\b(?:opponent|player)s? loses? (?:\d+|x|that much) life\b|\bloses? life equal to\b/],
+  ["group slug", /\beach (?:opponent|player) loses (?:\d+|x) life\b|\bdamage to each (?:opponent|player)\b/],
+  ["self damage", /\bdamage to you\b|\byou lose (?:\d+|x|that much) life\b|\bpay (?:\d+|x)? ?life\b/],
+  ["pingers", /\bdeals? 1 damage to (?:any target|target|each opponent|each creature)/],
+  ["life exchange", /\bexchange (?:your )?life totals?\b|\blife total becomes\b/],
+  ["exile", /\bfrom exile\b|\bin exile\b|\bexiled (?:card|cards|with|this way)\b|\bcards? exiled\b/],
+  ["counterspells", /\bcounter (?:target|that|it|up to)\b[^.]*\b(?:spell|ability)\b|\bcounter it\b/],
+  ["bounce", /\bto (?:its|their) owner'?s'? hands?\b/],
+  ["fight", /\bfights?\b/],
+  ["land destruction", /\bdestroy (?:target|all|each|up to \w+ target)\b[^.]*\blands?\b|\beach player sacrifices [^.]*\blands?\b/],
+  ["donate", /\b(?:target|an) (?:opponent|player) gains control\b/],
+  ["cycling", /\bcycling\b|\bwhenever you cycle\b/],
+  ["flashback", /\bflashback\b|\bcast [^.]*\bfrom your graveyard\b/],
+  ["self discard", /\bwhenever you discard\b|\bmadness\b|\b(?:as an additional cost to cast [^.]*, |, )?discard (?:a|two|three|x|your hand|up to|one or more|any number)\b/],
+  ["looting", /\bdraw (?:a card|two cards|x cards), then discard\b/],
+  ["scry", /\bscry\b/],
+  ["surveil", /\bsurveil\b/],
+  ["impulse draw", /\bexile the top [^.]*\.? ?[^.]*\byou may (?:play|cast)\b/],
+  ["topdeck", /\btop card of your library\b|\blook at the top\b|\bon top of your library\b/],
+  ["hand size", /\bmaximum hand size\b/],
+  ["energy", /\{e\}|\benergy counter/],
+  ["monarch", /\bmonarch\b/],
+  ["morph", /\bmorph\b|\bdisguise\b|\bmanifest\b|\bface[- ]down\b|\bturned face up\b/],
+  ["modular", /\bmodular\b/],
+  ["snow", /\bsnow\b/],
+  ["devotion", /\bdevotion\b/],
+  ["coin flip", /\bflip (?:a|one or more|two|that many) coins?\b/],
+  ["die roll", /\broll (?:a|one or more|two) (?:d\d+|six-sided die|die|dice)\b|\bwhenever you roll\b/],
+  ["chaos", /\bat random\b|\bflip a coin\b|\broll a d\d+\b/],
+  ["anthems", /\b(?:creatures|other [\w ]+?) you control get \+\d+\/\+\d+/],
+  ["attack triggers", /\bwhenever [^.]*\battacks\b/],
+  ["forced combat", /\battacks? each (?:combat|turn) if able\b|\bgoad/],
+  ["tap untap", /\b(?:un)?tap (?:target|all|each|another|up to|two|x)\b|\bbecomes (?:un)?tapped\b/],
+  ["activated abilities", /\bactivated abilit/],
+  ["triggered abilities", /\btriggered abilit|\btriggers an additional time\b/],
+  ["party", /\bparty\b/],
+  ["land animation", /\blands? [^.]*becomes? (?:a|an) [^.]*creature\b|\bland creatures?\b/],
+  ["experience counters", /\bexperience counter/],
+  ["charge counters", /\bcharge counter/],
+  ["time counters", /\btime counter|\bsuspend\b/],
+  ["suspend", /\bsuspend\b/],
+  ["rad counters", /\brad counter/],
+  ["connive", /\bconniv/],
+  ["devoid", /\bdevoid\b/],
+  ["foretell", /\bforetell/],
+  ["curses", /\bcurse\b/],
+  ["annihilator", /\bannihilator\b/],
+  ["shrines", /\bshrines?\b/],
+  ["blood", /\bblood tokens?\b/],
+  ["madness", /\bmadness\b/],
+  ["convoke", /\bconvoke\b/],
+  ["myriad", /\bmyriad\b/],
+  ["crime", /\bcommit(?:s|ted)? a crime\b/],
+  ["lessons", /\blessons?\b/],
+  ["deserts", /\bdeserts?\b/],
+  ["sneak attack", /\bput (?:a|an) [^.]*creature card from your hand onto the battlefield\b/]
+];
+const THEME_TEXT_READER_TAGS = new Set(THEME_TEXT_READERS.map(([tag]) => tag));
+
 function detectCardTags(card) {
   const tags = [];
   const text = getCardText(card);
@@ -781,6 +856,10 @@ function detectCardTags(card) {
   }
   if (/\b(?:greatest|total) power\b|\bpower (?:\d+|x) or (?:greater|more)\b|\bequal to (?:its|that creature's|the sacrificed creature's|the) power\b|\bwith power\b/.test(text)) {
     tags.push("power matters");
+  }
+
+  for (const [tag, reads] of THEME_TEXT_READERS) {
+    if (typeof reads === "function" ? reads(type, text) : reads.test(combined)) tags.push(tag);
   }
 
   if (
@@ -901,7 +980,8 @@ const DETECTABLE_CARD_TAGS = new Set([
   "airbending", "waterbending", "earthbending", "firebending",
   "sagas", "cascade", "amass", "mutate", "discover", "affinity", "populate",
   "the ring tempts you", "extra combats", "extra turns", "storm", "dungeon",
-  "dredge", "descend", "explore", "x spells", "burn", "discard", "etb", "clones"
+  "dredge", "descend", "explore", "x spells", "burn", "discard", "etb", "clones",
+  "toughness matters", "defenders", "power matters", ...THEME_TEXT_READER_TAGS
 ]);
 
 // strategyProfile's wants* flags are an ambient signal: what this
