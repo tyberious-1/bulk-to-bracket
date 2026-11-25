@@ -1075,6 +1075,21 @@ function getEdhrecReferenceBonus(edhrecCard, modePrefs) {
   return bonus;
 }
 
+// What EDHREC adds on top of a card's own score (2026-11-25): how much more this commander's decks play it than
+// other decks (synergy), how many of them play it at all (inclusion), and whether it sits in the average-deck list.
+// buildDeckFromScoredPool scores EDHREC candidates as scoreFallbackCard + mode fit + theme fit + this, so both pools
+// share one scale and EDHREC is evidence on top rather than a separate ranking (theme-fallback picks averaged 32-84
+// against EDHREC's 19-38 on the 13 builds, so every cross-pool comparison favoured the collection).
+function getEdhrecEvidenceScore(edhrecCard, modePrefs) {
+  if (!edhrecCard) return 0;
+  const inclusionRate = getEdhrecInclusionRate(edhrecCard);
+  const popularity = inclusionRate === null ? 0 : inclusionRate * EDHREC_CARD_INCLUSION_WEIGHT;
+  const synergy = Number(edhrecCard.synergy || 0) * EDHREC_CARD_SYNERGY_WEIGHT * (modePrefs?.synergyBias ?? 1);
+  const labels = Array.isArray(edhrecCard.labels) && edhrecCard.labels.length ? edhrecCard.labels : [edhrecCard.label || ""];
+  const averageDeck = labels.some((label) => /average decks?/.test(normalizeThemeName(label)));
+  return synergy + popularity + (averageDeck ? 6 : 0);
+}
+
 function cardMatchesThemeFocus(card, modePrefs) {
   if (!modePrefs.themeFocus) return true;
 

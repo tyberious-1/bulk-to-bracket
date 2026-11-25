@@ -390,6 +390,23 @@ function buildDeckFromScoredPool(
     else genericFallbackPool.push(candidate);
   }
 
+  // One scale for both pools (2026-11-25): an EDHREC candidate is scored the way a collection card is, plus what
+  // EDHREC knows about it (getEdhrecEvidenceScore). Before, the same on-theme card scored about 20 points higher from
+  // the collection than from EDHREC, so the per-source floors and every EDHREC-versus-collection choice compared two
+  // scales: Fynn's cheap EDHREC deathtouch creatures lost their slots to 4-6 mana collection ones.
+  if (options.unifiedScores !== false) {
+    for (const entry of scoredNonlands) {
+      const key = normalizeCardName(entry.name);
+      const card = allOwnedCardData.get(key);
+      if (!card) continue;
+      const fit = classifyBackfillModeFit(card, modePrefs, isTribalDeck);
+      entry.score = scoreFallbackCard(card, commanderThemes, strategyProfile, commanderColors, modePrefs)
+        + (fit.tier === 0 ? 12 : -10)
+        + getThemeFitBonus(themeCardNames.get(key) || null)
+        + getEdhrecEvidenceScore(edhrecCardLookup.get(key), modePrefs);
+    }
+  }
+
   // Asked in order, so a generic card is only ever reached once the on-theme
   // tier has nothing left that fits the slot.
   const fallbackTiers = [themeFallbackPool, genericFallbackPool];
