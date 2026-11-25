@@ -997,7 +997,12 @@ function getCenterLinks(card, needs) {
       // Fodder that pays you back for dying (Doomed Dissenter's Zombie) is worth more than a body with some other trigger.
       if (isCreature && abilities.some((ab) => /\bwhen(?:ever)? ~ dies\b/.test(ab.line) && ab.effects.some((e) => ["create-token", "draw", "return-from-graveyard"].includes(e.label)))) add("fodder-dies", "pays you back when it dies");
       if (abilities.some((ab) => ab.kind === "activated" && ab.cost.includes("sacrifice-other"))) add("outlet", "sacrifice outlet");
-      if (/whenever (?:another |a |an |one or more |a nontoken )?[^.,]*\b(?:dies|die)\b|whenever you sacrifice/.test(text)) add("death-payoff", "death or sacrifice payoff");
+      // Whose creature has to die matters as much on the card as on the commander (2026-11-25): a payoff for "a creature
+      // an opponent controls dies" pays nothing for sacrificing your own, so it links only when the commander counts
+      // every death (c.anyDeath); one for your own creatures links either way.
+      const payoff = /whenever (?:another |a |an |one or more |a nontoken )?([^.,]*)\b(?:dies|die)\b/.exec(text);
+      const opponentsOnly = Boolean(payoff && /\b(?:an opponent controls|opponents control|your opponents control)\b/.test(payoff[1]));
+      if ((payoff && (!opponentsOnly || c.anyDeath)) || /whenever you sacrifice/.test(text)) add("death-payoff", "death or sacrifice payoff");
       // The commander returns cards from the graveyard, so "whenever cards leave your graveyard" triggers on every use (Tormod).
       if (/return/.test(c.gets) && /whenever (?:one or more |a |another )?(?:other )?cards? leaves? your graveyard/.test(text)) add("graveyard-leave-payoff", "triggers when cards leave the graveyard");
       if (/return/.test(c.gets)) {
