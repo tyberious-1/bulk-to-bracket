@@ -283,8 +283,18 @@ const CENTER_STRONG_LINK = 14;  // engines.js getCenterBonus at or above this: t
 function curveHasRoom(curvePlan, cmc, card) {
   if (!curvePlan) return true;
   if (card && Number(card.centerWeight || 0) >= CENTER_STRONG_LINK) return true;
+  if (card && card.cheatedIn) return true;
   const band = getCmcBand(cmc);
   return (curvePlan.counts[band] || 0) < (curvePlan.caps[band] || 0);
+}
+
+// A full mana-value band is a cost, not a wall (2026-11-25). The pickers used to take the first card whose band had
+// room, however weak, and only fell back to the best card when no band had room: Fynn's type-target fill took Urban
+// Daggertooth (score 9) over Tajuru Blightblade (38) because the one-drops were full, and the weak pick then failed the
+// quality floor and ended the creature fill. Now every candidate competes, and one past its band's cap pays this.
+const CURVE_OVER_CAP_COST = 10;
+function curveCost(curvePlan, cmc, card) {
+  return curveHasRoom(curvePlan, cmc, card) ? 0 : CURVE_OVER_CAP_COST;
 }
 
 function recordCurvePick(curvePlan, cmc) {
@@ -367,7 +377,8 @@ function getRoleCounts(deck) {
 // excludedKeys holds every commander's normalized name (a deck may have two),
 // so a commander is never also drafted into its own deck.
 function pickBestCardForBucket(pool, usedNames, excludedKeys, bucket, curvePlan = null, accept = null) {
-  let bestIgnoringCurve = null;
+  let best = null;
+  let bestScore = -Infinity;
 
   for (const card of pool) {
     const key = normalizeCardName(card.name);
@@ -375,15 +386,15 @@ function pickBestCardForBucket(pool, usedNames, excludedKeys, bucket, curvePlan 
     if (getDeckTypeBucket(card.type || card.type_line || "") !== bucket) continue;
     if (accept && !accept(card)) continue;
 
-    // The pool is score-sorted, so the first card whose band still has room is
-    // the best card we can take without distorting the curve.
-    if (curveHasRoom(curvePlan, curveCmcOf(card), card)) return card;
-    if (!bestIgnoringCurve) bestIgnoringCurve = card;
+    // A full band costs CURVE_OVER_CAP_COST rather than ruling the card out (see curveCost).
+    const adjusted = Number(card.score || 0) - curveCost(curvePlan, curveCmcOf(card), card);
+    if (adjusted > bestScore) {
+      best = card;
+      bestScore = adjusted;
+    }
   }
 
-  // Every band this bucket can still reach is full -- take the best remaining
-  // card rather than leaving the slot empty.
-  return bestIgnoringCurve;
+  return best;
 }
 
 // Phase 2 fills most of a full build's remaining nonland slots, but unlike
@@ -391,9 +402,8 @@ function pickBestCardForBucket(pool, usedNames, excludedKeys, bucket, curvePlan 
 // consulted the curve plan at all -- a card's role/type deficit terms (worth
 // up to ~65 points) made a band's cap irrelevant here however full that band
 // already was. curvePlan is optional (callers that don't care about the
-// curve, like this file's own unit tests, can omit it) and, same as the
-// other two pickers, being over a band's cap never excludes a card outright
-// -- bestIgnoringCurve stays available if nothing in-budget fits.
+// curve, like this file's own unit tests, can omit it). A full band costs
+// CURVE_OVER_CAP_COST (curveCost); it never excludes a card outright.
 function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys, curvePlan = null, typeDeck = deck) {
   const typeCounts = countByType(typeDeck);
   const roleCounts = getRoleCounts(deck);
@@ -402,8 +412,6 @@ function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys, curve
 
   let best = null;
   let bestScore = -Infinity;
-  let bestIgnoringCurve = null;
-  let bestIgnoringCurveScore = -Infinity;
 
   for (const card of pool) {
     const key = normalizeCardName(card.name);
@@ -441,12 +449,7 @@ function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys, curve
 
     if (bucket === "Creature") adjustedScore += 4;
 
-    if (adjustedScore > bestIgnoringCurveScore) {
-      bestIgnoringCurve = card;
-      bestIgnoringCurveScore = adjustedScore;
-    }
-
-    if (!curveHasRoom(curvePlan, curveCmcOf(card), card)) continue;
+    adjustedScore -= curveCost(curvePlan, curveCmcOf(card), card);
 
     if (adjustedScore > bestScore) {
       best = card;
@@ -454,5 +457,5 @@ function chooseBestFlexibleCard(pool, deck, plan, usedNames, excludedKeys, curve
     }
   }
 
-  return best || bestIgnoringCurve;
+  return best;
 }

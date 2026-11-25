@@ -212,7 +212,7 @@ runSuite("type-plan", {
     const best = chooseBestFlexibleCard(pool, deck, plan, new Set(), new Set());
     assertEqual(best.name, "Needs Draw");
   },
-  "chooseBestFlexibleCard: prefers an in-budget card once the curve plan's band is full": function () {
+  "chooseBestFlexibleCard: a full band costs CURVE_OVER_CAP_COST, so a close in-budget card wins": function () {
     // Phase 2 fills most of a full build's nonland slots and, unlike Phase 0
     // and Phase 1, never consulted the curve plan at all -- a CMC-3 card
     // could always outscore an in-budget alternative on role/type deficit
@@ -227,8 +227,10 @@ runSuite("type-plan", {
       { name: "CMC3 High Score", score: 50, role: "synergy", type: "Creature", cmc: 3 },
       { name: "CMC1 Low Score", score: 10, role: "synergy", type: "Creature", cmc: 1 }
     ];
-    const best = chooseBestFlexibleCard(pool, deck, plan, new Set(), new Set(), curvePlan);
-    assertEqual(best.name, "CMC1 Low Score");
+    // Since 2026-11-25 a full band is a cost, not a wall: a much stronger card still wins.
+    const close = [pool[0], { ...pool[1], score: 50 - CURVE_OVER_CAP_COST + 1 }];
+    assertEqual(chooseBestFlexibleCard(close, deck, plan, new Set(), new Set(), curvePlan).name, "CMC1 Low Score");
+    assertEqual(chooseBestFlexibleCard(pool, deck, plan, new Set(), new Set(), curvePlan).name, "CMC3 High Score");
   },
   "getCardsNeededForTypeMinimums: reports one entry per unmet type minimum": function () {
     const typeBuckets = { Creature: { target: 20, min: 8 }, Instant: { target: 7, min: 1 } };

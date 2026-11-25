@@ -232,8 +232,6 @@ function getFallbackSource(card) {
 function pickBestFallbackCard(pool, usedNames, commanderKeys, bucket, curvePlan, redundancyCounts, accept = null) {
   let best = null;
   let bestScore = -Infinity;
-  let bestIgnoringCurve = null;
-  let bestIgnoringCurveScore = -Infinity;
 
   for (const card of pool) {
     const key = normalizeCardName(card.name);
@@ -241,25 +239,15 @@ function pickBestFallbackCard(pool, usedNames, commanderKeys, bucket, curvePlan,
     if (getDeckTypeBucket(card.type || card.type_line || "") !== bucket) continue;
     if (accept && !accept(card)) continue;
 
-    const adjusted = Number(card.score || 0) - getRedundancyPenalty(card.redundancyKeys, redundancyCounts);
-
-    if (curveHasRoom(curvePlan, curveCmcOf(card), card)) {
-      if (adjusted > bestScore) {
-        best = card;
-        bestScore = adjusted;
-      }
-      continue;
-    }
-
-    if (adjusted > bestIgnoringCurveScore) {
-      bestIgnoringCurve = card;
-      bestIgnoringCurveScore = adjusted;
+    const adjusted = Number(card.score || 0) - getRedundancyPenalty(card.redundancyKeys, redundancyCounts)
+      - curveCost(curvePlan, curveCmcOf(card), card);
+    if (adjusted > bestScore) {
+      best = card;
+      bestScore = adjusted;
     }
   }
 
-  // Every band this bucket can still reach is full -- take the best remaining
-  // card rather than leaving the slot empty.
-  return best || bestIgnoringCurve;
+  return best;
 }
 
 function buildDeckFromScoredPool(
@@ -417,6 +405,11 @@ function buildDeckFromScoredPool(
     for (const candidate of pool) {
       const owned = allOwnedCardData.get(normalizeCardName(candidate.name));
       candidate.centerWeight = owned ? getCenterBonus(owned, modePrefs.engineNeeds) : 0;
+      // A payload the commander returns from the graveyard (Greasefang's vehicles) is put onto the battlefield, not
+      // cast, so its printed cost takes no curve slot. With the curve a soft cost (curveCost), a 7-mana vehicle
+      // otherwise lost every slot to cheaper cards; the hard caps had only kept them by accident.
+      candidate.cheatedIn = Boolean(owned && modePrefs.engineNeeds && modePrefs.engineNeeds.returnsFromGraveyard
+        && getEngineClassDetails(owned, modePrefs.engineNeeds).some((d) => d.cls === "payload"));
     }
   }
   // With no EDHREC page this pool is the whole collection and thousands of cards tie, so the tie-break matters
@@ -468,7 +461,7 @@ function buildDeckFromScoredPool(
   const planCards = () => (supportOverhead ? deck.filter((entry) => !entry.supportOnly) : deck);
   function releaseDeckPick(entry) {
     if (!entry || entry.supportOnly) return;
-    releaseCurvePick(curvePlan, curveCmcOf(entry));
+    if (!entry.cheatedIn) releaseCurvePick(curvePlan, curveCmcOf(entry));
   }
 
   // Traits of everything already drafted, EDHREC picks included -- a Rogue
@@ -512,7 +505,7 @@ function buildDeckFromScoredPool(
       vehiclesPicked += 1;
       if (vehiclesPicked >= vehicleCeiling) dropSpareVehicles(vehiclePools);
     }
-    if (!supportOnly) recordCurvePick(curvePlan, curveCmcOf(card));
+    if (!supportOnly && !card.cheatedIn) recordCurvePick(curvePlan, curveCmcOf(card));
     adjustRedundancy(card, 1);
     return true;
   }
@@ -559,7 +552,8 @@ function buildDeckFromScoredPool(
   // which can swing 20+ points on role/popularity/theme terms, blow straight
   // through a band's cap during this phase even though it fills the bulk of
   // the deck's slots -- the same prefer-in-budget-else-fallback split Phase 1's
-  // pickBestCardForBucket already uses, applied here too.
+  // pickBestCardForBucket used to use. (2026-11-25: the other pickers now charge curveCost instead, on one score
+  // scale; this phase keeps the split until the support-role phase is reworked.)
   // A support card with no tie to the plan (see supportOverhead above).
   function isSupportOnly(card) {
     return supportOverhead && !isThemeFallback(card) && Number(card.centerWeight || 0) < CENTER_LINK_KEEP;
