@@ -1,5 +1,5 @@
-const fs=require("fs");const {isCommanderCast}=require("./common");const lines=fs.readFileSync(process.argv[2],"utf8").split("\n");
-const strip=n=>n.replace(/^Ai\(\d+\)-/,"").replace(/,.*$/,"").replace(/^High Perfect /,"");
+const fs=require("fs");const {isCommanderCast,shortName}=require("./common");const lines=fs.readFileSync(process.argv[2],"utf8").split("\n");
+const strip=n=>shortName(n).replace(/^High Perfect /,"");
 let games=[],g=null;
 for(const l of lines){
  if(/^Turn: Turn 1 \(/.test(l)&&(!g||g.done)){g={n:games.length+1,turnLines:0,draws:{},drawSrc:{},trigDraws:{},trigSrc:{},lastTrig:null,ccast:{},cdeath:{},atk:{},cdmg:{},life:{},min:{},casts:{},dmgOut:{},spells:{},targeted:[],cmdByCard:{},done:false};games.push(g);}
@@ -7,7 +7,7 @@ for(const l of lines){
  let m;
  if(/^Turn: /.test(l))g.turnLines++;
  if((m=l.match(/^Game Result: .*? in (\d+) ms\. Ai\(\d\)-(.+?) has won/))){g.ms=+m[1];g.win=strip(m[2]);g.done=true;}
- if((m=l.match(/^Resolve Stack: (.+?) \(\d+\) - (?:.*?)Ai\(\d\)-([^,]+)(?:, [^ ]+(?: [^ ]+)*?)? draws (\w+) cards?/))){const p=strip("Ai(1)-"+m[2]);const k={a:1,one:1,two:2,three:3,four:4,five:5}[m[3]]||+m[3]||1;g.draws[p]=(g.draws[p]||0)+k;g.drawSrc[p]=g.drawSrc[p]||{};g.drawSrc[p][m[1]]=(g.drawSrc[p][m[1]]||0)+k;}
+ if((m=l.match(/^Resolve Stack: (.+?) \(\d+\) - (?:.*?)Ai\(\d\)-(.+?) draws (\w+) cards?/))){const p=strip("Ai(1)-"+m[2]);const k={a:1,one:1,two:2,three:3,four:4,five:5}[m[3]]||+m[3]||1;g.draws[p]=(g.draws[p]||0)+k;g.drawSrc[p]=g.drawSrc[p]||{};g.drawSrc[p][m[1]]=(g.drawSrc[p][m[1]]||0)+k;}
  // Triggered draws ("When X enters, draw a card") name no player on the Resolve line: attribute them to the controller on the preceding "triggered" line.
  if((m=l.match(/^Add To Stack: Ai\(\d\)-(.+?) triggered /)))g.lastTrig=strip("Ai(1)-"+m[1]);
  else if(/^Resolve Stack: (When|Whenever|At the beginning)/.test(l)&&g.lastTrig){

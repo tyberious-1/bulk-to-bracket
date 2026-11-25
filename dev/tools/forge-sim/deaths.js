@@ -3,7 +3,7 @@
 const fs = require("fs");
 const [, , file, frag] = process.argv;
 const L = fs.readFileSync(file, "utf8").split("\n");
-const short = (s) => s.replace(/Ai\(\d\)-/, "").split(",")[0];
+const { shortName: short } = require("./common");
 let g = 0, cur = null, atk = [], blocks = 0, noblocks = 0, life = {}, lifeAtTurnStart = {}, cast = {}, dead = {}, own = {};
 for (const l of L) {
   let m;

@@ -10,4 +10,11 @@ function isCommanderCast(player, card) {
   const b = baseName(player);
   return card === b || (!b.includes(",") && card.split(",")[0] === b);
 }
-module.exports = { playerName, baseName, isCommanderCast };
+// Short label for reports: the name before the first comma, keeping a one-character seat suffix, so a pod with the builder's
+// deck ("... B") and the precon ("... P") of the same commander reports "Bello B" and "Bello P", not one merged "Bello".
+function shortName(p) {
+  const name = playerName(p);
+  const suffix = (name.match(/\s#?[A-Z0-9]$/) || [""])[0];
+  return name.split(",")[0].replace(/\s#?[A-Z0-9]$/, "") + suffix;
+}
+module.exports = { playerName, baseName, isCommanderCast, shortName };

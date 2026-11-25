@@ -1,6 +1,6 @@
 // node win_cards.js <log> -- per deck: for games it won vs lost, which cards cast, which damaged the opponent player, what its plan triggers did
 const fs=require("fs");
-const short=n=>n.replace(/^Ai\(\d\)-/,"").split(",")[0];
+const {shortName:short}=require("./common");
 let games=[],g=null;
 for(const l of fs.readFileSync(process.argv[2],"utf8").split("\n")){
   let m;

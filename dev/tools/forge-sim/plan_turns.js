@@ -1,6 +1,6 @@
 // node plan_turns.js <log>  -- per deck, per own turn: spells, attackers, cards drawn, commander triggers, named token creations, energy events (Saheeli only)
 const fs=require("fs");const file=process.argv[2];
-const short=n=>n.split(",")[0];
+const {shortName:short}=require("./common");
 const M=["spells","attackers","drawn","cmdTrig","tokens","energy","cmdCast"];
 let game=null,own={},cur=null;const games=[];
 const slot=(p)=>{ if(!game.per[p])game.per[p]={}; const k=own[p]||0; if(!k) return null; return game.per[p][k]||(game.per[p][k]=Object.fromEntries(M.map(m=>[m,0]))); };
