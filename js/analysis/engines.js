@@ -117,6 +117,13 @@ function readCenterTypes(line) {
 // dungeons 309, experience and stun counters, +1/+1 counters, and the token kinds). `free` terms define the plan wherever they
 // appear; a token term counts only when the commander's own condition or cost runs on it ("whenever you sacrifice a Clue"),
 // because one Treasure made on enter is not a Treasure deck (Gonti).
+// "Whenever a creature dies" with no "you control" or "you own" counts every creature at the table (Sarcophagus, Ship
+// of the Dead, 2026-11-25): removal and wipes feed it as much as a sacrifice outlet does.
+function anyCreatureDeath(line) {
+  const m = /(?:if|when(?:ever)?) (?:a|one or more|another) (?:other )?(?:nontoken )?(?:creatures?|permanents?)([^,.]*?)(?:died|dies?|die)\b/.exec(line);
+  return Boolean(m && !/\byou (?:control|own)\b|\byour\b|\ban opponent controls\b/.test(m[1]));
+}
+
 const CENTER_TERMS = [
   { term: "ring", re: /\bthe ring tempts you\b|\bring-bearer\b/, free: true },
   { term: "initiative", re: /\binitiative\b|\bventure into the dungeon\b|\bcompleted a dungeon\b|\bdungeons?\b/, free: true },
@@ -212,12 +219,12 @@ function getCommanderCenter(commanderTexts) {
         const kwm = /creatures? you control with (flying|first strike|deathtouch|haste|trample|menace|vigilance|lifelink|reach|hexproof|indestructible)/.exec(bare);
         if (kwm) add({ kind: "keyword", kw: kwm[1] });
         if (/\btokens? you control\b|tokens? would be created/.test(bare)) add({ kind: "event", event: "token-created" });
-        if (/(?:if|when(?:ever)?) (?:a|one or more) (?:creatures?|permanents?)[^,.]*?(?:died|dies?|left the battlefield|leaves? the battlefield)(?: this turn)?|creature died (?:this turn|under)/.test(bare) && a.kind === "triggered") add({ kind: "exchange", pays: "creature", count: 1, gets: "value" });
+        if (/(?:if|when(?:ever)?) (?:a|one or more) (?:creatures?|permanents?)[^,.]*?(?:died|dies?|left the battlefield|leaves? the battlefield)(?: this turn)?|creature died (?:this turn|under)/.test(bare) && a.kind === "triggered") add({ kind: "exchange", pays: "creature", count: 1, gets: "value", anyDeath: anyCreatureDeath(bare) });
         if (/return (?:another )?(?:target )?(?:nonland )?(?:permanent|creature)[^.]*you control to (?:its|their) owner's hand/.test(bare)) add({ kind: "enters" });
         if (a.kind === "triggered" && a.trigger.includes("combat-damage")) add({ kind: "hits" });
         if (a.kind === "triggered" && a.trigger.includes("dies")) {
           if (selfSubject) add({ kind: "leaves" });
-          else add({ kind: "exchange", pays: "creature", count: 1, gets: "value" });
+          else add({ kind: "exchange", pays: "creature", count: 1, gets: "value", anyDeath: anyCreatureDeath(bare) });
         }
         if (a.kind === "triggered" && (a.trigger.includes("cast-spell") || a.trigger.includes("cast-second") || a.trigger.includes("cast-noncreature")) && !/\bwhenever you cast an? [a-z]+ spell\b/.test(line)) add({ kind: "cast-any" });
         // An enter trigger is the commander's plan only when it is its one active ability (Rutstein's mill on enter and upkeep, Kardur's
@@ -743,7 +750,7 @@ const CENTER_LINK_WEIGHTS = {
   "counts-type": 5, "boosts-type": 8, "reads-count": 8, "mech-same": 8, "fight-source": 6, "fight-body": 4, "ladder-step": 2, "ladder-etb": 6, "small-evasion": 2, "haste-body": 4, "mana-token": 4, "ninja-enabler": 6, "tap-untap": 5, "tap-haste": 4, "copy-target": 6, "pillow-piece": 8, "draw-for-hand": 5, "kw-member": 5, "big-toughness": 10, "supplies-toughness": 6, "land-matters": 6, "combat-sink": 4, "bend-fodder": 6, "story-member": 5, "life-loss": 8, "enter-member": 5, "enter-maker": 6, "scry-source": 6, "discard-source": 6, "discard-payoff": 6, "big-spell": 5, "cheap-spell": 3, "spell-copy": 8, "double-strike": 6, "extra-combat": 10, "attack-payoff": 6, "haste-giver": 4, "blink": 10, "etb-doubler": 12, "bounce-own": 6, "etb-body": 3, "attach-member": 5, "attach-helper": 8, "attach-tutor": 6, "attach-payoff": 6, "top-setup": 6, "free-cast": 6, "mana-sink": 6, "mana-doubler": 10, "untaps": 8, "tap-payoff": 6, "term-link": 6, "term-link-common": 2, "term-doubler": 10, "type-member": 5, "type-payoff": 8, "type-lord": 8, "type-maker": 6,
   "makes-event": 6, "makes-event-once": 2, "makes-type": 6, "makes-type-weak": 3, "event-payoff": 10, "cheaper-casts": 8,
   "landwalk": 14, "makes-land-type": 10, "discount-target": 4, "draw-payoff-all": 14, "draw-payoff": 8, "group-draw": 6, "hand-room": 4, "makes-tokens-burst": 14, "makes-tokens-repeat": 10, "makes-token": 4, "doubles-tokens": 14, "token-payoff": 4,
-  fodder: 2, "fodder-dies": 3, "graveyard-leave-payoff": 8, outlet: 6, "death-payoff": 6, "return-target": 6, "return-target-small": 3, reanimates: 8, "comes-back": 4, "graveyard-fill": 6, "power-fodder": 6
+  fodder: 2, "fodder-dies": 3, "graveyard-leave-payoff": 8, outlet: 6, "death-payoff": 6, "return-target": 6, "return-target-small": 3, reanimates: 8, "comes-back": 4, "graveyard-fill": 6, "power-fodder": 6, "kills-many": 8, "kills-one": 5
 };
 
 function centerTypeHas(card, type) {
@@ -1006,6 +1013,11 @@ function getCenterLinks(card, needs) {
       }
       if (/return/.test(c.gets) && abilities.some((ab) => ab.effects.some((e) => ["mill-self", "discard-self", "loot", "rummage", "put-into-graveyard"].includes(e.label)))) add("graveyard-fill", "fills the graveyard");
       if (/power/.test(c.gets) && isCreature && power >= 4) add("power-fodder", "power " + power);
+      if (c.anyDeath && typeof getRoleContributions === "function") {
+        const roles = getRoleContributions(card, false);
+        if (roles.includes("wipe")) add("kills-many", "board wipe: every creature that dies counts");
+        else if (roles.includes("removal") && /\bdestroy|\bdamage\b|\bfights?\b|-\d+\/-\d+|-x\/-x|sacrifices?\b/.test(text)) add("kills-one", "removal that kills: any creature's death counts");
+      }
     }
   }
   return Array.from(found.values());
