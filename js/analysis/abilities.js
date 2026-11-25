@@ -166,7 +166,8 @@ function tagEffects(text) {
   if (/\badd (?:\{m\}|one mana|[a-z ]*mana)/.test(text)) add("add-mana");
   if (/\bsearch your library\b/.test(text)) add("tutor");
   // Lands that reach the battlefield without being your normal land drop (fetch, ramp, extra drops).
-  if (/(?:search your library for|put) [^.]*\bland cards?\b[^.]*onto the battlefield|play (?:an )?additional lands?|additional lands? (?:on|each|this) /.test(text)) add("land-to-battlefield");
+  // A typed land counts too (2026-11-25): Wood Elves' "search your library for a Forest card ... onto the battlefield".
+  if (/(?:search your library for|put) [^.]*\b(?:land|forest|plains|island|swamp|mountain|desert|gate)s? cards?\b[^.]*onto the battlefield|play (?:an )?additional lands?|additional lands? (?:on|each|this) /.test(text)) add("land-to-battlefield");
   if (/\b(?:gain|gains) (?:\d+|x) life|you gain life/.test(text)) add("gain-life");
   if (/\blose (?:\d+|x) life|loses (?:\d+|x) life/.test(text)) add("lose-life");
   if (/\btap (?:target|up to|all|each)|\buntap\b/.test(text)) add("tap-untap");

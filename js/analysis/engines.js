@@ -534,7 +534,10 @@ function getEventProducers(card, needs) {
     const has = (label) => labels.includes(label);
 
     if (wanted.has("landfall")) {
-      if (has("land-to-battlefield")) add("landfall", "puts a land onto the battlefield", strength.weak, flaws);
+      // Two or more lands from one use is two or more landfall triggers (Explosive Vegetation, Cultivate's one plus a
+      // land to hand stays single): not weak, whatever it costs.
+      const lands = /\b(?:up to )?(?:two|three|x|all)\b[^.]*\blands?\b[^.]*onto the battlefield|\bany number of\b[^.]*\blands?\b[^.]*onto the battlefield/.test(ab.line || "");
+      if (has("land-to-battlefield")) add("landfall", "puts a land onto the battlefield", strength.weak && !lands, flaws);
       else if (ab.trigger.includes("landfall")) add("landfall", "landfall card", false, flaws);
     }
     for (const event of ["draw", "draw-second"]) {

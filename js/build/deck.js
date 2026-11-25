@@ -152,6 +152,8 @@ function isLandRamp(card) {
     && /search your library for [^.]*\b(?:lands?|forests?|plains|islands?|swamps?|mountains?|deserts?)\b[^.]*onto the battlefield|put (?:a|up to (?:one|two)|that|those) (?:basic )?land cards? [^.]*onto the battlefield|put (?:it|them|that card|those cards) onto the battlefield[^.]*\bif (?:it's|they're) a land/.test(text);
 }
 
+const PLAN_ROLE_OVERFLOW = 4;
+const PLAN_ROLE_OVERFLOW_LINK = 6;
 const PLAN_ROLE_BONUS = 12;
 function isPlanCard(card) {
   return Boolean(card && (card.themeMatch || card.planTagged || Number(card.centerWeight || 0) >= CENTER_LINK_KEEP));
@@ -440,6 +442,7 @@ function buildDeckFromScoredPool(
     for (const candidate of pool) {
       const owned = allOwnedCardData.get(normalizeCardName(candidate.name));
       candidate.centerWeight = owned ? getCenterBonus(owned, modePrefs.engineNeeds) : 0;
+      candidate.engineWeight = owned ? getEngineBonus(owned, modePrefs.engineNeeds) : 0;
       // A payload the commander returns from the graveyard (Greasefang's vehicles) is put onto the battlefield, not
       // cast, so its printed cost takes no curve slot. With the curve a soft cost (curveCost), a 7-mana vehicle
       // otherwise lost every slot to cheaper cards; the hard caps had only kept them by accident.
@@ -712,7 +715,11 @@ function buildDeckFromScoredPool(
 
       const roomInRole = (card) => {
         const rule = plan.roleBuckets[card.role];
-        return !rule || (roleCounts[card.role] || 0) < rule.target;
+        // A card the commander's own text links to (engine bonus PLAN_ROLE_OVERFLOW_LINK+, not just an EDHREC theme tag,
+        // which let draw and removal bloat past target) may run PLAN_ROLE_OVERFLOW past its role's target (2026-11-25): Omnath's land ramp is its landfall
+        // engine, but the ramp target was full of ramp Elementals, so Rampant Growth (score 47) lost its sorcery slot to Lava
+        // Axe (22) from the generic tier.
+        return !rule || (roleCounts[card.role] || 0) < rule.target + (Number(card.engineWeight || 0) >= PLAN_ROLE_OVERFLOW_LINK ? PLAN_ROLE_OVERFLOW : 0);
       };
 
       const edhrecPick = pickBestCardForBucket(scoredNonlands, usedNames, commanderKeys, neededBucket, curvePlan, roomInRole);
