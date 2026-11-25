@@ -20,10 +20,13 @@ const EDHREC_THEME_MIN_DECKS = 20;
 // A commander with few decks on EDHREC (Ghalta the Unstoppable: 255 decks against 11,262 for Ghalta, Primal
 // Hunger) gets near-empty theme counts and a thin card pool, so the builder never sees the plan its popular
 // sibling is built around. EDHREC lists similar commanders on each page; the first one in the same color
-// identity with far more decks lends its cards, theme pages and theme tags to the pool.
+// identity with far more decks lends theme pages to the pool, only for the thin commander's own main tags.
+// Its main page and its tags stay out: borrowing them whole gave Norika (enchantments) Sram's Vehicles plan.
 const EDHREC_THIN_COMMANDER_DECKS = 1000;
 const EDHREC_SIBLING_MIN_DECK_RATIO = 5;
 const EDHREC_SIBLING_TRY_LIMIT = 6;
+// One deck behind a tag says nothing about what the commander does.
+const EDHREC_SIBLING_FIT_MIN_DECKS = 2;
 
 function edhrecCommanderDeckCount(data) {
   return Number(data?.container?.json_dict?.card?.num_decks || 0);
@@ -55,20 +58,16 @@ async function findSimilarCommanderPool(data, commanderNames) {
   return null;
 }
 
-// Theme tags of both commanders on one list, the larger deck count per slug, so the borrowed commander's
-// plans (Vehicles, Voltron) can compete with the thin commander's own.
-function mergeEdhrecTaglinks(ownData, siblingData) {
-  const bySlug = new Map();
-  for (const tag of [...(ownData?.panels?.taglinks || []), ...(siblingData?.panels?.taglinks || [])]) {
-    const key = tag?.slug || tag?.value;
-    if (!key) continue;
-    const prior = bySlug.get(key);
-    if (!prior || Number(tag.count || 0) > Number(prior.count || 0)) bySlug.set(key, tag);
-  }
-  return {
-    ...ownData,
-    panels: { ...(ownData?.panels || {}), taglinks: Array.from(bySlug.values()) }
-  };
+// The thin commander's own main tags, most played first: the only themes a sibling may lend pages for.
+function edhrecSiblingFitSlugs(data) {
+  const ranked = (Array.isArray(data?.panels?.taglinks) ? data.panels.taglinks : [])
+    .filter((tag) => tag?.slug)
+    .sort((a, b) => Number(b.count || 0) - Number(a.count || 0));
+  const floor = Math.max(
+    EDHREC_SIBLING_FIT_MIN_DECKS,
+    Number(ranked[0]?.count || 0) * EDHREC_THEME_MIN_RELATIVE_SHARE
+  );
+  return ranked.filter((tag) => Number(tag.count || 0) >= floor).map((tag) => String(tag.slug));
 }
 
 function toEdhrecSlug(name) {
@@ -667,8 +666,8 @@ async function getEDHREC(commanderNames) {
   // distinctive cards from the commander's general staples (analysis/plans.js).
   const themeCardStats = {};
 
-  const loadThemePages = async (pageData, slug) => {
-    for (const themeSlug of pickEdhrecThemeSlugs(pageData)) {
+  const loadThemePages = async (themeSlugs, slug) => {
+    for (const themeSlug of themeSlugs) {
       const themeData = await fetchEdhrecThemePage(slug, themeSlug);
       if (themeData) {
         collectEdhrecCards(themeData, deduped);
@@ -686,18 +685,17 @@ async function getEDHREC(commanderNames) {
     }
   };
 
-  await loadThemePages(data, commanderSlug);
+  await loadThemePages(pickEdhrecThemeSlugs(data), commanderSlug);
 
   const sibling = await findSimilarCommanderPool(data, commanderNames);
-  let tagData = data;
   if (sibling) {
-    collectEdhrecCards(sibling.data, deduped);
-    await loadThemePages(sibling.data, sibling.slug);
-    tagData = mergeEdhrecTaglinks(data, sibling.data);
+    // In the thin commander's tag order, so its top theme seeds the first plan.
+    const available = new Set(pickEdhrecThemeSlugs(sibling.data));
+    await loadThemePages(edhrecSiblingFitSlugs(data).filter((slug) => available.has(slug)), sibling.slug);
   }
 
-  const tags = extractEdhrecTagsFromData(tagData);
-  const allTags = extractAllEdhrecTaglinkNames(tagData);
+  const tags = extractEdhrecTagsFromData(data);
+  const allTags = extractAllEdhrecTaglinkNames(data);
   const typeAverages = extractEdhrecTypeAverages(data);
   const roleTargets = extractEdhrecRoleTargets(data, tags);
 
