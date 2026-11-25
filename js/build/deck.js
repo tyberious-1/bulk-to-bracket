@@ -134,6 +134,15 @@ function supportRoleFit(source, role) {
 }
 
 // entries: [{ card, adjusted }]. Returns the card to take for the role, or null.
+// Support roles filled by plan cards (2026-11-25). Players fill ramp, draw and removal with cards that also serve the
+// plan: on six builder-vs-YouTube pairs the role counts were alike, but the YouTube lists' role cards were creatures
+// far more often (Doran 17 of 23 against the builder's 8 of 24). A role candidate that is on the plan (a theme card or
+// one linked to the commander's center) gets this much on top, and both pools compete on one scale.
+const PLAN_ROLE_BONUS = 12;
+function isPlanCard(card) {
+  return Boolean(card && (card.themeMatch || card.planTagged || Number(card.centerWeight || 0) >= CENTER_LINK_KEEP));
+}
+
 function pickRoleCandidate(entries) {
   if (!entries.length) return null;
   const top = Math.max(...entries.map((e) => e.adjusted));
@@ -382,12 +391,24 @@ function buildDeckFromScoredPool(
   // EDHREC knows about it (getEdhrecEvidenceScore). Before, the same on-theme card scored about 20 points higher from
   // the collection than from EDHREC, so the per-source floors and every EDHREC-versus-collection choice compared two
   // scales: Fynn's cheap EDHREC deathtouch creatures lost their slots to 4-6 mana collection ones.
+  // A card whose own tags name one of the commander's themes (Rampant Growth's "lands" for a landfall commander) is a
+  // plan card for the role picker even when no theme list named it.
+  const planSignals = buildThemeSignalSet(commanderThemes);
+  const isPlanTagged = (card) => detectCardTags(card).some((tag) => planSignals.has(normalizeThemeName(tag)));
+  for (const pool of [themeFallbackPool, genericFallbackPool]) {
+    for (const candidate of pool) {
+      const owned = allOwnedCardData.get(normalizeCardName(candidate.name));
+      candidate.planTagged = Boolean(owned && isPlanTagged(owned));
+    }
+  }
   if (options.unifiedScores !== false) {
     for (const entry of scoredNonlands) {
       const key = normalizeCardName(entry.name);
       const card = allOwnedCardData.get(key);
       if (!card) continue;
       const fit = classifyBackfillModeFit(card, modePrefs, isTribalDeck);
+      entry.themeMatch = themeCardNames.get(key) || null;
+      entry.planTagged = isPlanTagged(card);
       entry.score = scoreFallbackCard(card, commanderThemes, strategyProfile, commanderColors, modePrefs)
         + (fit.tier === 0 ? 12 : -10)
         + getThemeFitBonus(themeCardNames.get(key) || null)
@@ -575,6 +596,7 @@ function buildDeckFromScoredPool(
       if (chargeRedundancy) adjusted -= getRedundancyPenalty(card.redundancyKeys, redundancyCounts);
       // No plan tie: the score is mostly noise (spells score ~5 below creatures for no reason), so rank by job fit.
       if (isSupportOnly(card)) adjusted = supportRoleFit(getRedundancySource(card), role) * 2 + adjusted / 10;
+      else if (isPlanCard(card)) adjusted += PLAN_ROLE_BONUS;
 
       const bucket = getDeckTypeBucket(card.type || card.type_line || "");
       const typeRule = typePlan?.buckets?.[bucket];
@@ -605,13 +627,15 @@ function buildDeckFromScoredPool(
     }
     if (!neediestRole) break;
 
-    const edhrecPick = pickBestForRole(scoredNonlands, neediestRole, false);
-    if (edhrecPick) {
-      addCard(edhrecPick, "edhrec", isSupportOnly(edhrecPick));
+    // EDHREC and on-theme collection cards compete together (one scale since 2026-11-25), so a collection creature
+    // that ramps or removes and serves the plan can take a role slot an off-plan EDHREC staple used to get first.
+    const sharedPick = pickBestForRole([...scoredNonlands, ...themeFallbackPool], neediestRole, true);
+    if (sharedPick) {
+      addCard(sharedPick, scoredNonlands.includes(sharedPick) ? "edhrec" : getFallbackSource(sharedPick), isSupportOnly(sharedPick));
       continue;
     }
 
-    const fallbackPick = pickFromTiers(fallbackTiers, (tier) => pickBestForRole(tier, neediestRole, true));
+    const fallbackPick = pickFromTiers([genericFallbackPool], (tier) => pickBestForRole(tier, neediestRole, true));
     if (!fallbackPick) {
       // Nothing owned and legal can serve this role -- a collection with no
       // board wipes in these colors, say. Stop asking rather than spin.

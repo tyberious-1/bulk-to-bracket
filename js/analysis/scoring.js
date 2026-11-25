@@ -775,7 +775,13 @@ function detectCardTags(card) {
   }
 
   if (type.includes("enchantment")) tags.push("enchantments");
-  if (text.includes("landfall") || text.includes("search your library for a land")) tags.push("lands");
+  // Fetching a land, basic or typed, also feeds landfall: "search your library for a basic land card" (Rampant Growth)
+  // and "for a Forest card" (Wood Elves) missed the old literal "for a land", so Omnath's ramp read as off-plan.
+  if (
+    text.includes("landfall") ||
+    /search your library for (?:a|an|up to (?:one|two|three|x)|two|x)? ?(?:basic |nonbasic |snow )?(?:land|forest|plains|island|swamp|mountain|desert|gate)/.test(text) ||
+    /put (?:a|up to (?:one|two)) (?:basic )?land cards? from your hand onto the battlefield/.test(text)
+  ) tags.push("lands");
   if (type.includes("instant") || type.includes("sorcery")) tags.push("spellslinger");
   if (text.includes("sacrifice")) tags.push("sacrifice");
 
