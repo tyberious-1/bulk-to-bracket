@@ -12,7 +12,7 @@ user-facing project description.
 
 - All JS is plain global-scope scripts, loaded by `<script>` tags in dependency order. A new `js/` file needs its tag in BOTH
   `index.html` and `pauper.html` and in `dev/tools/jxa-harness/build_harness.sh`.
-- Run suites with JXA (`dev/tests/jxa/run.sh`, `run_all.sh`), not node; node is for `node --check` and ad-hoc checks. zsh does not
+- Run suites with `bash dev/tests/jxa/run_all.sh` (or `run.sh`): osascript (JXA) on macOS, node where osascript is absent (Linux). `node --check` is for syntax checks. zsh does not
   word-split an unquoted `$VAR`: use a bash array or `bash -c`. Never leave a bare `cat` in a shell call (it hangs).
 - A change to `js/build/` or `js/analysis/` needs the relevant suites; a change to shared scoring needs the 13-build diff.
 - Read the card's own text before judging a pick or blaming the pool (see `btb-deck-thinking`). Fix by category, not for one commander.
@@ -136,7 +136,7 @@ over anything else for quick validation:
 ```bash
 node --check js/build/deck.js   # syntax check a single file
 ```
-The test suites still run under JXA (see `btb-testing-harness`), not node.
+Run the test suites with `bash dev/tests/jxa/run_all.sh` (or `run.sh`): osascript on macOS, node where osascript is absent (Linux).
 There's no `package.json` and no npm scripts.
 
 
