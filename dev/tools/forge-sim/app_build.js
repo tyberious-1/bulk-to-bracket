@@ -1,4 +1,4 @@
-// app_build.js "<commander>" <owned json> <out.dck>: build a deck through the real app (index.html) in headless Firefox and
+// app_build.js "<commander>" <owned json> <out.dck> ["<partner or Background>"]: build a deck through the real app (index.html) in headless Firefox and
 // write it as a Forge .dck. Run from the repo root.
 // <owned json>: a Scryfall card array of the collection (dev/tools/jxa-harness/fetch_owned.py output), under
 // dev/tools/forge-sim/work/. The page gets it as a stand-in collection CSV; EDHREC is fetched live, as the app does. The build
@@ -11,8 +11,9 @@ const http = require("http");
 const { spawn, execSync } = require("child_process");
 
 const ROOT = path.resolve(__dirname, "../../..");
-const [commander, ownedArg, out] = process.argv.slice(2);
-if (!commander || !ownedArg || !out) { console.error('usage: node app_build.js "<commander>" <owned json> <out.dck>'); process.exit(1); }
+const [commander, ownedArg, out, partner = ""] = process.argv.slice(2);
+if (!commander || !ownedArg || !out) { console.error('usage: node app_build.js "<commander>" <owned json> <out.dck> ["<partner>"]'); process.exit(1); }
+// A Partner / Background commander is tested with its pair (see the btb-forge-sim skill); both must be in the owned json.
 const ownedRel = path.relative(ROOT, path.resolve(ownedArg));
 if (!ownedRel.startsWith("dev/tools/forge-sim/work/")) { console.error("owned json must be under dev/tools/forge-sim/work/"); process.exit(1); }
 
@@ -52,6 +53,18 @@ const INJECT = `
     await new Promise((r) => setTimeout(r, 4000));
     commanderInput.value = ${JSON.stringify(commander)};
     commanderInput.dispatchEvent(new Event("input", { bubbles: true }));
+    const partnerName = ${JSON.stringify(partner)};
+    if (partnerName) {
+      // The app reveals the partner field once it has read the commander's pairing ability; wait for that, then fill it.
+      for (let i = 0; i < 30 && partnerRow.classList.contains("hidden"); i++) {
+        commanderInput.dispatchEvent(new Event("change", { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      partnerRow.classList.remove("hidden");
+      partnerInput.value = partnerName;
+      partnerInput.dispatchEvent(new Event("input", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 1500));
+    }
     generateBtn.click();
     const started = Date.now();
     while (Date.now() - started < 400000) {
@@ -114,11 +127,11 @@ function finish(d) {
     const m = /^(\d+)x?\s+(.+?)(\s+\([A-Z0-9]+\).*)?$/.exec(raw.trim());
     if (!m) continue;
     const name = m[2].split(" // ")[0].replace(" *CMDR*", "").trim();
-    if (name !== commander) main.push(`${m[1]} ${name}`);
+    if (name !== commander && name !== partner) main.push(`${m[1]} ${name}`);
   }
   const count = main.reduce((s, l) => s + Number(l.split(" ")[0]), 0);
-  fs.writeFileSync(out, `[metadata]\nName=${commander}\n[commander]\n1 ${commander}\n[main]\n${main.join("\n")}\n`);
-  console.log(`wrote ${out}: ${count} cards + commander | default plan: ${d.focus} | plans: ${JSON.stringify(d.plans)} | JS errors: ${JSON.stringify(d.errors)}`);
+  fs.writeFileSync(out, `[metadata]\nName=${commander}\n[commander]\n1 ${commander}\n${partner ? `1 ${partner}\n` : ""}[main]\n${main.join("\n")}\n`);
+  console.log(`wrote ${out}: ${count} cards + commander${partner ? " + " + partner : ""} | default plan: ${d.focus} | plans: ${JSON.stringify(d.plans)} | JS errors: ${JSON.stringify(d.errors)}`);
   process.exit(0);
 }
 
