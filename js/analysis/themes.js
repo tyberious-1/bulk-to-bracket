@@ -298,14 +298,24 @@ function deriveCommanderThemes(commanderTexts, collectionData, allOwnedCardData,
   const types = [];
   const keywords = [];
   const terms = [];
+  // What the commander does with the board (2026-11-25): a creature or token it pays for or feeds on is a Sacrifice
+  // plan, a token trigger is Tokens, and an anthem over your creatures is Go Wide. Sarcophagus, Ship of the Dead
+  // ("other creatures you control get +1/+0", "whenever a creature dies") read as nothing here, so its build fell
+  // back to counting the pool and got "human tribal, artifact creature tribal".
+  const plays = [];
   for (const rec of getCommanderCenter(texts)) {
     if (rec.kind === "type" && creatureTypeFromThemeWord(rec.type)) types.push(pluralizeCreatureType(rec.type));
     else if (rec.kind === "keyword" && rec.kw) keywords.push(rec.kw);
     else if (rec.kind === "term" && rec.term && !rec.thin) terms.push(rec.term);
+    else if (rec.kind === "exchange" && /^(?:creatures?|tokens?|permanents?|artifacts? or creatures?|creatures? or artifacts?)$/.test(String(rec.pays || ""))) plays.push("sacrifice");
+    else if (rec.kind === "event" && rec.event === "token-created") plays.push("tokens");
   }
+  const lowered = texts.join("\n").toLowerCase();
+  // "Tokens", not "Go Wide": the local matcher reads a theme by its words on cards, and no card says "go wide".
+  if (/\b(?:other )?creatures you control get \+\d+\/\+\d+/.test(lowered)) plays.push("tokens");
   const out = [];
   const seen = new Set();
-  for (const group of [types, keywords, terms]) {
+  for (const group of [types, keywords, terms, plays]) {
     const supported = [];
     for (const theme of group) {
       if (seen.has(theme)) continue;

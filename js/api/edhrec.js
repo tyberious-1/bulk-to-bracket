@@ -203,61 +203,10 @@ async function fetchEdhrecThemePage(commanderSlug, themeSlug) {
   }
 }
 
-function extractLikelyTags(value, weights) {
-  if (Array.isArray(value)) {
-    if (value.every((item) => typeof item === "string")) {
-      value.forEach((tag, index) => {
-        if (!isLikelyEdhrecTagCandidate(tag)) return;
-        const key = normalizeThemeName(tag);
-        weights.set(key, Math.max(weights.get(key) || 0, value.length - index));
-      });
-      return;
-    }
-
-    value.forEach((item) => extractLikelyTags(item, weights));
-    return;
-  }
-
-  if (!value || typeof value !== "object") return;
-
-  for (const [key, nested] of Object.entries(value)) {
-    const lowerKey = normalizeThemeName(key);
-
-    if (lowerKey.includes("tag") && typeof nested === "string" && isLikelyEdhrecTagCandidate(nested)) {
-      const tagKey = normalizeThemeName(nested);
-      weights.set(tagKey, Math.max(weights.get(tagKey) || 0, 6));
-      continue;
-    }
-
-    if (lowerKey.includes("tag") && Array.isArray(nested) && nested.every((item) => typeof item === "string")) {
-      nested.forEach((tag, index) => {
-        if (!isLikelyEdhrecTagCandidate(tag)) return;
-        const tagKey = normalizeThemeName(tag);
-        weights.set(tagKey, Math.max(weights.get(tagKey) || 0, nested.length - index + 2));
-      });
-      continue;
-    }
-
-    if (lowerKey.includes("tag") && Array.isArray(nested)) {
-      nested.forEach((item, index) => {
-        if (!item || typeof item !== "object") return;
-        const label = item.name || item.label || item.tag || item.value || item.header;
-        if (!isLikelyEdhrecTagCandidate(label)) return;
-        const count = Number(item.count || item.num_decks || item.decks || item.value_count || 0);
-        const score = count > 0 ? count : Math.max(1, nested.length - index + 1);
-        const tagKey = normalizeThemeName(label);
-        weights.set(tagKey, Math.max(weights.get(tagKey) || 0, score));
-      });
-    }
-
-    extractLikelyTags(nested, weights);
-  }
-}
-
 // EDHREC's own answer to "what is this commander's deck about", in
 // panels.taglinks: theme names with the number of decks behind each.
 //
-// Preferred over extractLikelyTags below, which walks the whole payload and
+// Preferred over the old payload walk (removed 2026-11-25), which walked the whole payload and
 // cannot tell a theme from a page section or from the name of a similar
 // commander. For a popular commander the walk lands on the right answer by
 // weight of numbers; for a niche one the junk outranks the real themes
@@ -337,19 +286,12 @@ function extractAllEdhrecTaglinkNames(data) {
     .map((tag) => tag.name);
 }
 
+// No taglinks panel means EDHREC has no themes for this commander yet (a new card): return none, so
+// detectCommanderThemes reads the commander's own text instead (deriveCommanderThemes). The old fallback walked the
+// payload for anything theme-shaped and, on Sarcophagus, Ship of the Dead (2026-11-25), returned "battles" (a card
+// type count) and "feldon of the third path" (a similar commander), which then blocked the text reading.
 function extractEdhrecTagsFromData(data) {
-  const named = extractEdhrecTaglinkThemes(data);
-  if (named.length) return named;
-
-  // No taglinks panel at all -- fall back to reading the payload for anything
-  // theme-shaped, section labels and similar commanders filtered out as best
-  // they can be.
-  const weights = new Map();
-  extractLikelyTags(data, weights);
-  return Array.from(weights.entries())
-    .sort((a, b) => b[1] - a[1])
-    .map(([tag]) => tag)
-    .slice(0, 12);
+  return extractEdhrecTaglinkThemes(data);
 }
 
 function parseEdhrecSectionAverage(section) {
