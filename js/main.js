@@ -13,8 +13,18 @@
 let currentRunContext = null;
 
 // Resolves the entered name(s) into the commanders of the deck. A pair runs
-// 98 cards plus two commanders and uses the union of both color identities.
+// 98 cards plus two commanders and uses the union of both color identities, unless the player picked fewer colors for a
+// hybrid commander (getHybridColorOptions; the Deck Colors panel). identityColors keeps the full identity.
 async function resolveCommanders(primaryName, partnerName) {
+  const commanders = await resolveCommanderCards(primaryName, partnerName);
+  commanders.identityColors = sortColorsWubrg(commanders.colors);
+  commanders.colorOptions = getHybridColorOptions([commanders.primary, commanders.partner]);
+  const picked = getDeckColorChoice(commanders.names);
+  if (picked && commanders.colorOptions.some((set) => set.join("") === picked.join(""))) commanders.colors = picked;
+  return commanders;
+}
+
+async function resolveCommanderCards(primaryName, partnerName) {
   const primary = await getCommander(primaryName);
   if (!primary) throw new Error("Commander not found on Scryfall.");
   if (!canBeActiveCommander(primary)) throw new Error("Selected card does not appear to be a legal commander.");
@@ -60,6 +70,7 @@ async function generateDeck() {
   document.getElementById("postBuildControls").classList.add("hidden");
   document.getElementById("buildModeControls").classList.add("hidden");
   hidePlanOptions();
+  hideDeckColorOptions();
 
   clearLog();
   clearCommanderCard();
@@ -97,7 +108,9 @@ async function generateDeck() {
     const commanders = await resolveCommanders(commanderName, partnerName);
 
     displayCommanderCard(commanders.primary, commanders.partner);
-    logMessage(`Commander found: ${commanders.names.join(" + ")} | Color identity: ${commanders.colors.join("") || "Colorless"}`);
+    renderDeckColorOptions(commanders);
+    logMessage(`Commander found: ${commanders.names.join(" + ")} | Color identity: ${commanders.identityColors.join("") || "Colorless"}`);
+    if (sortColorsWubrg(commanders.colors).join("") !== commanders.identityColors.join("")) logMessage(`Building in ${commanders.colors.join("")}, the colors you picked for this hybrid commander.`);
 
     let edhrecData = { cards: [], tags: [], allTags: [], typeAverages: null, roleTargets: null, themeCardLists: {} };
 
@@ -168,7 +181,13 @@ async function generateDeck() {
       buildPlanOptions(
         edhrecData?.themeCardStats,
         edhrecData?.coreCards,
-        (name) => hasOwnedCard(collection, name) && !isBasicLand(name),
+        // Owned and in the deck's colors: EDHREC lists only cards in the commander's identity, but a hybrid commander built
+        // in fewer colors (Deck Colors) must not count its off-color cards as coverage.
+        (name) => {
+          if (!hasOwnedCard(collection, name) || isBasicLand(name)) return false;
+          const card = allOwnedCardData.get(normalizeCardName(name)) || allOwnedCardData.get(normalizeCardName(getPrimaryCardName(name)));
+          return !card || legalForCommander(card.colors, commanders.colors, card);
+        },
         getCommanderTextThemes([commanders.primary?.text, commanders.partner?.text])
       ),
       commanderThemes,
@@ -721,6 +740,20 @@ if (planOptionsWrap) {
     );
     if (!custom) return;
     renderPlanOptions(currentRunContext.planOptions || [], custom);
+  });
+}
+
+// Deck Colors: a hybrid commander can be built in fewer colors; picking one rebuilds from the start (the pool, EDHREC
+// legality, plans and mana base all depend on the colors). The full identity clears the choice.
+const deckColorOptionsWrap = document.getElementById("deckColorOptions");
+if (deckColorOptionsWrap) {
+  deckColorOptionsWrap.addEventListener("click", (event) => {
+    const button = event.target.closest(".deck-color-btn");
+    if (!button || !currentRunContext || button.classList.contains("active")) return;
+    const { names, identityColors } = currentRunContext.commanders;
+    const colors = button.dataset.colors.split("");
+    setDeckColorChoice(names, colors.join("") === identityColors.join("") ? null : colors);
+    generateDeck();
   });
 }
 

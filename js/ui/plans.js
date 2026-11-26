@@ -113,3 +113,26 @@ function updateFunPicksNote(requested, deck, minimalBuild) {
 function hidePlanOptions() {
   document.getElementById("planOptionsPanel")?.classList.add("hidden");
 }
+
+// Deck Colors panel: shown only for a hybrid commander that can be built in fewer colors (getHybridColorOptions). One
+// button per color set that still casts it, the one being built marked active; main.js rebuilds on a click.
+const DECK_COLOR_NAMES = { W: "White", U: "Blue", B: "Black", R: "Red", G: "Green" };
+function renderDeckColorOptions(commanders) {
+  const panel = document.getElementById("deckColorsPanel");
+  const wrap = document.getElementById("deckColorOptions");
+  if (!panel || !wrap) return;
+  const options = (commanders && commanders.colorOptions) || [];
+  if (!options.length) { panel.classList.add("hidden"); wrap.innerHTML = ""; return; }
+  const current = sortColorsWubrg(commanders.colors || []).join("");
+  wrap.innerHTML = options.map((set) => {
+    const key = set.join("");
+    const pips = set.map((c) => `<span class="color-pip pip-${escapeHtml(c)}">${escapeHtml(c)}</span>`).join("");
+    const label = set.map((c) => DECK_COLOR_NAMES[c] || c).join(" + ");
+    return `<button type="button" class="mode-toggle-btn deck-color-btn${key === current ? " active" : ""}" data-colors="${escapeHtml(key)}" title="${escapeHtml(label)}">${pips} ${escapeHtml(label)}</button>`;
+  }).join("");
+  panel.classList.remove("hidden");
+}
+
+function hideDeckColorOptions() {
+  document.getElementById("deckColorsPanel")?.classList.add("hidden");
+}

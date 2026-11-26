@@ -73,6 +73,43 @@ function sortColorsWubrg(colors = []) {
   return unique.sort((a, b) => weight(a) - weight(b));
 }
 
+// Deck colors a hybrid commander can be built in (user, 2026-11-26: Evelyn, the Covetous, {2}{U/B}{B}{B/R}, runs as mono
+// black, UB, BR or UBR). A deck may use fewer colors than its commander's identity; the useful choices are the sets that
+// still pay every mana symbol on the commander, cost and rules text: a one-color symbol needs its color, a hybrid {U/B}
+// needs one of its two, and {2/B} or Phyrexian {B/P} need neither. A color in the identity that no symbol names (a color
+// indicator) is always kept. Returns the sets smallest first, the full identity last, or [] when only the full identity
+// works (no choice to offer). `cards` are the commander records (partner included), with manaCost and text.
+function getHybridColorOptions(cards) {
+  const list = (cards || []).filter(Boolean);
+  const identity = sortColorsWubrg(list.flatMap((card) => card.colors || []));
+  if (identity.length < 2) return [];
+  const required = new Set();
+  const pairs = [];
+  const named = new Set();
+  // Reminder text is dropped: Sethron, Hurloon General's "({B/R} can be paid with either {B} or {R}.)" would read as a {B}.
+  const symbols = list.flatMap((card) => [...`${card.manaCost || ""} ${String(card.text || "").replace(/\([^)]*\)/g, "")}`.matchAll(/\{([^}]+)\}/g)].map((m) => m[1].toUpperCase()));
+  for (const symbol of symbols) {
+    const parts = symbol.split("/");
+    const colors = parts.filter((p) => "WUBRG".includes(p) && p.length === 1);
+    colors.forEach((c) => named.add(c));
+    if (!colors.length) continue;
+    if (parts.includes("P") || parts.some((p) => /^\d+$/.test(p))) continue;
+    if (colors.length === 1) required.add(colors[0]);
+    else pairs.push(colors);
+  }
+  if (!pairs.length) return [];
+  identity.filter((c) => !named.has(c)).forEach((c) => required.add(c));
+  const options = [];
+  for (let mask = 1; mask < 1 << identity.length; mask += 1) {
+    const set = identity.filter((_, i) => mask & (1 << i));
+    if ([...required].some((c) => !set.includes(c))) continue;
+    if (pairs.some((pair) => !pair.some((c) => set.includes(c)))) continue;
+    options.push(set);
+  }
+  if (options.length < 2) return [];
+  return options.sort((a, b) => a.length - b.length || WUBRG_ORDER.indexOf(a[0]) - WUBRG_ORDER.indexOf(b[0]));
+}
+
 function isBasicLand(name) {
   const normalized = normalizeCardName(name);
   return BASIC_LANDS.some((land) => normalizeCardName(land.name) === normalized);

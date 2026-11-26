@@ -94,5 +94,21 @@ runSuite("format", {
     assertTrue(legalForCommander(["R"], ["R"], { name: "Guttersnipe", type: "creature — goblin shaman" }), "no block outside a build");
     assertTrue(!readCommanderCastBlock(["Your opponents can't cast spells during your turn."]), "an opponent restriction is not ours");
     assertTrue(!readCommanderCastBlock(["You can't cast spells during combat."]), "a conditional restriction is not read");
+  },
+
+  "getHybridColorOptions: the color sets that still cast a hybrid commander": function () {
+    const sets = (card) => getHybridColorOptions([card]).map((s) => s.join("")).join(" ");
+    // Evelyn, the Covetous: {B} is required, each hybrid needs one of its colors.
+    assertEqual(sets({ colors: ["U", "B", "R"], manaCost: "{2}{U/B}{B}{B/R}", text: "flash" }), "B UB BR UBR");
+    // A hybrid in rules text counts (Tatsunari, Toad Rider: {2}{B} with a {G/U} ability), so mono black is out.
+    assertEqual(sets({ colors: ["U", "B", "G"], manaCost: "{2}{B}", text: "{1}{g/u}: target frog can't be blocked" }), "UB BG UBG");
+    // Reminder text is not a cost (Sethron, Hurloon General).
+    assertEqual(sets({ colors: ["B", "R"], manaCost: "{3}{R}{R}", text: "{2}{b/r}: minotaurs get +1/+0. ({b/r} can be paid with either {b} or {r}.)" }), "R BR");
+    // No hybrid, Phyrexian or twobrid only, or mono color: no choice to offer.
+    assertEqual(sets({ colors: ["W", "B"], manaCost: "{1}{W}{B}", text: "extort" }), "");
+    assertEqual(sets({ colors: ["B"], manaCost: "{4}{B}{B/P}", text: "" }), "");
+    assertEqual(sets({ colors: ["B"], manaCost: "{2}{B/R}", text: "" }), "");
+    // A partner pair is read together.
+    assertEqual(getHybridColorOptions([{ colors: ["B", "R"], manaCost: "{2}{B/R}", text: "" }, { colors: ["G"], manaCost: "{1}{G}", text: "" }]).map((s) => s.join("")).join(" "), "BG RG BRG");
   }
 });

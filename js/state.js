@@ -37,6 +37,18 @@ let curveFirstEnabled = false;
 // On by default; the build-mode switch turns it off, and a build then runs without any event.
 let eventEnginesEnabled = true;
 
+// Deck colors picked for a hybrid commander (getHybridColorOptions), as { key: "<commander names joined by |>", colors }.
+// Kept only while the same commander(s) are built; null means the full color identity.
+let deckColorChoice = null;
+
+function getDeckColorChoice(names) {
+  return deckColorChoice && deckColorChoice.key === (names || []).join("|") ? deckColorChoice.colors : null;
+}
+
+function setDeckColorChoice(names, colors) {
+  deckColorChoice = colors ? { key: (names || []).join("|"), colors: sortColorsWubrg(colors) } : null;
+}
+
 function getEventEnginesEnabled() {
   return eventEnginesEnabled;
 }

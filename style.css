@@ -2224,3 +2224,22 @@ button:disabled {
 .bu-result h3 { margin: 16px 0 4px; }
 .bu-commander { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--border, #3a4660); border-radius: 8px; }
 .bu-use-commander { padding: 2px 8px; font-size: 0.8em; margin-left: 6px; }
+
+/* Deck Colors panel (hybrid commanders): one button per color set. */
+.deck-color-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.deck-color-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.deck-color-btn .color-pip {
+  width: 18px;
+  height: 18px;
+  font-size: 10px;
+}
