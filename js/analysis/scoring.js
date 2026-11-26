@@ -1192,6 +1192,18 @@ function classifyBackfillModeFit(card, modePrefs, isTribalDeck = false) {
   };
 }
 
+// Score for a card's mana value. Cheapest is best (2026-11-26): 3-4 used to outscore 1-2, and builds ran 18
+// three-drops where human decks run 11; a hand-built Greasefang with 8 of them swapped for owned 1-2 drops matched a
+// YouTube deck's early plays in Forge (4.8 spells by turn 5 vs the build's 4.4) and got its commander out half a turn
+// sooner.
+function getCurveTerm(cmc) {
+  if (cmc <= 2) return 5;
+  if (cmc <= 3) return 4;
+  if (cmc <= 4) return 3;
+  if (cmc <= 6) return 1;
+  return 0;
+}
+
 function scoreCard(card, edhrecCard, commanderThemes, strategyProfile, commanderColors, modePrefs) {
   // Both EDHREC terms used to contribute almost nothing. decks/1200 spanned a
   // third of a point for a commander with a few hundred decks and pinned at
@@ -1216,10 +1228,7 @@ function scoreCard(card, edhrecCard, commanderThemes, strategyProfile, commander
   // costs the whole turn -- see applyCurveFirstRoleTargets's linked spec.
   if (modePrefs.curveFirst && role === "removal" && card.cmc <= 2) roleBonus += 4;
 
-  let curveBonus = 0;
-  if (card.cmc <= 2) curveBonus = 3;
-  else if (card.cmc <= 4) curveBonus = 4;
-  else if (card.cmc <= 6) curveBonus = 1;
+  const curveBonus = getCurveTerm(card.cmc);
 
   const tags = detectCardTags(card);
   const themeSignals = buildThemeSignalSet(commanderThemes);
@@ -1268,9 +1277,7 @@ function scoreFallbackCard(card, commanderThemes, strategyProfile, commanderColo
 
   if (modePrefs.curveFirst && role === "removal" && card.cmc <= 2) score += 4;
 
-  if (card.cmc <= 2) score += 3;
-  else if (card.cmc <= 4) score += 4;
-  else if (card.cmc <= 6) score += 1;
+  score += getCurveTerm(card.cmc);
 
   const tags = detectCardTags(card);
   const themeSignals = buildThemeSignalSet(commanderThemes);

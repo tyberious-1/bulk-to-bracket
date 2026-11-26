@@ -262,10 +262,7 @@ function popularityOf(card) {
 
 // The curve term scoreCard and scoreFallbackCard give a card by mana value (scoring.js).
 function curveTermOf(cmc) {
-  if (cmc <= 2) return 3;
-  if (cmc <= 4) return 4;
-  if (cmc <= 6) return 1;
-  return 0;
+  return getCurveTerm(cmc);
 }
 
 function getFallbackSource(card) {
@@ -469,8 +466,8 @@ function buildDeckFromScoredPool(
       // otherwise lost every slot to cheaper cards; the hard caps had only kept them by accident.
       candidate.cheatedIn = Boolean(owned && modePrefs.engineNeeds && modePrefs.engineNeeds.returnsFromGraveyard
         && getEngineClassDetails(owned, modePrefs.engineNeeds).some((d) => d.cls === "payload"));
-      // Its cost is never paid, so it gets the best curve term the scorers give (3-4 mana) instead of its own.
-      if (candidate.cheatedIn) candidate.score = Number(candidate.score || 0) + (4 - curveTermOf(Number(candidate.cmc) || 0));
+      // Its cost is never paid, so it gets the best curve term the scorers give (the cheapest band) instead of its own.
+      if (candidate.cheatedIn) candidate.score = Number(candidate.score || 0) + (curveTermOf(0) - curveTermOf(Number(candidate.cmc) || 0));
     }
   }
   // With no EDHREC page this pool is the whole collection and thousands of cards tie, so the tie-break matters

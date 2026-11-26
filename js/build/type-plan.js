@@ -125,8 +125,10 @@ function getCmcBand(cmc) {
 
 // Shares of the nonland slots per band. EDHREC's endpoints don't report a
 // curve, so these are fixed: a normal descending Commander curve that still
-// leaves room for a real top end.
-const DEFAULT_CURVE_SHARES = { 1: 0.08, 2: 0.20, 3: 0.22, 4: 0.18, 5: 0.13, 6: 0.10, 7: 0.09 };
+// leaves room for a real top end. 2026-11-26: the bottom grew from 28% to 42% of the spells. Human-built decks run
+// 40-56% at mana value 2 or less (YouTube Greasefang 37 of 66, the Galea precon 34 of 61), and in Forge pods a
+// Greasefang build with 8 three- and four-drops swapped for 1-2 drops matched the human deck's early plays.
+const DEFAULT_CURVE_SHARES = { 1: 0.12, 2: 0.30, 3: 0.20, 4: 0.14, 5: 0.10, 6: 0.08, 7: 0.06 };
 
 // Curve shares, nudged by how ramp-heavy the plan is and whether the
 // strategy wants a low, wide curve. Bounded (+/-0.02 to +/-0.05 of total
