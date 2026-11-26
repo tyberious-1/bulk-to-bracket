@@ -294,15 +294,19 @@ const DERIVED_THEME_MIN_OWNED = 5;
 
 // Tags that only say the commander itself has a keyword, or that duplicate a broader tag (see deriveCommanderThemes).
 // No "artifact": every deck has artifacts, so it is never a theme (fallback-themes test, Thorin).
-const CENTER_CARD_TYPE_THEMES = { enchantment: "enchantments", instant: "spellslinger", sorcery: "spellslinger", saga: "sagas", shrine: "shrines", lesson: "lessons", vehicle: "vehicles", equipment: "voltron", aura: "voltron" };
+const CENTER_CARD_TYPE_THEMES = { enchantment: "enchantments", instant: "spellslinger", sorcery: "spellslinger", saga: "sagas", shrine: "shrines", lesson: "lessons", vehicle: "vehicles", equipment: "voltron", aura: "voltron", legendary: "legends" };
 const COMMANDER_SELF_KEYWORD_TAGS = new Set(["flying", "deathtouch", "haste", "flash", "defenders", "gowide", "countersmatter", "opponent draw", "legends"]);
 
-function deriveCommanderThemes(commanderTexts, collectionData, allOwnedCardData, commanderColors) {
-  const texts = (commanderTexts || []).filter(Boolean);
-  if (!texts.length) return [];
+// The themes a commander's own words name, in groups: creature types, keywords, terms, what it does with the board
+// (plays), and last the theme tags read off its text (read). deriveCommanderThemes keeps those the collection supports;
+// plan ranking (plans.js) puts plans that match them first.
+function getCommanderThemeGroups(texts) {
   const types = [];
   const keywords = [];
   const terms = [];
+  // Terms the center reader calls too thin to build on ("counters" in High Perfect Morcant's proliferate): not a theme
+  // on their own, but plan ranking may still use them to choose between EDHREC's plans.
+  const thinTerms = [];
   // What the commander does with the board (2026-11-25): a creature or token it pays for or feeds on is a Sacrifice
   // plan, a token trigger is Tokens, and an anthem over your creatures is Go Wide. Sarcophagus, Ship of the Dead
   // ("other creatures you control get +1/+0", "whenever a creature dies") read as nothing here, so its build fell
@@ -312,6 +316,7 @@ function deriveCommanderThemes(commanderTexts, collectionData, allOwnedCardData,
     if (rec.kind === "type" && creatureTypeFromThemeWord(rec.type)) types.push(pluralizeCreatureType(rec.type));
     else if (rec.kind === "keyword" && rec.kw) keywords.push(rec.kw);
     else if (rec.kind === "term" && rec.term && !rec.thin) terms.push(rec.term);
+    else if (rec.kind === "term" && rec.term) thinTerms.push(rec.term);
     else if (rec.kind === "exchange" && /^(?:creatures?|tokens?|permanents?|artifacts? or creatures?|creatures? or artifacts?)$/.test(String(rec.pays || ""))) plays.push("sacrifice");
     else if (rec.kind === "event" && rec.event === "token-created") plays.push("tokens");
     // A card type the commander names that is not a creature type ("artifact spells", "instant or sorcery").
@@ -322,8 +327,6 @@ function deriveCommanderThemes(commanderTexts, collectionData, allOwnedCardData,
   const lowered = texts.join("\n").toLowerCase();
   // "Tokens", not "Go Wide": the local matcher reads a theme by its words on cards, and no card says "go wide".
   if (/\b(?:other )?creatures you control get \+\d+\/\+\d+/.test(lowered)) plays.push("tokens");
-  const out = [];
-  const seen = new Set();
   // Last resort, when the center reader found no plan: what the theme readers see in the commander's own words
   // (detectCardTags on its text alone, not its type line or stats). Measured 2026-11-25 over 700 owned commanders: 510
   // derived no theme, so a new card with no EDHREC themes (Sarcophagus) fell back to counting the pool. A keyword the
@@ -334,6 +337,23 @@ function deriveCommanderThemes(commanderTexts, collectionData, allOwnedCardData,
       if (!COMMANDER_SELF_KEYWORD_TAGS.has(tag)) read.push(tag);
     }
   }
+  return { types, keywords, terms, thinTerms, plays, read };
+}
+
+// Every theme the commander's own words name, normalized (getCommanderThemeGroups, flattened).
+function getCommanderTextThemes(commanderTexts) {
+  const texts = (commanderTexts || []).filter(Boolean);
+  if (!texts.length) return [];
+  const { types, keywords, terms, thinTerms, plays, read } = getCommanderThemeGroups(texts);
+  return Array.from(new Set([...types, ...keywords, ...terms, ...thinTerms, ...plays, ...read].map(normalizeThemeName).filter(Boolean)));
+}
+
+function deriveCommanderThemes(commanderTexts, collectionData, allOwnedCardData, commanderColors) {
+  const texts = (commanderTexts || []).filter(Boolean);
+  if (!texts.length) return [];
+  const { types, keywords, terms, plays, read } = getCommanderThemeGroups(texts);
+  const out = [];
+  const seen = new Set();
   // Support is counted by words on the cards and by theme tags: no card prints "voltron" or "spellslinger".
   let ownedTags = null;
   const supportFor = (theme) => {

@@ -65,7 +65,28 @@ function planJaccard(a, b) {
 
 // Plans from the commander's EDHREC theme pages. `isOwned(name)` says whether the
 // collection has a card. Returns up to PLAN_MAX_OPTIONS plans, best coverage first.
-function buildPlanOptions(themeCardStats, coreCards, isOwned) {
+// One word of a theme name in a form that matches across plural and adjective ("elves"/"elf", "legends"/"legendary").
+function themeWordStem(word) {
+  if (word === "legendary") return "legend";
+  return word.replace(/ies$/, "y").replace(/ves$/, "f").replace(/s$/, "");
+}
+
+// How many of a plan's themes the commander's own words name (getCommanderTextThemes): through a theme alias
+// ("elves" ~ "elf tribal", "proliferate" ~ "counters") or a one-word signal inside the theme's name ("counters" in
+// "minus 1 minus 1 counters").
+function planTextMatches(themes, textThemes) {
+  const signals = (textThemes || []).map(normalizeThemeName).filter(Boolean);
+  if (!signals.length) return 0;
+  const signalWords = new Set(signals.filter((s) => !s.includes(" ")).map(themeWordStem));
+  return (themes || []).filter((theme) => {
+    const name = normalizeThemeName(theme);
+    const aliases = getThemeAliases(theme).map(normalizeThemeName);
+    if (signals.some((s) => aliases.includes(s) || getThemeAliases(s).map(normalizeThemeName).includes(name))) return true;
+    return name.split(" ").some((word) => signalWords.has(themeWordStem(word)));
+  }).length;
+}
+
+function buildPlanOptions(themeCardStats, coreCards, isOwned, textThemes = []) {
   const core = planWantedCards(coreCards);
   const themes = [];
   // A theme page's potentialDecks is the number of decks behind it, so the largest value ranks themes by play.
@@ -147,10 +168,14 @@ function buildPlanOptions(themeCardStats, coreCards, isOwned) {
     });
   }
 
-  // Best coverage first, but each option must be a real alternative: it may share
-  // at most PLAN_MAX_SHARED_THEMES themes with a plan already chosen. Without
-  // this Kardur offered Aristocrats+Tokens+Clones next to Lifegain+Aristocrats+Tokens.
-  plans.sort((a, b) => b.owned - a.owned);
+  // Plans the commander's own words name first, then best coverage (2026-11-26: coverage alone made High Perfect
+  // Morcant, whose text is about Elves entering and -1/-1 counters, default to Reanimator + Graveyard + Elves on 56
+  // owned cards over -1/-1 Counters + Tokens + Elves on 34; Sisay, who fetches legends, defaulted to Enchantress).
+  // Each option must be a real alternative: it may share at most PLAN_MAX_SHARED_THEMES themes with a plan already
+  // chosen. Without this Kardur offered Aristocrats+Tokens+Clones next to Lifegain+Aristocrats+Tokens.
+  // A light plan (under PLAN_LIGHT_OWNED owned) gets no lift: naming it does not fill it (Bello's Elementals, 2 owned).
+  for (const plan of plans) plan.textMatches = plan.owned >= PLAN_LIGHT_OWNED ? planTextMatches(plan.themes, textThemes) : 0;
+  plans.sort((a, b) => b.textMatches - a.textMatches || b.owned - a.owned);
   const top = [];
   for (const plan of plans) {
     if (top.length >= PLAN_MAX_OPTIONS) break;

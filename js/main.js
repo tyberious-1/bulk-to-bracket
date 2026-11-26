@@ -168,7 +168,8 @@ async function generateDeck() {
       buildPlanOptions(
         edhrecData?.themeCardStats,
         edhrecData?.coreCards,
-        (name) => hasOwnedCard(collection, name) && !isBasicLand(name)
+        (name) => hasOwnedCard(collection, name) && !isBasicLand(name),
+        getCommanderTextThemes([commanders.primary?.text, commanders.partner?.text])
       ),
       commanderThemes,
       allOwnedCardData,
