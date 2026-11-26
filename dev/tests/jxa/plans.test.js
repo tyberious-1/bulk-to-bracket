@@ -58,6 +58,21 @@ runSuite("plans", {
     assertEqual(plans[0].coreOwned, 0);
   },
 
+  "buildPlanOptions: a theme named for a kind of land is no plan unless the commander names it": function () {
+    const staples = planCards("Staple", 10, 60, 100);
+    const gates = ["Golgari", "Rakdos", "Selesnya", "Izzet", "Orzhov"].map((g) => planEntry(`${g} Guildgate`, 60, 100, 0, "Lands"));
+    const snow = ["Forest", "Island", "Swamp", "Plains", "Mountain"].map((b) => planEntry(`Snow-Covered ${b}`, 60, 100, 0, "Lands"));
+    const deserts = ["Fervent", "Glorious", "Indomitable", "Mindful", "Penitent"].map((d) => planEntry(`Desert of the ${d}`, 60, 100, 0, "Lands"));
+    const stats = {
+      guildgates: [...staples, ...gates, ...planCards("Gate Spell", 10, 60, 100)],
+      deserts: [...staples, ...deserts, ...planCards("Desert Spell", 10, 60, 100)],
+      snow: [...staples, ...snow, ...planCards("Snow Spell", 10, 60, 100)]
+    };
+    const themesOf = (plans) => plans.map((p) => p.themes.join("+")).sort().join(",");
+    assertEqual(themesOf(buildPlanOptions(stats, staples, () => true)), "snow");
+    assertEqual(themesOf(buildPlanOptions(stats, staples, () => true, ["deserts"])), "deserts,snow");
+  },
+
   "buildPlanOptions: a light plan names the better-supported one": function () {
     const staples = planCards("Staple", 10, 60, 100);
     const stats = {

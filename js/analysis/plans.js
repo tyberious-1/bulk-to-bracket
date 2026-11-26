@@ -86,6 +86,20 @@ function planTextMatches(themes, textThemes) {
   }).length;
 }
 
+// A theme named for a kind of land (Guildgates) lives in its page's land section: its lands carry the theme's
+// name. Plans steer nonland picks and the manabase chooses lands (Gates enter tapped, so the land rule keeps them
+// out), so such a theme's nonland cards are only the commander's general list and its name would mislabel the plan
+// (Codie, Vociferous Codex: "Spellslinger + Cascade + Guildgates", 10 Guildgates on the page, none in the deck).
+// Snow-covered lands are basics the builder does play, so they don't count.
+const PLAN_LAND_NAMED_MIN = 5;
+function planThemeIsLands(slug, entries) {
+  const words = normalizeThemeName(slug).split(" ").map(themeWordStem).filter((w) => w.length > 3);
+  if (!words.length) return false;
+  const named = (entries || []).filter((e) => e?.name && /\bland/i.test(e.label || "") && !/^snow-covered /i.test(e.name) &&
+    words.some((w) => e.name.toLowerCase().includes(w)));
+  return named.length >= PLAN_LAND_NAMED_MIN;
+}
+
 function buildPlanOptions(themeCardStats, coreCards, isOwned, textThemes = []) {
   const core = planWantedCards(coreCards);
   const themes = [];
@@ -99,6 +113,7 @@ function buildPlanOptions(themeCardStats, coreCards, isOwned, textThemes = []) {
       .map(([slug]) => slug)
   );
   for (const [slug, entries] of Object.entries(themeCardStats || {})) {
+    if (planThemeIsLands(slug, entries) && !planTextMatches([slug], textThemes)) continue;
     const wanted = planWantedCards(entries);
     const distinctive = new Map();
     for (const [name, v] of wanted) {
