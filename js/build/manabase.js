@@ -505,10 +505,29 @@ function landRuleAllows(card, tribe = "") {
   if (/choose a color/.test(text) && /enters tapped/.test(text)) return false;
   if (/\{1\},\s*\{t\}: add (?:one mana of )?any color/.test(text)) return false;
   if (!/enters (?:the battlefield )?tapped/.test(text) || /enters (?:the battlefield )?tapped unless/.test(text)) return true;
+  // A shock land ("you may pay 2 life. If you don't, it enters tapped") comes down untapped when it has to (2026-11-26:
+  // Katara owned Breeding Pool and Hallowed Fountain and got neither).
+  if (/you may pay \d+ life\. if you don't, it enters (?:the battlefield )?tapped/.test(text)) return true;
   return /\bsurveil\b/.test(text) ||
     /graveyard/.test(text) ||
     /becomes? an? [^.]*creature/.test(text) ||
     Boolean(tribe && new RegExp(`\\b${tribe.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}s?\\b`).test(text));
+}
+
+const MULTICOLOR_SOURCE_VALUE = 9;
+const ONE_COLOR_LAND_COST = 6;
+const TAPPED_UNLESS_UNMET_COST = 6;
+
+// The land rule's one exception: in a deck of 3+ colors, a tapped land that makes at least TAPPED_FIXER_MIN_COLORS of
+// them (a tri-land: Seaside Citadel, a triome), at most TAPPED_FIXER_MAX. Measured 2026-11-26 with a goldfish that counts
+// tapped lands (20000 shuffles, Katara/Galea/Doran): tri-lands only took Katara's on-curve commander from 51% to 60% at
+// no loss of mana in turns 1-6; allowing tapped duals too (up to 6) gained 2 more points for Katara but cost Galea mana.
+const TAPPED_FIXER_MAX = 6;
+const TAPPED_FIXER_MIN_COLORS = 3;
+function isTappedFixer(card, commanderColors) {
+  if ((commanderColors || []).length < 3 || TAPPED_FIXER_MAX <= 0 || landRuleAllows(card)) return false;
+  const mana = getLandManaProfile(card);
+  return mana.reliable.filter((c) => commanderColors.includes(c)).length >= TAPPED_FIXER_MIN_COLORS;
 }
 
 function evaluateNonbasicLand(card, commanderColors, strategyProfile, modePrefs, edhrecCardLookup = null, colorTargets = null) {
@@ -547,7 +566,12 @@ function evaluateNonbasicLand(card, commanderColors, strategyProfile, modePrefs,
 
   // A flexible source (relevantReliable didn't already cover it) is weighted
   // like the rest of the deck's colors on average, since it isn't tied to one.
-  score += relevantReliable.reduce((sum, color) => sum + 6 * targetWeight(color), 0) + flexibleSources * 6;
+  // In three or more colors a source is worth more and a land that makes at most one of them fixes nothing (2026-11-26:
+  // Katara's build ran seven one-color utility lands and Subspace Anomaly over owned duals; in Forge a version with those
+  // seven swapped for duals got its commander out on turn 4.8 against the build's 6.3).
+  const perSource = commanderColors.length >= 3 ? MULTICOLOR_SOURCE_VALUE : 6;
+  score += relevantReliable.reduce((sum, color) => sum + perSource * targetWeight(color), 0) + flexibleSources * perSource;
+  if (commanderColors.length >= 3 && reliableSources <= 1) score -= ONE_COLOR_LAND_COST;
   score += relevantConditional.reduce((sum, color) => sum + 1.5 * targetWeight(color), 0);
   score += relevantRestricted.reduce((sum, color) => sum + 1.5 * targetWeight(color), 0);
 
@@ -584,6 +608,9 @@ function evaluateNonbasicLand(card, commanderColors, strategyProfile, modePrefs,
       !tappedUnlessTags.length ||
       tappedUnlessTags.some((tag) => landConditionMatchesStrategy(tag, strategyProfile, modePrefs));
     if (conditionUsable) score += 1;
+    // A condition the deck can't meet ("unless you control a Mount or Vehicle" in Katara) means it always enters
+    // tapped: the land rule's tapped case, so it loses to a basic of its color (2026-11-26).
+    else score -= TAPPED_UNLESS_UNMET_COST;
   }
   if (text.includes("pay 1 life")) score -= 0.5;
 
@@ -679,7 +706,18 @@ function buildNonbasicManaBase(collectionData, allOwnedCardData, commanderColors
     commanderColors.length === 3 ? Math.min(modePrefs.manaBaseBias > 1 ? 18 : 16, targetLandCount) :
     Math.min(modePrefs.manaBaseBias > 1 ? 22 : 20, targetLandCount);
 
-  return filtered.slice(0, maxNonbasicCount);
+  const picked = [];
+  let tappedFixers = 0;
+  for (const land of filtered) {
+    if (picked.length >= maxNonbasicCount) break;
+    const card = allOwnedCardData.get(normalizeCardName(land.name));
+    if (card && isTappedFixer(card, commanderColors)) {
+      if (tappedFixers >= TAPPED_FIXER_MAX) continue;
+      tappedFixers++;
+    }
+    picked.push(land);
+  }
+  return picked;
 }
 
 function buildBasicManaBase(commanderColors, landCountNeeded, selectedNonbasics = [], colorTargets = null) {
