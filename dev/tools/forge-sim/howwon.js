@@ -3,7 +3,10 @@
 // A final blow = the last damage line to that player before their life first reached 0 or less. If the life change has no
 // damage line right before it, it is reported as "life loss (no damage line)", which is not the same as saying what caused it.
 const fs = require("fs");
-const lines = fs.readFileSync(process.argv[2], "utf8").split("\n");
+const { clockMs } = require("./common");
+const logText = fs.readFileSync(process.argv[2], "utf8");
+const lines = logText.split("\n");
+const CLOCK_MS = clockMs(logText);
 const strip = (n) => n.replace(/^Ai\(\d+\)-/, "");
 const p0 = strip;
 const games = [];
@@ -29,7 +32,7 @@ for (const line of lines) {
     continue;
   }
   m = line.match(/^Game Result: .*? in (\d+) ms\. (.+?) has won!/);
-  if (m) { g.winner = Number(m[1]) >= (Number(process.env.FORGE_CLOCK_MS) || 120000) ? "(timed out, no winner)" : strip(m[2]); g.done = true; }
+  if (m) { g.winner = Number(m[1]) >= CLOCK_MS ? "(timed out, no winner)" : strip(m[2]); g.done = true; }
 }
 const tally = {};
 const rows = [];

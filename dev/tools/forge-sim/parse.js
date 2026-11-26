@@ -1,7 +1,8 @@
 // Usage: node parse.js <forge sim log>   -- per deck: does it function? (not "does it win")
 const fs = require("fs");
-const { isCommanderCast } = require("./common");
-const lines = fs.readFileSync(process.argv[2], "utf8").split("\n");
+const { isCommanderCast, clockMs: logClock } = require("./common");
+const logText = fs.readFileSync(process.argv[2], "utf8");
+const lines = logText.split("\n");
 let games = [];
 let g = null, cur = null, pending = {};
 for (const line of lines) {
@@ -26,10 +27,12 @@ for (const line of lines) {
     if (isCommanderCast(m[1], m[2])) p.cmdr = p.cmdr || p.own;
   }
   m = line.match(/^Game Result: .*? in (\d+) ms\. (.+?) has won!/);
-  // A game that hits the 120 s clock is a draw: every player's Game Outcome line says "has won", but Game Result still names
-  // one. Do not count it as a win (found 2026-11-17).
-  if (m) { g.timeout = Number(m[1]) >= (Number(process.env.FORGE_CLOCK_MS) || 120000); g.winner = g.timeout ? null : m[2]; g.done = true; }
+  // A game that hits the clock is a draw: every player's Game Outcome line says "has won", but Game Result still names
+  // one. Do not count it as a win (found 2026-11-17). The clock is settled after the whole log is read.
+  if (m) { g.ms = Number(m[1]); g.named = m[2]; g.done = true; }
 }
+const clockMs = logClock(logText);
+for (const x of games) if (x.done) { x.timeout = x.ms >= clockMs; x.winner = x.timeout ? null : x.named; }
 // A run that was stopped (stall watchdog, timeout) can leave a last game with turn lines but no result; drop it so it does not skew the counts.
 const unfinished = games.filter((x) => !x.done).length;
 games = games.filter((x) => x.done);
@@ -51,7 +54,7 @@ for (const gm of games) for (const k of Object.keys(gm.players)) {
 const avg = (a) => (a.length ? (a.reduce((x, y) => x + y, 0) / a.length).toFixed(1) : "-");
 const seatWins = {}; let noWinner = 0;
 for (const gm of games) { if (!gm.winner) { noWinner++; continue; } const sm = gm.winner.match(/^Ai\((\d+)\)/); const sk = sm ? sm[1] : "?"; seatWins[sk] = (seatWins[sk] || 0) + 1; }
-console.log("games timed out at the 120 s clock (draws, not wins):", games.filter((x) => x.timeout).length, "| games with no winner:", noWinner, "| wins by seat:", JSON.stringify(seatWins), "| expected per deck at 4 players: " + (games.length / 4).toFixed(1) + " +/- " + Math.sqrt(games.length * 0.25 * 0.75).toFixed(1));
+console.log("games timed out at the " + clockMs / 1000 + " s clock (draws, not wins):", games.filter((x) => x.timeout).length, "| games with no winner:", noWinner, "| wins by seat:", JSON.stringify(seatWins), "| expected per deck at 4 players: " + (games.length / 4).toFixed(1) + " +/- " + Math.sqrt(games.length * 0.25 * 0.75).toFixed(1));
 console.log("games:", games.length, " avg game length (turns, all players):", avg(games.map((x) => x.turns)));
 for (const [d, s] of Object.entries(names)) {
   console.log("\n" + d);

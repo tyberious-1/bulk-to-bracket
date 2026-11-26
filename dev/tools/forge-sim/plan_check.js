@@ -7,7 +7,7 @@
 // declined optional triggers are invisible; a creature stays "suited" after its Equipment moves.
 const fs = require("fs");
 const path = require("path");
-const { baseName, shortName } = require("./common");
+const { baseName, shortName, clockMs } = require("./common");
 const RULES = require("./plan_rules");
 
 const [log, ...dbs] = process.argv.slice(2);
@@ -17,7 +17,6 @@ for (const f of dbs) for (const r of require(path.resolve(f))) db[r.name.split("
 const typeOf = (n) => (db[n]?.type_line || "").split("//")[0];
 const cmcOf = (n) => Number(db[n]?.cmc || 0);
 const textOf = (n) => db[n] ? (db[n].oracle_text || (db[n].card_faces || []).map((f) => f.oracle_text).join("\n") || "") : "";
-const CLOCK_MS = Number(process.env.FORGE_CLOCK_MS || 900000);
 
 // Creature types any known card has, for the generic "types the commander names" rule.
 const creatureTypes = new Set();
@@ -62,7 +61,9 @@ function emit(player, kind, e) {
 }
 const who = (s) => s.replace(/^Ai\(\d\)-/, "");
 
-for (const l of fs.readFileSync(log, "utf8").split("\n")) {
+const logText = fs.readFileSync(log, "utf8");
+const CLOCK_MS = clockMs(logText);
+for (const l of logText.split("\n")) {
   let m;
   if ((m = /^Game Result: Game \d+ ended in (\d+) ms\. Ai\(\d\)-(.*) has won!/.exec(l))) {
     g.winner = Number(m[1]) >= CLOCK_MS ? null : m[2];
