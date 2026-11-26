@@ -300,6 +300,16 @@ async function toggleEventEngines() {
 }
 
 async function performBuildFromContext() {
+  const { commanders } = currentRunContext || {};
+  setCommanderCastBlock(commanders ? readCommanderCastBlock([commanders.primary?.text, commanders.partner?.text], commanders.names) : null);
+  try {
+    return await performBuildFromContextInner();
+  } finally {
+    setCommanderCastBlock(null);
+  }
+}
+
+async function performBuildFromContextInner() {
   const {
     commanders,
     collection,

@@ -73,5 +73,26 @@ runSuite("format", {
     assertTrue(!legalForCommander(colorless, ["W", "G"], { name: "Sample", type: "token creature — soldier" }), "token");
     assertTrue(legalForCommander(colorless, ["W", "G"], { name: "Sample", type: "legendary planeswalker — sample" }), "planeswalker");
     assertTrue(legalForCommander(["W"], ["W", "G"], { name: "No Way Out", type: "instant" }), "the Midnight Hunt instant");
+  },
+
+  "legalForCommander: a commander's \"you can't cast permanent spells\" leaves only lands, instants and sorceries": function () {
+    const all = ["W", "U", "B", "R", "G"];
+    const block = readCommanderCastBlock(["You can't cast permanent spells.\n{4}, {T}: Add {W}{U}{B}{R}{G}."], ["Codie, Vociferous Codex"]);
+    assertTrue(Boolean(block), "Codie's line is read");
+    setCommanderCastBlock(block);
+    try {
+      assertTrue(!legalForCommander(["R"], all, { name: "Guttersnipe", type: "creature — goblin shaman" }), "creature");
+      assertTrue(!legalForCommander([], all, { name: "Sol Ring", type: "artifact" }), "artifact");
+      assertTrue(legalForCommander(["R"], all, { name: "Lightning Bolt", type: "instant" }), "instant");
+      assertTrue(legalForCommander([], all, { name: "Forest", type: "basic land — forest" }), "land");
+      assertTrue(legalForCommander(["R"], all, { name: "Bonecrusher Giant", type: "creature — giant // instant — adventure",
+        raw: { card_faces: [{ type_line: "Creature — Giant" }, { type_line: "Instant — Adventure" }] } }), "a card with an instant face");
+      assertTrue(legalForCommander([], all, { name: "Codie, Vociferous Codex", type: "legendary artifact creature — book construct" }), "the commander itself");
+    } finally {
+      setCommanderCastBlock(null);
+    }
+    assertTrue(legalForCommander(["R"], ["R"], { name: "Guttersnipe", type: "creature — goblin shaman" }), "no block outside a build");
+    assertTrue(!readCommanderCastBlock(["Your opponents can't cast spells during your turn."]), "an opponent restriction is not ours");
+    assertTrue(!readCommanderCastBlock(["You can't cast spells during combat."]), "a conditional restriction is not read");
   }
 });

@@ -86,7 +86,54 @@ function isGameChanger(cardName) {
   return GAME_CHANGERS.has(normalizeCardName(getPrimaryCardName(cardName)));
 }
 
+// A commander that says "you can't cast <kind> spells" (Codie, Vociferous Codex: "You can't cast permanent spells.") makes
+// those cards dead in its deck: they can't be cast while it is out (2026-11-26: the builder gave Codie 13 creatures and
+// artifacts). Read once per build (performBuildFromContext) and checked in legalForCommander; null outside a build so other
+// tabs are unaffected. Only an unconditional sentence counts ("...spells during combat" does not). Lands are played, not
+// cast, and tokens a spell makes are not cast, so neither is blocked.
+let activeCommanderCastBlock = null;
+const CAST_BLOCK_PERMANENT_TYPES = ["artifact", "creature", "enchantment", "planeswalker", "battle"];
+
+function readCommanderCastBlock(commanderTexts, commanderNames = []) {
+  const kinds = [];
+  for (const text of commanderTexts || []) {
+    const lowered = String(text || "").toLowerCase().replace(/\([^)]*\)/g, "");
+    const re = /(?:^|[.\n]\s*)you can't cast ((?:non)?[a-z]+(?:(?:,| or| and) (?:non)?[a-z]+)*) spells(?=\s*(?:[.\n]|$))/g;
+    for (const m of lowered.matchAll(re)) kinds.push(...m[1].split(/,| or | and /).map((w) => w.trim()).filter(Boolean));
+  }
+  if (!kinds.length) return null;
+  return { kinds, commanders: new Set((commanderNames || []).map((n) => normalizeCardName(n))) };
+}
+
+function setCommanderCastBlock(block) {
+  activeCommanderCastBlock = block || null;
+}
+
+function faceCastBlocked(faceType, kinds) {
+  const type = String(faceType || "").toLowerCase();
+  if (/\bland\b/.test(type)) return false;
+  const isPermanent = CAST_BLOCK_PERMANENT_TYPES.some((t) => new RegExp("\\b" + t + "\\b").test(type));
+  return kinds.some((kind) => {
+    if (kind === "permanent") return isPermanent;
+    if (kind === "nonpermanent") return !isPermanent;
+    if (kind.startsWith("non")) return !new RegExp("\\b" + kind.slice(3) + "\\b").test(type);
+    return new RegExp("\\b" + kind.replace(/s$/, "") + "\\b").test(type);
+  });
+}
+
+// True when the active commander forbids casting every face of this card.
+function castBlockedByCommander(card) {
+  const block = activeCommanderCastBlock;
+  if (!block || !card) return false;
+  if (block.commanders.has(normalizeCardName(card.name || ""))) return false;
+  const faces = (card.raw && Array.isArray(card.raw.card_faces) && card.raw.card_faces.length)
+    ? card.raw.card_faces.map((f) => f.type_line)
+    : [card.typeLine || (card.raw && card.raw.type_line) || getCardType(card)];
+  return faces.every((face) => faceCastBlocked(face, block.kinds));
+}
+
 function legalForCommander(cardColors, commanderColors, card) {
+  if (card && castBlockedByCommander(card)) return false;
   // A plane, scheme, vanguard or token has no place in a deck whatever its colors (an old cached lookup can still hold one).
   if (card && /^(?:plane|phenomenon|scheme|ongoing scheme|vanguard|conspiracy|dungeon|emblem|token)\b/.test(getCardType(card).replace(/^(?:legendary|basic|snow|world)\s+/g, ""))) return false;
   for (const color of cardColors) {
