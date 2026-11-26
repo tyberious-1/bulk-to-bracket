@@ -1002,7 +1002,7 @@ function buildDeckFromScoredPool(
   const landRuleData = new Map();
   for (const [key, card] of allOwnedCardData) {
     const keepsTribalPath = strategyProfile.wantsTribal && normalizeCardName(card.name) === "path of ancestry";
-    if (!getCardType(card).includes("land") || isBasicLand(card.name) || keepsTribalPath || landRuleAllows(card) || isTappedFixer(card, commanderColors)) landRuleData.set(key, card);
+    if (!getCardType(card).includes("land") || isBasicLand(card.name) || keepsTribalPath || landRuleAllows(card)) landRuleData.set(key, card);
   }
 
   const selectedNonbasicLands = buildNonbasicManaBase(
