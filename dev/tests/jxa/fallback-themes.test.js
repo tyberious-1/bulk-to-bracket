@@ -149,5 +149,15 @@ runSuite("fallback-themes", {
   "pickDefaultPlanFocus: no plans means no default": function () {
     assertEqual(pickDefaultPlanFocus([]), "");
     assertEqual(pickDefaultPlanFocus(undefined), "");
+  },
+
+  "getCommanderTextThemes: blight and -1/-1 counters read as -1/-1 Counters, proliferate as Proliferate": function () {
+    const morcant = getCommanderTextThemes(["Whenever High Perfect Morcant or another Elf you control enters, each opponent blights 1. (They each put a -1/-1 counter on a creature they control.)\nTap three untapped Elves you control: Proliferate. Activate only as a sorcery."]);
+    assertTrue(morcant.includes("minus 1 minus 1 counters"));
+    assertTrue(morcant.includes("proliferate"));
+    const scorpion = getCommanderTextThemes(["Whenever a creature with a -1/-1 counter on it dies, draw a card. {1}{B}{R}: Put a -1/-1 counter on another target creature."]);
+    assertTrue(scorpion.includes("minus 1 minus 1 counters"));
+    // Reminder text is not the commander's words: a +1/+1 card whose reminder mentions proliferate reads no Proliferate.
+    assertTrue(!getCommanderTextThemes(["Put a +1/+1 counter on target creature. (Proliferate means ...)"]).includes("proliferate"));
   }
 });

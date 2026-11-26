@@ -327,6 +327,13 @@ function getCommanderThemeGroups(texts) {
   const lowered = texts.join("\n").toLowerCase();
   // "Tokens", not "Go Wide": the local matcher reads a theme by its words on cards, and no card says "go wide".
   if (/\b(?:other )?creatures you control get \+\d+\/\+\d+/.test(lowered)) plays.push("tokens");
+  // Counter words the center reader calls thin (2026-11-26): "blights" puts a -1/-1 counter on a creature (High Perfect
+  // Morcant, Auntie Ool) and "proliferate" grows counters already there. Both are EDHREC themes by name, so plan ranking can
+  // match them instead of the broad "counters" (which also matched +1/+1 plans). Reminder text is dropped first: Morcant's
+  // "(Choose any number of permanents...)" is not its own words.
+  const ownWords = lowered.replace(/\([^)]*\)/g, "");
+  if (/\bblights?\b|-1\/-1 counters?\b/.test(ownWords)) plays.push("minus 1 minus 1 counters");
+  if (/\bproliferate\b/.test(ownWords)) plays.push("proliferate");
   // Last resort, when the center reader found no plan: what the theme readers see in the commander's own words
   // (detectCardTags on its text alone, not its type line or stats). Measured 2026-11-25 over 700 owned commanders: 510
   // derived no theme, so a new card with no EDHREC themes (Sarcophagus) fell back to counting the pool. A keyword the
