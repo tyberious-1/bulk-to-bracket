@@ -23,7 +23,7 @@
 //   - Creatures cast on the dying turn are excluded from "could have attacked": summoning sickness.
 //
 // Power comes from dev/tools/jxa-harness/owned_raw.json plus work/precon_cards.json (built by
-// fetch_deck_cards.py from the precon .dck files). A cast card with no data at all is COUNTED and printed
+// fetch_deck_cards.js from the precon .dck files). A cast card with no data at all is COUNTED and printed
 // ("cast cards with NO card data"); an earlier draft skipped them silently, which made every precon
 // look like it had an empty board. Check that count is ~0 before trusting any row.
 
