@@ -88,6 +88,14 @@ runSuite("format", {
       assertTrue(legalForCommander(["R"], all, { name: "Bonecrusher Giant", type: "creature — giant // instant — adventure",
         raw: { card_faces: [{ type_line: "Creature — Giant" }, { type_line: "Instant — Adventure" }] } }), "a card with an instant face");
       assertTrue(legalForCommander([], all, { name: "Codie, Vociferous Codex", type: "legendary artifact creature — book construct" }), "the commander itself");
+      // The app's slimmed raw keeps faces without type_line: the card's "A // B" type line is read instead.
+      assertTrue(legalForCommander(["R"], all, { name: "Grabby Giant", type: "creature — giant // instant — adventure",
+        raw: { card_faces: [{ name: "Grabby Giant" }, { name: "That's Mine" }] } }), "an adventure with slim faces");
+      assertTrue(!legalForCommander(["W"], all, { name: "Sample Flip", type: "creature — human // creature — werewolf",
+        raw: { card_faces: [{ name: "A" }, { name: "B" }] } }), "a two-creature-face card with slim faces");
+      // A prepare card's spell is cast only as a copy while the creature is prepared (rule 723): it is a creature here.
+      assertTrue(!legalForCommander(["G"], all, { name: "Studious First-Year", type: "creature — bear wizard // sorcery", layout: "prepare",
+        raw: { card_faces: [{ name: "Studious First-Year" }, { name: "Rampant Growth" }] } }), "a prepare card");
     } finally {
       setCommanderCastBlock(null);
     }

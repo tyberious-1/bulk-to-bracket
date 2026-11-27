@@ -163,9 +163,15 @@ function castBlockedByCommander(card) {
   const block = activeCommanderCastBlock;
   if (!block || !card) return false;
   if (block.commanders.has(normalizeCardName(card.name || ""))) return false;
-  const faces = (card.raw && Array.isArray(card.raw.card_faces) && card.raw.card_faces.length)
-    ? card.raw.card_faces.map((f) => f.type_line)
+  // One type line per face. The app's slimmed raw keeps no face type_line (slimScryfallRaw), so the card's own "A // B" type
+  // line is split instead; before 2026-11-26 that left every two-faced card with blank faces, and none was ever blocked.
+  const split = getCardType(card).split("//").map((t) => t.trim());
+  let faces = (card.raw && Array.isArray(card.raw.card_faces) && card.raw.card_faces.length)
+    ? card.raw.card_faces.map((f, i) => (f && f.type_line) || split[i] || "")
     : [card.typeLine || (card.raw && card.raw.type_line) || getCardType(card)];
+  // A prepare card's spell (Studious First-Year // Rampant Growth) can't be cast from the card (rule 723): only a copy, while
+  // the creature is on the battlefield prepared. So only the creature face counts (2026-11-26: 8 such cards were dead in Codie).
+  if (String(card.layout || (card.raw && card.raw.layout) || "").toLowerCase() === "prepare") faces = faces.slice(0, 1);
   return faces.every((face) => faceCastBlocked(face, block.kinds));
 }
 
